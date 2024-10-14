@@ -1,0 +1,48 @@
+&cntrl
+imin            = 1
+dx0             = {step_size}
+maxcyc          = {maxcyc}
+ntmin           = 2
+ntpr            = {ofreq},      ! Frequency to dump energies in mdout
+ntwe            = {ofreq},      ! Frequency to dump energies in mden
+ntwr            = {ofreq},      ! Frequency to write restart file
+ntwx            = {ofreq},      ! Frequence to write mdcrd file
+
+ntb             = {ntb},          ! Constant volume
+
+cut             = {cut},       ! Non-bonded cutoff
+
+ntr             = 0 
+restraintmask   = '!:WAT,Cl-,K+,Na+ & !@H='
+restraint_wt    = 5 
+
+ifsc            = {ifsc}
+icfe            = {icfe}
+
+noshakemask     = {noshakemask}
+
+clambda         = {clambda}
+timask1         = {timask1}
+timask2         = {timask2}
+scmask1         = {scmask1}
+scmask2         = {scmask2}
+scalpha         = 0.5
+scbeta          = 1.0
+
+gti_cut         = 1
+gti_output      = 1
+gti_add_sc      = 5
+gti_scale_beta  = 1
+gti_cut_sc_on   = {gti_cut_sc_on}
+gti_cut_sc_off  = {gti_cut_sc_off}
+gti_lam_sch     = 1
+gti_ele_sc      = 1
+gti_vdw_sc      = 1
+gti_cut_sc      = 2
+gti_ele_exp     = 2
+gti_vdw_exp     = 2
+gti_syn_mass    = 0
+/
+
+&ewald
+/

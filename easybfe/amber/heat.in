@@ -1,0 +1,66 @@
+&cntrl
+ntx             = 1,          ! 1 - start from scratch; 5 - start from a restart file
+irest           = 0,          ! 0 - start from scratch; 1 - restart
+
+nstlim          = {nstlim},      ! Number of steps
+dt              = {dt},      ! Time step (in ps)
+ntpr            = {ofreq},       ! Frequency to dump energies in mdout
+ntwe            = {ofreq},       ! Frequency to dump energies in mden
+ntwr            = {ofreq},       ! Frequency to write restart file
+ntwx            = {ofreq},       ! Frequence to write mdcrd file
+
+ntb             = {ntb},         ! Constant volume
+
+iwrap           = {iwrap},         ! Process PBC when dump to trajectories
+
+ntt             = 3,         ! Langevin dynamics
+gamma_ln        = 2.0,       ! Collision Frequency, in ps^-1
+temp0           = {temp0},    ! Tempeature to be kept
+tempi           = {tempi},       ! Initial temperature
+
+ntc             = 2,         ! SHAKE
+ntf             = {ntf},     ! SHAKE
+tol             = 0.0005,    ! Constraint tolerance
+
+nmropt          = 1,         ! Enable varying temperatures
+
+cut             = {cut},       ! Non-bonded cutoff
+
+! Restraint
+ntr             = {ntr}
+restraintmask   = '!:WAT,Cl-,K+,Na+ & !@H='
+restraint_wt    = {restraint_wt}
+
+ifsc            = {ifsc}
+icfe            = {icfe}
+
+noshakemask     = {noshakemask}
+
+clambda         = {clambda}
+timask1         = {timask1}
+timask2         = {timask2}
+scmask1         = {scmask1}
+scmask2         = {scmask2}
+scalpha         = 0.5
+scbeta          = 1.0
+
+gti_cut         = 1
+gti_output      = 1
+gti_add_sc      = 5
+gti_scale_beta  = 1
+gti_cut_sc_on   = {gti_cut_sc_on}
+gti_cut_sc_off  = {gti_cut_sc_off}
+gti_lam_sch     = 1
+gti_ele_sc      = 1
+gti_vdw_sc      = 1
+gti_cut_sc      = 2
+gti_ele_exp     = 2
+gti_vdw_exp     = 2
+gti_syn_mass    = 0
+/
+
+&ewald
+/
+
+&wt TYPE="TEMP0", istep1 = 0, istep2 = {istep2}, value1 = {tempi}, value2 = {temp0}, /
+&wt TYPE="END", /

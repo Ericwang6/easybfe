@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block extrastyle %}
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/pdbe-molstar@3.3.0/build/pdbe-molstar-light.css" />
+<!-- JS -->
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/pdbe-molstar@3.3.0/build/pdbe-molstar-plugin.js"></script>
+
+<style>
+    #myViewer {
+        float: right;
+        width: 1000px;
+        height: 800px;
+        position: relative;
+        margin: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Begin Page Content -->
+<div class="container-fluid">
+
+    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 mb-0 text-gray-800">Ligands</h1>
+    </div>
+
+    <div class="col-lg-6" id="ligandPanel">
+
+        {% for ligand in infos %}
+        <div class="card shadow mb-4">
+            <!-- Card Header - Accordion -->
+            <a href="#{{ ligand }}Info" class="d-block card-header py-3" data-toggle="collapse"
+                role="button" aria-expanded="true" aria-controls="collapseCardExample">
+                <h6 class="m-0 font-weight-bold text-primary">{{ ligand }}</h6>
+            </a>
+            <!-- Card Content - Collapse -->
+            <div class="collapse show" id="{{ ligand }}Info">
+                <div class="card-body">
+                    <img src="/files/ligands/png/{{ ligand }}" width="300px" height="300px"/>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+
+    </div>
+
+    <div class="col-lg-6" >
+
+        <div class="card shadow mb-4">
+            <!-- Card Header - Accordion -->
+            <a href="addLigand" class="d-block card-header py-3" data-toggle="collapse"
+                role="button" aria-expanded="true" aria-controls="collapseCardExample">
+                <h6 class="m-0 font-weight-bold text-primary">Add Ligand</h6>
+            </a>
+            <!-- Card Content - Collapse -->
+            <div class="collapse show" id="addLigand">
+                <a href="#" class="btn btn-facebook btn-block"><i
+                    class="fab fa-facebook-f fa-fw"></i> Upload</a>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Div where the viewer will be rendered -->
+    <div id="myViewer"></div>
+
+    <script>
+        // Create plugin instance
+        const viewerInstance = new PDBeMolstarPlugin();
+
+        // Function to render the viewer with the protein name provided by the user
+        function loadProtein() {
+            const name = document.getElementById('proteinName').value;  // Get the value entered by the user
+            
+            // Set options (All the available options are listed below in the documentation)
+            const options = {
+                customData: {
+                    url: `http://127.0.0.1:5001/files/proteins/${name}`,  // Use the input value in the URL
+                    format: 'pdb',
+                    binary: false
+                },
+                bgColor: 'white'
+            };
+            
+            // Get element from HTML/Template to place the viewer 
+            const viewerContainer = document.getElementById('myViewer');
+        
+            // Call render method to display the 3D view
+            viewerInstance.render(viewerContainer, options);
+        }
+        loadProtein("");
+
+        // Add event listener to the button to trigger the viewer load when clicked
+        document.getElementById('loadProtein').addEventListener('click', loadProtein);
+    </script>
+
+</div>
+
+<!-- /.container-fluid -->
+{% endblock %}

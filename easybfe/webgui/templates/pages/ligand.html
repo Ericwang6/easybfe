@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block extrastyle %}
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/pdbe-molstar@3.3.0/build/pdbe-molstar-light.css" />
+{% endblock %}
+
+{% block content %}
+<!-- Begin Page Content -->
+<div class="container-fluid">
+
+    <!-- Page Heading -->
+    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 mb-0 text-gray-800">Ligands</h1>
+    </div>
+
+    <div class="row">
+
+        <div class="col-lg-6">
+
+            {% for ligand in infos %}
+            <div class="card shadow mb-4">
+                <!-- Card Header - Accordion -->
+                <a href="#Info-{{ ligand }}" class="d-block card-header py-3" data-toggle="collapse"
+                    role="button" aria-expanded="true" aria-controls="collapseCardExample">
+                    <h6 class="m-0 font-weight-bold text-primary">{{ ligand }}</h6>
+                </a>
+                <!-- Card Content - Collapse -->
+                <div class="collapse show" id="Info-{{ ligand }}">
+                    <div class="card-body">
+                        <img src="/files/ligands/png/{{ ligand }}" width="300px" height="300px"/>
+                        <p class="ligandInfo">Counter: 0</p>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+
+        </div>
+
+        <div class="col-lg-6">
+
+            <!-- Collapsable Card Example -->
+            <div class="card shadow mb-4">
+                <!-- Card Header - Accordion -->
+                <a href="#collapseCardExample" class="d-block card-header py-3" data-toggle="collapse"
+                    role="button" aria-expanded="true" aria-controls="collapseCardExample">
+                    <h6 class="m-0 font-weight-bold text-primary">Add New Ligands</h6>
+                </a>
+                <!-- Card Content - Collapse -->
+                <div class="collapse show" id="collapseCardExample">
+                    <div class="card-body">
+                        <form id="uploadLigandForm">
+                            <div class="mb-3">
+                              <label for="ligandNameInput" class="form-label">Enter Ligand Name:</label>
+                              <input type="text" class="form-control" id="ligandNameInput" name="ligandName">
+                              <!-- <div id="emailHelp" class="form-text">We'll never share your email with anyone else.</div> -->
+                            </div>
+                            <div class="mb-3">
+                              <label for="ligandFileUpload" class="form-label">Upload Ligand File:</label>
+                              <input type="file" accept=".sdf" id="ligandFileUpload" name="ligandFile">
+                            </div>
+                            <!-- <div class="mb-3 form-check">
+                              <input type="checkbox" class="form-check-input" id="exampleCheck1">
+                              <label class="form-check-label" for="exampleCheck1">Check me out</label>
+                            </div> -->
+                            <button type="submit" class="btn btn-primary">Add Ligand</button>
+                          </form>
+                          <div id="uploadLigandResponseMessage" style="color: red"></div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <script>
+            var counter = 0;
+            function updateLigandStatus() {
+                counter ++;
+                var elements = document.getElementsByClassName('ligandInfo');
+                for (var i = 0; i < elements.length; i++ ) {
+                    elements[i].textContent = 'Counter:' + counter;
+                }
+            }
+            // setInterval(updateLigandStatus, 1000);
+
+            // upload ligand
+            document.getElementById('uploadLigandForm').addEventListener('submit', function(event) {
+                document.getElementById('uploadLigandResponseMessage').textContent = '';
+                event.preventDefault(); // Prevent the default form submission behavior
+                
+                // Get the file input element
+                var fileInput = document.getElementById('ligandFileUpload');
+                var file = fileInput.files[0]; // Get the first file (if multiple files are allowed, handle them accordingly)
+                
+                if (!file) {
+                    document.getElementById('uploadLigandResponseMessage').textContent = 'No file selected';
+                    return; // Exit if no file was selected
+                }
+
+                var name = document.getElementById('ligandNameInput').value;
+                if (!name) {
+                    document.getElementById('uploadLigandResponseMessage').textContent = 'Ligand name cannot be empty';
+                    return;
+                }
+                
+                // Create a FormData object to hold the file
+                var formData = new FormData();
+                formData.append('file', file); // Append the file to the FormData object
+                formData.append('name', name);
+                
+                // Send the FormData to the server using fetch
+                fetch('/uploadLigand', {
+                    method: 'POST',
+                    body: formData,
+                })
+                .then(response => response.json())
+                .then(jdata => {
+                    console.log(jdata);
+                    if (jdata.status != 200) {
+                        alert(jdata.message);
+                        // document.getElementById('uploadLigandResponseMessage').textContent = jdata.message;
+                    }
+                    location.reload();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('responseMessage').textContent = 'Error uploading file';
+                });
+            });
+        </script>
+
+    </div>
+
+</div>
+<!-- /.container-fluid -->
+{% endblock %}

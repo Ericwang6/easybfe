@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block extrastyle %}
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/pdbe-molstar@3.3.0/build/pdbe-molstar-light.css" />
+<!-- JS -->
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/pdbe-molstar@3.3.0/build/pdbe-molstar-plugin.js"></script>
+<style>
+    #myViewer {
+        width: 100%;
+        height: 600px;
+        position: relative;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Begin Page Content -->
+<div class="container-fluid">
+
+    <!-- Input field for the user to enter the name -->
+    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 mb-0 text-gray-800">Proteins</h1>
+    </div>
+
+    <div class="row">
+
+        <div class="col-lg-6">
+            <!-- Collapsable Card Example -->
+            <div class="card shadow mb-4">
+                <!-- Card Header - Accordion -->
+                <a href="#addProteinCardShow" class="d-block card-header py-3" data-toggle="collapse"
+                    role="button" aria-expanded="true" aria-controls="addProteinCardShow">
+                    <h6 class="m-0 font-weight-bold text-primary">Add New Protein</h6>
+                </a>
+                <!-- Card Content - Collapse -->
+                <div class="collapse show" id="addProteinCardShow">
+                    <div class="card-body">
+                        <form id="uploadProteinForm">
+                            <div class="row g-2 align-items-center mb-3">
+                                <div class="col-auto">
+                                    <label for="proteinNameInput" class="col-form-label">Protein Name:</label>
+                                </div>
+                                <div class="col-auto">
+                                    <input type="text" id="proteinNameInput" class="form-control">
+                                </div>
+                            </div>
+
+                            <div class="row g-2 align-items-center mb-3">
+                                <div class="col-auto">
+                                    <label for="proteinFileUpload" class="col-form-label">Upload Protein PDB:</label>
+                                </div>
+                                <div class="col-auto">
+                                    <input class="form-control-file" type="file" accept=".pdb" id="proteinFileUpload" name="proteinFile">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Add Protein</button>
+                        </form>
+                        <div id="uploadProteinResponseMessage" style="color: red"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card shadow mb-4">
+                <!-- Card Header - Accordion -->
+                <a href="#proteinShow" class="d-block card-header py-3" data-toggle="collapse"
+                    role="button" aria-expanded="true" aria-controls="proteinShow">
+                    <h6 class="m-0 font-weight-bold text-primary">Proteins</h6>
+                </a>
+                <!-- Card Content - Collapse -->
+                <div class="collapse show" id="proteinShow">
+                    <div class="card-body">
+                        <div class="list-group">
+                            {% for protein in proteins %}
+                            <a href="javascript:void(0)" class="list-group-item list-group-item-action list-group-item-default" onclick="displayProtein(this.innerText)">{{ protein }}</a>
+                            {% endfor %}
+                        </div>
+                        
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="col-lg-6">
+            <div id="myViewer"></div>
+        </div>
+
+    </div>
+
+    <script>
+        document.getElementById('uploadProteinForm').addEventListener('submit', function(event) {
+                document.getElementById('uploadProteinResponseMessage').textContent = '';
+                event.preventDefault(); // Prevent the default form submission behavior
+                
+                // Get the file input element
+                var fileInput = document.getElementById('proteinFileUpload');
+                var file = fileInput.files[0]; // Get the first file (if multiple files are allowed, handle them accordingly)
+                
+                if (!file) {
+                    document.getElementById('uploadProteinResponseMessage').textContent = 'No file selected';
+                    return; // Exit if no file was selected
+                }
+
+                var name = document.getElementById('proteinNameInput').value;
+                if (!name) {
+                    document.getElementById('uploadProteinResponseMessage').textContent = 'Protein name cannot be empty';
+                    return;
+                }
+                
+                // Create a FormData object to hold the file
+                var formData = new FormData();
+                formData.append('file', file); // Append the file to the FormData object
+                formData.append('name', name);
+                
+                // Send the FormData to the server using fetch
+                fetch('/uploadProtein', {
+                    method: 'POST',
+                    body: formData,
+                })
+                .then(response => response.json())
+                .then(jdata => {
+                    console.log(jdata);
+                    if (jdata.status != 200) {
+                        alert(jdata.message);
+                        // document.getElementById('uploadProteinResponseMessage').textContent = jdata.message;
+                    }
+                    location.reload();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('responseMessage').textContent = 'Error uploading file';
+                });
+            });
+
+        // Create plugin instance
+        const viewerInstance = new PDBeMolstarPlugin();
+        const viewerContainer = document.getElementById('myViewer');
+        var options = {
+            customData: {
+                url: '/',
+                format: 'pdb',
+                binary: false
+            },
+            bgColor: 'white'
+        };
+        viewerInstance.render(viewerContainer, options);
+
+        function displayProtein(name) {
+            viewerInstance.visual.update({
+                customData: {
+                    url: `/files/proteins/${name}`,
+                    format: 'pdb',
+                    binary: false
+                },
+                bgColor: 'white'
+            }, true);
+        }
+
+        // Function to render the viewer with the protein name provided by the user
+        // function displayProtein(name) {            
+        //     // Set options (All the available options are listed below in the documentation)
+        //     const options = {
+        //         customData: {
+        //             url: `/files/proteins/${name}`,  // Use the input value in the URL
+        //             format: 'pdb',
+        //             binary: false
+        //         },
+        //         bgColor: 'white'
+        //     };
+            
+        //     // Get element from HTML/Template to place the viewer 
+        //     const viewerContainer = document.getElementById('myViewer');
+        
+        //     // Call render method to display the 3D view
+        //     viewerInstance.render(viewerContainer, options);
+        // }
+        // loadProtein();
+
+        // Add event listener to the button to trigger the viewer load when clicked
+        // document.getElementById('loadProtein').addEventListener('click', loadProtein);
+    </script>
+
+</div>
+
+<!-- /.container-fluid -->
+{% endblock %}
