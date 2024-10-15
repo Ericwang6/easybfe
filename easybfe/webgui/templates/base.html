@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+  {% include "includes/head.html" %}
+  {% block extrastyle %}{% endblock extrastyle %}
+
+</head>
+
+<body id="page-top">
+
+  <!-- Page Wrapper -->
+  <div id="wrapper">
+
+      {% include "includes/sidebar.html" %}
+
+      <!-- Content Wrapper -->
+      <div id="content-wrapper" class="d-flex flex-column">
+
+          <!-- Main Content -->
+          <div id="content">
+
+            {% include "includes/topbar.html" %}
+
+            {% block content %}{% endblock %}
+
+          </div>
+          <!-- End of Main Content -->
+
+          {% include "includes/footer.html" %}
+
+      </div>
+      <!-- End of Content Wrapper -->
+
+  </div>
+  <!-- End of Page Wrapper -->
+
+  {% include "includes/misc.html" %}
+
+  {% include "includes/scripts.html" %}
+  {% block extra_js %}{% endblock extra_js %}
+
+</body>
+
+</html>
