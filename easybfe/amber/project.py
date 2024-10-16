@@ -101,6 +101,7 @@ class AmberRbfeProject:
         forcefield: str = 'gaff2', 
         charge_method: str = 'bcc', 
         overwrite: bool = False,
+        expt: float | None = None,
     ):
         """
         Add ligand
@@ -158,6 +159,14 @@ class AmberRbfeProject:
             num_h_donors = Lipinski.NumHDonors(mol),
             num_h_acceptors = Lipinski.NumHAcceptors(mol)
         )
+        if expt is not None:
+            info['dG.expt'] = expt
+        elif mol.HasProp('dG.expt'):
+            info['dG.expt'] = mol.GetDoubleProp('dG.expt')
+        elif mol.HasProp('affinity.expt'):
+            info['dG.expt'] = 298.15 * 8.314 * np.log(mol.GetDoubleProp('affinity.expt') * 1e-6) / 1000 / 4.184
+        else:
+            info['dG.expt'] = None
          
         self.logger.info(f'Ligand {name} is added to : {lig_file}')
         if parametrize:
@@ -184,21 +193,25 @@ class AmberRbfeProject:
         from rdkit import Chem
 
         mols = [m for m in Chem.SDMolSupplier(sdf, removeHs=False)]
-        if num_workers == 1:
-            for mol in mols:
-                self.add_ligand(mol, None, **kwargs)
+        if len(mols) == 1:
+            self.add_ligand(sdf, **kwargs)
         else:
-            # Here multiprocessing will clear all properties in the molecule (idk why)
-            tmpdir = tempfile.mkdtemp()
-            tmps = []
-            for m in mols:
-                tmpfile = os.path.join(tmpdir, f'{m.GetProp("_Name")}.sdf')
-                with Chem.SDWriter(tmpfile) as w:
-                    w.write(m)
-                tmps.append(tmpfile)
-            func = partial(self.add_ligand, **kwargs)
-            with mp.Pool(num_workers) as pool:
-                pool.map(func, tmps)
+            kwargs.pop('name')
+            if num_workers == 1:
+                for mol in mols:
+                    self.add_ligand(mol, None, **kwargs)
+            else:
+                # Here multiprocessing will clear all properties in the molecule (idk why)
+                tmpdir = tempfile.mkdtemp()
+                tmps = []
+                for m in mols:
+                    tmpfile = os.path.join(tmpdir, f'{m.GetProp("_Name")}.sdf')
+                    with Chem.SDWriter(tmpfile) as w:
+                        w.write(m)
+                    tmps.append(tmpfile)
+                func = partial(self.add_ligand, **kwargs)
+                with mp.Pool(num_workers) as pool:
+                    pool.map(func, tmps)
            
     def parametrize_ligand(self, name: str, protein_name: str, forcefield: str = 'gaff2', charge_method: str = 'bcc', overwrite: bool = False):
         from ..smff import GAFF, OpenFF, CustomForceField, SmallMoleculeForceField
@@ -332,18 +345,31 @@ class AmberRbfeProject:
             
         pert_dir.mkdir(exist_ok=True, parents=True)
         self.logger.info(f'Creating dirctory: {pert_dir}')
+        
+        # Read Ligands
+        ligandA = Chem.SDMolSupplier(str(self.ligands_dir / protein_name / ligandA_name / f'{ligandA_name}.sdf'), removeHs=False)[0]
+        ligandB = Chem.SDMolSupplier(str(self.ligands_dir / protein_name / ligandB_name / f'{ligandB_name}.sdf'), removeHs=False)[0]
 
+        # Read binding affinity
+        with open(self.ligands_dir / protein_name / ligandA_name / 'info.json') as f:
+            dG_ligA = json.load(f).get('dG.expt', None)
+        with open(self.ligands_dir / protein_name / ligandB_name / 'info.json') as f:
+            dG_ligB = json.load(f).get('dG.expt', None)
+        
+        if dG_ligA is not None and dG_ligB is not None:
+            ddG_expt = dG_ligB - dG_ligA
+        else:
+            ddG_expt = None
+        
+        # Write basic info
         with open(pert_dir / 'info.json', 'w') as f:
             basic_info = {
                 "protein_name": protein_name,
                 "ligandA_name": ligandA_name, 
                 "ligandB_name": ligandB_name,
+                "ddG.expt": ddG_expt,
             }
             json.dump(basic_info, f, indent=4)
-        
-        # Read Ligands
-        ligandA = Chem.SDMolSupplier(str(self.ligands_dir / protein_name / ligandA_name / f'{ligandA_name}.sdf'), removeHs=False)[0]
-        ligandB = Chem.SDMolSupplier(str(self.ligands_dir / protein_name / ligandB_name / f'{ligandB_name}.sdf'), removeHs=False)[0]
 
         # Atom Mapping
         self.logger.info("Generate atom mapping")
@@ -441,7 +467,7 @@ class AmberRbfeProject:
         
         # submit
         if submit:
-            legs = ['ligands', 'complex'] if skip_gas else ['ligands', 'complex', 'gas']
+            legs = ['solvent', 'complex'] if skip_gas else ['solvent', 'complex', 'gas']
             for leg in legs:
                 with set_directory(pert_dir / leg):
                     _, out, _ = run_command(['sbatch', 'run.slurm'])
@@ -449,7 +475,7 @@ class AmberRbfeProject:
     
     def add_perturbations(
         self,
-        perts: List[Tuple[str, str]],
+        perts: os.PathLike | List[Tuple[str, str]],
         protein_name: str,
         num_workers: int = 1,
         **kwargs
@@ -457,6 +483,9 @@ class AmberRbfeProject:
         """
         Add Perturbations
         """
+        if isinstance(perts, str) or isinstance(perts, Path):
+            with open(perts) as f:
+                perts = [line.split() for line in f.read().strip().split('\n')]
         if num_workers == 1:
             for pert in perts:
                 self.add_perturbation(pert[0], pert[1], protein_name, **kwargs)
