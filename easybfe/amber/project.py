@@ -35,10 +35,10 @@ def init_logger(logname: Optional[os.PathLike] = None) -> logging.Logger:
 
 
 class SimulationStatus(Enum):
-    NOTSTART = 'Not started'
-    RUNNING = 'Running'
-    FINISHED = 'Finished'
-    ERROR = "Error"
+    NOTSTART = 0
+    RUNNING = 1
+    FINISHED = 2
+    ERROR = 3
 
 
 
@@ -170,23 +170,6 @@ class AmberRbfeProject:
         with open(lig_dir / 'info.json', 'w') as f:
             json.dump(info, f, indent=4)
         return True
-    
-    @classmethod
-    def query_perturbation_status(cls, pert_dir: Path):
-        status = {
-            'finished': Path.is_file(pert_dir / 'result.json')
-        }
-        legs = ['gas', 'solvent', 'complex']
-        for leg in legs:
-            if Path.is_file(pert_dir / leg / 'done.tag'):
-                status[leg] = SimulationStatus.FINISHED
-            elif Path.is_file(pert_dir / leg / 'error.tag'):
-                status[leg] = SimulationStatus.ERROR
-            elif Path.is_file(pert_dir / leg / 'eq.tag') or Path.is_file(pert_dir / leg / 'prod.tag'):
-                status[leg]= SimulationStatus.RUNNING
-            else:
-                status[leg] = SimulationStatus.NOTSTART
-        return status
 
     def add_ligands(
         self, 
@@ -487,66 +470,72 @@ class AmberRbfeProject:
         if not skip_traj:
             self.process_traj(protein_name, pert_name)
     
-    def analyze_interactive(self):
-        raise NotImplementedError()
+    @classmethod
+    def query_perturbation_status(cls, pert_dir: Path):
+        status = {
+            'analysis': Path.is_file(pert_dir / 'result.json')
+        }
+        legs = ['gas', 'solvent', 'complex']
+        for leg in legs:
+            if Path.is_file(pert_dir / leg / 'done.tag'):
+                status[leg] = SimulationStatus.FINISHED
+            elif Path.is_file(pert_dir / leg / 'error.tag'):
+                status[leg] = SimulationStatus.ERROR
+            elif Path.is_file(pert_dir / leg / 'eq.tag') or Path.is_file(pert_dir / leg / 'prod.tag'):
+                status[leg]= SimulationStatus.RUNNING
+            else:
+                status[leg] = SimulationStatus.NOTSTART
+        return status
+    
+    @classmethod
+    def query_perturbation_info(cls, pert_dir: Path):
+        with open(pert_dir / 'info.json') as f:
+            info = json.load(f)
+        info['pert_name'] = pert_dir.name
+        status = cls.query_perturbation_status(pert_dir)
+        info['analysis.finished'] = status['analysis']
+        for leg in ['gas', 'solvent', 'complex']:
+            info[f'{leg}.status'] = status[leg].name
+        if info['analysis.finished']:
+            with open(pert_dir / 'result.json') as f:
+                result = json.load(f)
+            for key1 in result:
+                for key2 in result[key1]:
+                    info[f'{key1}.{key2}'] = result[key1][key2]
+        return info
+    
+    def gather_perturbations_info(self):
+        '''Gather data of all perturbations'''
+        import pandas as pd
 
-    # def analyze(self):
-    #     perts = []
-    #     perts_to_analyze = []
-    #     msgs = []
-        
-    #     for protein_name in self.perturbations:
-    #         for pert_name in self.perturbations[protein_name]:
-    #             pert_dir = self.rbfe_dir / protein_name / pert_name
-    #             status = self.query_perturbation_status(pert_dir)
-            
-    #         if not status['finished']:
-    #             continue
-            
-
-    #         if Path.is_file(pert / 'result.json'):
-    #             msg = 'Finished'
-    #         else:
-    #             status = {leg: Path.is_file(pert / f'{leg}/done.tag') for leg in ['ligands', 'complex', 'gas']}
-                
-    #             if (status['ligands']) and (status['complex']):
-    #                 msg = 'Need to run analysis workflow.' + '' if status['gas'] else ' without solvation contribution analysis'
-    #                 perts_to_analyze.append(pert.name)
-    #             else:
-    #                 msg = ' and '.join([key.capitalize() for key in ["ligands", "complex"] if not status[key]]) + ' not finished.'
-            
-    #         perts.append(pert.name)
-    #         msgs.append(msg)
-                    
-    #     print(f"Found {len(perts)} perturbations")
-    #     for i in range(len(perts)):
-    #         print(f'{i+1}.', perts[i], '-', msgs[i])
-
-    #     inp = input("Enter 'y' to start analyze all perturbations that require to be analyzed OR choose the perturbation with number or name: ")
-    #     if inp == 'y':
-    #         for pert in perts_to_analyze:
-    #             self.analyze_pert(pert)
-    #     elif inp in perts:
-    #         self.analyze_pert(inp)
-    #     else:
-    #         try:
-    #             inp = int(inp)
-    #             assert inp <= len(perts)
-    #         except:
-    #             print(f'Invalid input: {inp}\n')
-    #         self.analyze_pert(perts[inp - 1])
-        
-    #     if input('Enter "q" to quit the analyze program: ') == 'q':
-    #         sys.exit(0)
-    #     else:
-    #         self.analyze()
-        
-    # def analyze_pert(self, pert_name: str):
-    #     self.logger.info('Start - free energy evaulation')
-    #     self.evaluate_free_energy(pert_name)
-    #     self.logger.info('Start - processing trajectory')
-    #     self.process_traj(pert_name)
-    #     self.logger.info(f"Finished analyzing {pert_name}")
+        infos = []
+        for protein_name, pert_names in self.perturbations.items():
+            for pert_name in pert_names:
+                info = self.query_perturbation_info(self.rbfe_dir / protein_name / pert_name)
+                infos.append(info)
+        df = pd.DataFrame(infos)
+        return df
+    
+    def analyze_pert(self, protein_name: str, pert_name: str, skip_traj: bool = False):
+        self.evaluate_free_energy(protein_name, pert_name)
+        if not skip_traj:
+            self.process_traj(protein_name, pert_name)
+    
+    def analyze(self, interactive=True):
+        info_df = self.gather_perturbations_info()
+        query_str = '~`analysis.finished` & `solvent.status` == "{}" & `complex.status` == "{}"'.format(
+            SimulationStatus.FINISHED.name, SimulationStatus.FINISHED.name
+        )
+        ana_df = info_df.query(query_str)
+        print('Found these perturbations needs analysis:')
+        print(ana_df[['protein_name', 'ligandA_name', 'ligandB_name', 'ddG.expt']])
+        if interactive:
+            start = input('Enter y to start: ') == 'y'
+        else:
+            start = True
+        if start:
+            for _, row in ana_df.iterrows():
+                self.analyze_pert(row['protein_name'], row['pert_name'])
 
     def evaluate_free_energy(self, protein_name: str, pert_name: str):
         """
@@ -571,7 +560,6 @@ class AmberRbfeProject:
         from alchemlyb.convergence import forward_backward_convergence
         from alchemlyb.visualisation.convergence import plot_convergence
         from alchemlyb.visualisation.mbar_matrix import plot_mbar_overlap_matrix
-        from alchemlyb.preprocessing.subsampling import decorrelate_u_nk
 
         dG = {}
         dG_std = {}

@@ -51,7 +51,7 @@ def main():
     project = AmberRbfeProject(args.directory, init=(args.command == 'init'))
     if args.command == 'analyze':
         if args.interactive:
-            project.analyze_interactive()
+            project.analyze(interactive=True)
         else:
             project.analyze_pert(args.protein_name, args.pert_name, args.skip_traj)
         
