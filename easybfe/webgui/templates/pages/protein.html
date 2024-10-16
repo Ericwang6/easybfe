@@ -113,7 +113,7 @@
                 formData.append('name', name);
                 
                 // Send the FormData to the server using fetch
-                fetch('/uploadProtein', {
+                fetch("{{ url_for('uploadProtein') }}", {
                     method: 'POST',
                     body: formData,
                 })
@@ -146,9 +146,11 @@
         viewerInstance.render(viewerContainer, options);
 
         function displayProtein(name) {
+            var proteinUrl = "{{ url_for('serve_pdb', name='__name__') }}";
+            proteinUrl = proteinUrl.replace('__name__', name);
             viewerInstance.visual.update({
                 customData: {
-                    url: `/files/proteins/${name}`,
+                    url: proteinUrl,
                     format: 'pdb',
                     binary: false
                 },

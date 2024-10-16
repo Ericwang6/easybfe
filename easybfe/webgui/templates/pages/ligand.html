@@ -108,7 +108,7 @@
                 formData.append('name', name);
                 
                 // Send the FormData to the server using fetch
-                fetch('/uploadLigand', {
+                fetch("{{ url_for('uploadLigand') }}", {
                     method: 'POST',
                     body: formData,
                 })

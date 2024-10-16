@@ -1,13 +1,26 @@
-from flask import Flask, render_template, request, jsonify, send_from_directory, url_for
+from flask import Flask, render_template, request, jsonify, send_from_directory, url_for, Blueprint
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 import webbrowser
 import threading
 import time
 import os
+from pathlib import Path
 
 
 app = Flask(__name__, template_folder='templates')
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 CORS(app)
+
+
+def custom_url_for(endpoint, **values):
+    prefix = os.getenv('ONDEMAND_PREFIX', '')
+    return prefix + url_for(endpoint, **values)
+
+
+@app.context_processor
+def replace_url_for():
+    return dict(url_for=custom_url_for)
 
 
 @app.route('/')
@@ -98,17 +111,21 @@ if __name__ == '__main__':
         action='store_true',
         help='Toogle to start debug mode'
     )
+    parser.add_argument(
+        '--host',
+        dest='host',
+        default='127.0.0.1',
+        help='Host to run the Web-GUI. Swith to 0.0.0.0 if you deploy the code on a remote server.'
+    )
     args = parser.parse_args()
 
-
     if not args.debug:
-
         def openbrowser():
-            webbrowser.open_new(f'http://127.0.0.1:{args.port}/')
-            
+            webbrowser.open_new(f'http://{args.host}:{args.port}/')
         threading.Timer(1, openbrowser).start()
+    
 
     global project
     project = AmberRbfeProject(wdir=args.directory, init=args.init)
-    app.run(debug=True, port=args.port, host='127.0.0.1')
+    app.run(debug=args.debug, port=args.port, host=args.host)
 
