@@ -1,21 +1,16 @@
 import os
 import json
-import xml.etree.ElementTree as ET
-import xml.dom.minidom
 from pathlib import Path
-from typing import Union, Dict, Optional, List, Tuple
-import logging
+from typing import Union, Dict, List, Tuple
 
 import numpy as np
 import openmm as mm
 import openmm.app as app
 import openmm.unit as unit
-
+import parmed
 from rdkit import Chem
 
-import parmed
-import parmed.unit as u
-from parmed.periodic_table import Element as ELEMENT
+from ..smff.utils import convert_to_xml
 
 
 PROTEIN_FF_XMLS = {
@@ -84,197 +79,6 @@ def renumber_parmed_structure(struct: parmed.Structure, mapping: Dict[int, int])
     new_atoms.claim()
     struct.atoms = new_atoms
     return struct
-
-
-class OpenmmXML:
-    def __init__(self):
-        self.ffxml = None
-        self.topxml = None
-    
-    @staticmethod
-    def to_pretty_xmlstr(xmlele: ET.Element):
-        uglystr = ET.tostring(xmlele, "unicode")
-        pretxml = xml.dom.minidom.parseString(uglystr)
-        pretstr = pretxml.toprettyxml()
-        return pretstr
-    
-    @staticmethod
-    def to_pretty_xmlfile(xmlele: ET.Element, fname: os.PathLike):
-        xmlstr = OpenmmXML.to_pretty_xmlstr(xmlele)
-        with open(fname, 'w') as f:
-            f.write(xmlstr)
-    
-    def write_ffxml(self, fname: os.PathLike):
-        self.to_pretty_xmlfile(self.ffxml, fname)
-    
-    def write_topxml(self, fname: os.PathLike):
-        self.to_pretty_xmlfile(self.topxml, fname)
-
-    @classmethod
-    def from_parmed(cls, struct: parmed.Structure, useAtrributeFromResidue: bool = True, onlyCharges: bool = False):
-        if onlyCharges:
-            assert useAtrributeFromResidue, "useAtrributeFromResidue must be True when onlyCharges is True"
-        struct.join_dihedrals()
-        ffxml = ET.Element("ForceField")
-        topxml = ET.Element("Residues")
-        
-        # regularize atom names, and keep name unique
-        atomNamesCount = {}
-        atomNames = []
-        atomTypes = []
-        for atom in struct.atoms:
-            if atom.name not in atomNamesCount:
-                name = atom.name
-            else:
-                name = atom.name + "_" + str(atomNamesCount[atom.name] + 1)
-                # This is bad for protein systems, but we will keep it as this function is for ligands
-                raise NotImplementedError(f"Identical names: {atom.name}")
-            atomNamesCount[atom.name] = atomNamesCount.get(atom.name, 0) + 1
-            atomNames.append(name)
-            atomTypes.append(atom.residue.name + '-' + name)
-
-        # topology
-        residuesElement = ET.SubElement(ffxml, "Residues")
-        for res in struct.residues:
-            resElement = ET.SubElement(residuesElement, "Residue")
-            resElement.set("name", res.name)
-            topresElement = ET.SubElement(topxml, "Residue")
-            topresElement.set("name", res.name)
-            for atom in res.atoms:
-                atomElement = ET.SubElement(resElement, "Atom")
-                atomElement.set("name", atomNames[atom.idx])
-                atomElement.set("type", atomTypes[atom.idx])
-                if useAtrributeFromResidue:
-                    atomElement.set("charge", f"{atom.charge:.10f}")
-            for bond in struct.bonds:
-                bondElement = ET.SubElement(resElement, "Bond")
-                bondElement.set("atomName1", atomNames[bond.atom1.idx])
-                bondElement.set("atomName2", atomNames[bond.atom2.idx])
-                topbondElement = ET.SubElement(topresElement, "Bond")
-                topbondElement.set("from", atomNames[bond.atom1.idx])
-                topbondElement.set("to", atomNames[bond.atom2.idx])
-                
-        # atoms
-        atomTypesElement = ET.SubElement(ffxml, "AtomTypes")
-        for atom in struct.atoms:
-            atomElement = ET.SubElement(atomTypesElement, "Type")
-            atomElement.set("element", ELEMENT[atom.atomic_number])
-            atomElement.set("name", atomTypes[atom.idx])
-            atomElement.set("class", atom.type)
-            atomElement.set("mass", f"{atom.mass:.3f}")
-        
-        if not onlyCharges:
-            # bonds
-            bondsElement = ET.SubElement(ffxml, "HarmonicBondForce")
-            conv = (u.kilocalorie_per_mole / u.angstrom ** 2).conversion_factor_to(
-                u.kilojoule_per_mole / u.nanometer ** 2) * 2
-            for bond in struct.bonds:
-                bondElement = ET.SubElement(bondsElement, "Bond")
-                length = bond.type.req / 10 # in nm
-                k = bond.type.k * conv
-                bondElement.set("type1", str(atomTypes[bond.atom1.idx]))
-                bondElement.set("type2", str(atomTypes[bond.atom2.idx]))
-                bondElement.set("length", f"{length:.10f}")
-                bondElement.set("k", f"{k:.10f}")
-            
-            # angles
-            anglesElement = ET.SubElement(ffxml, "HarmonicAngleForce")
-            conv = (u.kilocalorie_per_mole/u.radian ** 2).conversion_factor_to(
-                    u.kilojoule_per_mole/u.radian ** 2 ) * 2
-            deg2rad = u.degree.conversion_factor_to(u.radian)
-            for angle in struct.angles:
-                angleElement = ET.SubElement(anglesElement, "Angle")
-                thetaeq = angle.type.theteq * deg2rad # in rad
-                k = angle.type.k * conv
-                angleElement.set("type1", str(atomTypes[angle.atom1.idx]))
-                angleElement.set("type2", str(atomTypes[angle.atom2.idx]))
-                angleElement.set("type3", str(atomTypes[angle.atom3.idx]))
-                angleElement.set("angle", f"{thetaeq:.10f}")
-                angleElement.set("k", f"{k:.10f}")
-            
-            # dihedrals
-            dihesElement = ET.SubElement(ffxml, "PeriodicTorsionForce")
-            dihesElement.set("ordering", "amber")
-            conv = u.kilocalories.conversion_factor_to(u.kilojoules)
-            for dihe in struct.dihedrals:
-                if dihe.improper:
-                    # OpenMM improper definitions is a little bit different
-                    diheElement = ET.SubElement(dihesElement, "Improper")
-                    diheElement.set("type1", str(atomTypes[dihe.atom3.idx]))
-                    diheElement.set("type2", str(atomTypes[dihe.atom1.idx]))
-                    diheElement.set("type3", str(atomTypes[dihe.atom2.idx]))
-                    diheElement.set("type4", str(atomTypes[dihe.atom4.idx]))
-                else:
-                    diheElement = ET.SubElement(dihesElement, "Proper")
-                    diheElement.set("type1", str(atomTypes[dihe.atom1.idx]))
-                    diheElement.set("type2", str(atomTypes[dihe.atom2.idx]))
-                    diheElement.set("type3", str(atomTypes[dihe.atom3.idx]))
-                    diheElement.set("type4", str(atomTypes[dihe.atom4.idx]))
-
-                def _set_dihedral(dtype, num):
-                    diheElement.set(f"periodicity{num}", str(dtype.per))
-                    diheElement.set(f"phase{num}", f"{dtype.phase * deg2rad:.10f}")
-                    diheElement.set(f"k{num}", f"{dtype.phi_k * conv:.10f}")
-
-                if isinstance(dihe.type, parmed.DihedralType):
-                    _set_dihedral(dihe.type, 1)
-                elif isinstance(dihe.type, parmed.DihedralTypeList):
-                    for i, dtype in enumerate(dihe.type):
-                        _set_dihedral(dtype, i+1)
-                else:
-                    raise TypeError("Unknown dihedral type")
-            
-            # nonbonded terms
-            nbsElement = ET.SubElement(ffxml, "NonbondedForce")
-            if hasattr(struct, "defaults"):
-                assert struct.defaults.gen_pairs == 'yes'
-                # In GMX top, 1-4 scaling factors are stored in [ defaults ] section
-                if abs(struct.defaults.fudgeQQ - 5 / 6) <= 1e-3:
-                    coul14scale = 5 / 6 # amber
-                elif abs(struct.defaults.fudgeQQ - 1 / 2) <= 1e-3:
-                    coul14scale = 1 / 2 # opls
-                else:
-                    coul14scale = struct.defaults.fudgeQQ
-                if abs(struct.defaults.fudgeLJ - 1 / 2) <= 1e-3:
-                    lj14scale = 1 / 2
-                else:
-                    lj14scale = struct.defaults.fudgeLJ
-            else:
-                # In Amber frcmod, 1-4 scaling factores are stored in each dihedral type
-                scee = np.array([dtype.scee for dtypelist in struct.dihedral_types for dtype in dtypelist if dtype.scee != 0.0])
-                scnb = np.array([dtype.scnb for dtypelist in struct.dihedral_types for dtype in dtypelist if dtype.scnb != 0.0])
-                if np.allclose(scee, 1.2):
-                    coul14scale = 5 / 6
-                else:
-                    raise RuntimeError("Undetermined coul 1-4 scale")
-                
-                if np.allclose(scnb, 2.0):
-                    lj14scale = 1 / 2
-                else:
-                    raise RuntimeError("Undetermined LJ 1-4 scale")
-            nbsElement.set("coulomb14scale", f"{coul14scale:.5f}")
-            nbsElement.set("lj14scale", f"{lj14scale:.5f}")
-
-            if useAtrributeFromResidue:
-                useChargeElement = ET.SubElement(nbsElement, "UseAttributeFromResidue")
-                useChargeElement.set("name", "charge")
-            params = parmed.ParameterSet.from_structure(struct, allow_unequal_duplicates=True)
-            for atom in struct.atoms:
-                sigma = params.atom_types[atom.type].sigma / 10 # in nm
-                #### NBFIX ####
-                epsilon = params.atom_types[atom.type].epsilon * conv # in kJ
-                nbElement = ET.SubElement(nbsElement, "Atom")
-                nbElement.set("type", atomTypes[atom.idx])
-                nbElement.set("sigma", f'{sigma:.10f}')
-                nbElement.set("epsilon", f'{epsilon:.10f}')
-                if not useAtrributeFromResidue:
-                    nbElement.set("charge", f"{atom.charge:.10f}")
-        
-        xmlobj = cls()
-        xmlobj.ffxml = ffxml
-        xmlobj.topxml = topxml
-        return xmlobj
-        # return ET.ElementTree(ffxml), ET.ElementTree(topxml)
 
 
 def computeBoxVectorsWithPadding(positions: unit.Quantity, buffer: unit.Quantity):
@@ -377,9 +181,9 @@ def prep_ligand_rbfe_systems(
     renumber_parmed_structure(ligandB_struct, renum_map_B)
 
     ffxml_A = str(wdir / 'ligandA.xml')
-    OpenmmXML.to_pretty_xmlfile(OpenmmXML.from_parmed(ligandA_struct).ffxml, ffxml_A)
+    convert_to_xml(ligandA_struct, ffxml_A)
     ffxml_B = str(wdir / 'ligandB.xml')
-    OpenmmXML.to_pretty_xmlfile(OpenmmXML.from_parmed(ligandB_struct).ffxml, ffxml_B)
+    convert_to_xml(ligandB_struct, ffxml_B)
 
     if protein_ff.endswith('.xml'):
         protein_ff_xml = protein_ff

@@ -1,15 +1,22 @@
-import os
+import os, shutil
 import pytest
+import json
+
+import numpy as np
+import parmed
+from rdkit import Chem
 
 from easybfe.amber.project import AmberRbfeProject
 from easybfe.amber.prep import prep_ligand_rbfe_systems
 
 
-
 class TestAmberLigandRbfeProject:
     @classmethod
     def setup_class(cls):
-        cls.project = AmberRbfeProject(os.path.join(os.path.dirname(__file__), '_test_ligand_rbfe_project'))
+        proj_dir = os.path.join(os.path.dirname(__file__), '_test_ligand_rbfe_project')
+        if os.path.isdir(proj_dir):
+            shutil.rmtree(proj_dir)
+        cls.project = AmberRbfeProject(proj_dir, init=True)
     
     @pytest.mark.dependency(name='test_add_protein')
     def test_add_protein(self):
@@ -23,52 +30,54 @@ class TestAmberLigandRbfeProject:
     
     @pytest.mark.dependency(name='test_add_ligand', dependency=['test_add_protein'])
     def test_add_ligand(self):
+        name = 'CDD_1845_gaff2'
         self.project.add_ligand(
-            fpath=os.path.join(os.path.dirname(__file__), 'data/CDD_1845.sdf'),
-            name='CDD_1845',
+            os.path.join(os.path.dirname(__file__), 'data/CDD_1845.sdf'),
+            name=name,
             protein_name='1845',
             parametrize=True,
             forcefield='gaff2',
             charge_method='gas',
             overwrite=True
         )
-        assert os.path.isfile(self.project.ligands_dir / '1845/CDD_1845/CDD_1845.sdf')
-        assert os.path.isfile(self.project.ligands_dir / '1845/CDD_1845/gaff2_gas/CDD_1845.prmtop')
-        assert os.path.isfile(self.project.ligands_dir / '1845/CDD_1845/gaff2_gas/CDD_1845.top')
+        assert os.path.isfile(self.project.ligands_dir / f'1845/{name}/{name}.sdf')
+        assert os.path.isfile(self.project.ligands_dir / f'1845/{name}/{name}.prmtop')
+        assert os.path.isfile(self.project.ligands_dir / f'1845/{name}/{name}.top')
     
     @pytest.mark.dependency(name='test_add_ligand_custom', dependency=['test_add_protein'])
     def test_add_ligand_custom(self):
+        name = 'CDD_1819_custom'
         self.project.add_ligand(
-            fpath=os.path.join(os.path.dirname(__file__), 'data/CDD_1819.sdf'),
-            name='CDD_1819',
+            os.path.join(os.path.dirname(__file__), 'data/CDD_1819.sdf'),
+            name=name,
             protein_name='1845',
             parametrize=True,
-            custom_ff=os.path.join(os.path.dirname(__file__), 'data/CDD_1819.prmtop'),
+            forcefield=os.path.join(os.path.dirname(__file__), 'data/CDD_1819.prmtop'),
             overwrite=True
         )
-        assert os.path.isfile(self.project.ligands_dir / '1845/CDD_1819/CDD_1819.sdf')
-        assert os.path.isfile(self.project.ligands_dir / '1845/CDD_1819/custom/CDD_1819.prmtop')
+        assert os.path.isfile(self.project.ligands_dir / f'1845/{name}/{name}.sdf')
+        assert os.path.isfile(self.project.ligands_dir / f'1845/{name}/{name}.prmtop')
     
     @pytest.mark.dependency(name='test_add_ligand_openff', dependency=['test_add_protein'])
     def test_add_ligand_openff(self):
-        self.project.parametrize_ligand(
-            name='CDD_1819',
+        name = 'CDD_1819_off'
+        self.project.add_ligand(
+            os.path.join(os.path.dirname(__file__), 'data/CDD_1819.sdf'),
+            name=name,
             protein_name='1845',
             forcefield='openff-2.1.0',
             charge_method='gas',
             overwrite=True
         )
-        assert os.path.isfile(self.project.ligands_dir / '1845/CDD_1819/CDD_1819.sdf')
-        assert os.path.isfile(self.project.ligands_dir / '1845/CDD_1819/openff-2.1.0_gas/CDD_1819.prmtop')
+        assert os.path.isfile(self.project.ligands_dir / f'1845/{name}/{name}.sdf')
+        assert os.path.isfile(self.project.ligands_dir / f'1845/{name}/{name}.prmtop')
     
     @pytest.mark.dependency(name='test_perturbation', dependency=['test_add_protein', 'test_add_ligand', 'test_add_ligand_custom'])
     def test_add_perturbation(self):
         self.project.add_perturbation(
-            ligandA_name='CDD_1819',
-            ligandB_name='CDD_1845',
+            ligandA_name='CDD_1819_custom',
+            ligandB_name='CDD_1845_gaff2',
             protein_name='1845',
-            ligandA_ff='custom/prmtop',
-            ligandB_ff='gaff2_gas/prmtop',
             pert_name='CDD_1819~CDD_1845',
             config=os.path.join(os.path.dirname(__file__), 'data/config_5ns.json'),
             overwrite=True
@@ -97,3 +106,20 @@ def test_amber_ligand_rbfe_prep():
         mapping=mapping,
         wdir=wdir
     )
+    mask_ref = {
+        "noshakemask": "'@1-145'",
+        "timask1": "'@1-73'",
+        "timask2": "'@74-145'",
+        "scmask1": "'@56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73'",
+        "scmask2": "'@129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145'"
+    }
+    with open(os.path.join(wdir, 'mask.json')) as f:
+        mask = json.load(f)
+        assert mask == mask_ref
+    
+    num_atoms_A = Chem.SDMolSupplier(os.path.join(datadir, 'CDD_1819.sdf'), removeHs=False)[0].GetNumAtoms()
+    struct = parmed.load_file(
+        os.path.join(wdir, 'gas.prmtop'),
+        xyz=os.path.join(wdir, 'gas.inpcrd')
+    )
+    assert np.allclose(struct.coordinates[:len(mapping)], struct.coordinates[num_atoms_A:][:len(mapping)])

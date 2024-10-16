@@ -99,33 +99,11 @@ class AmberRbfeProject:
         protein_name: str | None = None, 
         parametrize: bool = True, 
         forcefield: str = 'gaff2', 
-        charge_method: str = 'bcc',
-        custom_ff: os.PathLike | None = None, 
+        charge_method: str = 'bcc', 
         overwrite: bool = False,
     ):
         """
-        Add ligand to the project and use ACPYPE parametrize it
-
-        Parameters
-        ----------
-        fpath: os.PathLike
-            Path to the ligand file. Only sdf format is supported now
-        name: str
-            Name of the ligand. If None, will be inferred from the input path
-        parametrize: bool
-            Whether to parameterize the ligand.
-        forcefield: str
-            Force field used to parametrize the ligand, i.e. "-a" option in acpype.
-            'gaff' or 'gaff2' is accecpted. Default is 'gaff2'. 
-        charge_method: str
-            Method to assign atomic charges, i.e. "-c" option in acpype.
-            'gas' or 'bcc' is accepted. Default is 'bcc'
-        net_charge: str or int
-            Net charge of the ligand, i.e. '-n' option in acpype.
-            If 'auto', rdkit will be used to calculate the total net charge of the molecule.
-            Default is 'auto'
-        overwrite: bool
-            Whether to overwrite existing ligand directory. Default False.
+        Add ligand
         """
         from rdkit import Chem
         from rdkit.Chem import AllChem, Draw, Descriptors, Crippen, Lipinski
@@ -183,9 +161,9 @@ class AmberRbfeProject:
          
         self.logger.info(f'Ligand {name} is added to : {lig_file}')
         if parametrize:
-            self.parametrize_ligand(name, protein_name, forcefield, charge_method, custom_ff, overwrite)
+            ff_name = self.parametrize_ligand(name, protein_name, forcefield, charge_method, overwrite)
             info.update({
-                "forcefield": forcefield, 
+                "forcefield": ff_name, 
                 "charge_method": charge_method
             })
 
@@ -239,18 +217,22 @@ class AmberRbfeProject:
             with mp.Pool(num_workers) as pool:
                 pool.map(func, tmps)
            
-        
-    def parametrize_ligand(self, name: str, protein_name: str, forcefield: str = 'gaff2', charge_method: str = 'bcc', custom_ff: os.PathLike | None = None, overwrite: bool = False):
-        from ..smff import GAFF, OpenFF, CustomForceField
+    def parametrize_ligand(self, name: str, protein_name: str, forcefield: str = 'gaff2', charge_method: str = 'bcc', overwrite: bool = False):
+        from ..smff import GAFF, OpenFF, CustomForceField, SmallMoleculeForceField
 
         lig_dir = self.ligands_dir / protein_name / name
         
-        if forcefield.startswith('gaff'):
+        ff_name = forcefield
+        if isinstance(forcefield, SmallMoleculeForceField):
+            ff = forcefield
+            ff_name = ff.__class__.__name__
+        elif os.path.isfile(forcefield):
+            ff = CustomForceField(forcefield, overwrite)
+            ff_name = 'custom'
+        elif forcefield.startswith('gaff'):
             ff = GAFF(forcefield, charge_method)
         elif forcefield.startswith('openff'):
-            ff = OpenFF(forcefield, charge_method)
-        elif forcefield == 'custom':
-            ff = CustomForceField(custom_ff, overwrite)
+            ff = OpenFF(forcefield, charge_method) 
         else:
             msg = f"Unsupported force field: {forcefield}"
             self.logger.error(msg)
@@ -258,7 +240,7 @@ class AmberRbfeProject:
 
         ff.parametrize(lig_dir / f'{name}.sdf', lig_dir)
         self.logger.info(f"Ligand {name} is parametrized with {forcefield} and charge method {charge_method}")
-        return True
+        return ff_name
 
     def add_protein(self, fpath: os.PathLike, name: Optional[str] = None, check_ff: bool = True, overwrite: bool = False):
         """
