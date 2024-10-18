@@ -30,6 +30,7 @@ def parse_args(args: Sequence[str] | None = None):
         '-i', '--input',
         dest='input',
         required=True,
+        nargs="+",
         help='Input sdf file'
     )
     add_ligands_parser.add_argument(
