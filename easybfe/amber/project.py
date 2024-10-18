@@ -467,11 +467,9 @@ class AmberRbfeProject:
             wdir=prep_dir,
             protein_ff=config.get('protein_ff', 'ff14SB'),
             water_ff=config.get('water_ff', 'tip3p'),
-            neuturalize=config.get('neuturalize', True),
-            ionic_strength=config.get('ionic_strength', 0.15) * unit.molar,
-            gas_buffer=config.get('gas', {}).get('buffer', 20.0) / 10 * unit.nanometers,
-            solvent_buffer=config.get('solvent', {}).get('buffer', 15.0) / 10 * unit.nanometers,
-            complex_buffer=config.get('complex', {}).get('buffer', 12.0) / 10 * unit.nanometers,
+            gas_config=config.get('gas', {}),
+            solvent_config=config.get('solvent', {}),
+            complex_config=config.get('complex', {})
         )
         with open(prep_dir / 'mask.json') as f:
             mask = json.load(f)
@@ -497,17 +495,11 @@ class AmberRbfeProject:
             fep_workflow(leg_config, leg_dir, gas_phase=(leg == 'gas'))
             self.logger.info(f"FEP simulation workflow is set for leg: {leg}. Config file written to: {leg_dir / 'config.json'}")
 
-            with open(Path(__file__).parent / 'submit.slurm') as f:
-                slurm = f.read()
-                slurm = slurm.replace('@SLURM_CONFIG', '\n'.join(config['slurm_config']))
-                slurm = slurm.replace('@SET_UP_ENV', f'{config["env"]}' if 'env' in config else '')
-                slurm = slurm.replace('@NUM_LAMBDA', str(len(config[leg]['lambdas'])))
-                slurm = slurm.replace(
-                    '@STAGES', 
-                    '("em" "heat" "pres_0" "pres_1" "pres_2" "pre_prod")' if leg != 'gas' else '("em" "heat")'
-                )
             with open(leg_dir / 'run.slurm', 'w') as f:
-                f.write(slurm)
+                f.write('#/bin/bash\n')
+                f.write('\n'.join(config.get('header', [])))
+                f.write('\n')
+                f.write('source run.sh')
         
         # submit
         if submit:

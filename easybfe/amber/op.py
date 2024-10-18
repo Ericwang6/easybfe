@@ -27,6 +27,8 @@ def pmemd_exec(use_cuda: bool = True, use_mpi: bool = False):
         exe = "pmemd.cuda"
     else:
         exe = "pmemd"
+    if use_mpi:
+        exe += '.MPI'
     return exe
 
 
@@ -303,7 +305,7 @@ def prod(
         _fe_var_check(scmask2, "scmask2")
         _fe_var_check(clambda, 'clambda')
         ifsc, icfe = 1, 1
-        ntf = 1
+        ntf = 2
     else:
         ifsc, icfe = 0, 0
         ntf = 2
@@ -321,7 +323,7 @@ def prod(
 
     if free_energy and use_mbar:
         _fe_var_check(lambdas, "lambdas")
-        _fe_var_check(efreq, "efreq")
+        efreq = num_steps if efreq is None else efreq
         mbar_setting = [
             "{:<15} = 1".format("ifmbar"), 
             "{:<15} = {}".format("bar_intervall", efreq),
@@ -385,8 +387,6 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
         key: config[key] for key in ['noshakemask', 'timask1', 'timask2', 'scmask1', 'scmask2']
     }
 
-    pmemd_exec = 'pmemd.cuda' if not gas_phase else "pmemd"
-
     wdir = Path(wdir).resolve()
     wdir.mkdir(exist_ok=True)
     
@@ -409,7 +409,7 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
             wdir=em_dir,
             prmtop=prmtop, 
             inpcrd=em_inpcrd,
-            pmemd_exec=pmemd_exec,
+            pmemd_exec=pmemd_exec(use_cuda=True, use_mpi=False),
             free_energy=True,
             cutoff=cutoff,
             clambda=clambda,
@@ -423,7 +423,6 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
             wdir=heat_dir,
             prmtop=prmtop,
             inpcrd=em_dir / "em.rst7",
-            pmemd_exec=pmemd_exec,
             cutoff=cutoff,
             temp0=temp, 
             free_energy=True,
@@ -433,48 +432,17 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
         )
 
         if not gas_phase:
-            pres_0_dir = lambda_dir / 'pres_0'
+            pres_dir = lambda_dir / 'pres'
             pressurize(
-                wdir=pres_0_dir,
+                wdir=pres_dir,
                 prmtop=prmtop,
                 inpcrd=heat_dir / "heat.rst7",
-                pmemd_exec=pmemd_exec,
                 cutoff=cutoff,
                 pressure=pres,
                 temp0=temp, 
                 free_energy=True, clambda=clambda,
-                deffnm='pres_0',
-                **config['pres_0'],
-                **mask_config
-            )
-
-            pres_1_dir = lambda_dir / 'pres_1'
-            pressurize(
-                wdir=pres_1_dir,
-                prmtop=prmtop,
-                inpcrd=pres_0_dir / "pres_0.rst7",
-                pmemd_exec=pmemd_exec,
-                cutoff=cutoff,
-                pressure=pres,
-                temp0=temp, 
-                free_energy=True, clambda=clambda,
-                deffnm='pres_1',
-                **config['pres_1'],
-                **mask_config
-            )
-
-            pres_2_dir = lambda_dir / 'pres_2'
-            pressurize(
-                wdir=pres_2_dir,
-                prmtop=prmtop,
-                inpcrd=pres_1_dir / "pres_1.rst7",
-                pmemd_exec=pmemd_exec,
-                cutoff=cutoff,
-                pressure=pres,
-                temp0=temp, 
-                free_energy=True, clambda=clambda,
-                deffnm='pres_2',
-                **config['pres_2'],
+                deffnm='pres',
+                **config['pres'],
                 **mask_config
             )
 
@@ -482,8 +450,7 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
             pressurize(
                 wdir=pre_prod_dir,
                 prmtop=prmtop,
-                inpcrd=pres_2_dir / 'pres_2.rst7',
-                pmemd_exec=pmemd_exec,
+                inpcrd=pres_dir / 'pres.rst7',
                 cutoff=cutoff,
                 pressure=pres,
                 temp0=temp, 
@@ -501,7 +468,6 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
             wdir=prod_dir,
             prmtop=prmtop,
             inpcrd=prod_inpcrd,
-            pmemd_exec=pmemd_exec,
             cutoff=cutoff,
             pressure=pres,
             temp0=temp, 
@@ -515,21 +481,41 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
             **mask_config
         )
 
-    groupfile = []
-    str_template = "-O -p {prmtop} -c {inpcrd} -i {mdin} -o {mdout} -r {restart} -x {traj} -ref {ref} -e {mden} -l {mdlog} -inf {mdinfo}"
-    for i in range(len(lambdas)):
-        prev_stage = "heat" if gas_phase else "pre_prod"
-        groupfile.append(str_template.format(
-            prmtop=os.path.relpath(prmtop, wdir),
-            inpcrd=f"lambda{i}/{prev_stage}/{prev_stage}.rst7",
-            mdin=f"lambda{i}/prod/prod.in",
-            mdout=f"lambda{i}/prod/prod.out",
-            restart=f"lambda{i}/prod/prod.rst7",
-            traj=f"lambda{i}/prod/prod.mdcrd",
-            ref=f"lambda{i}/{prev_stage}/{prev_stage}.rst7",
-            mden=f"lambda{i}/prod/prod.mden",
-            mdlog=f"lambda{i}/prod/prod.log",
-            mdinfo=f"lambda{i}/prod/prod.info"
-        ))
-    with open(wdir / "prod.groupfile", 'w') as f:
-        f.write('\n'.join(groupfile))
+
+    if gas_phase:
+        stages = ['em', 'heat', 'prod']
+    else:
+        stages = ['em', 'heat', 'pres', 'pre_prod', 'prod']
+
+    
+    for si in range(1, len(stages)):
+        stage = stages[si]
+        prev_stage = stages[si-1]
+
+        groupfile = []
+        str_template = "-O -p {prmtop} -c {inpcrd} -i {mdin} -o {mdout} -r {restart} -x {traj} -ref {ref} -e {mden} -l {mdlog} -inf {mdinfo}"
+        for i in range(len(lambdas)):
+            groupfile.append(str_template.format(
+                prmtop=os.path.relpath(prmtop, wdir),
+                inpcrd=f"lambda{i}/{prev_stage}/{prev_stage}.rst7",
+                mdin=f"lambda{i}/{stage}/{stage}.in",
+                mdout=f"lambda{i}/{stage}/{stage}.out",
+                restart=f"lambda{i}/{stage}/{stage}.rst7",
+                traj=f"lambda{i}/{stage}/{stage}.mdcrd",
+                ref=f"lambda{i}/{prev_stage}/{prev_stage}.rst7",
+                mden=f"lambda{i}/{stage}/{stage}.mden",
+                mdlog=f"lambda{i}/{stage}/{stage}.log",
+                mdinfo=f"lambda{i}/{stage}/{stage}.info"
+            ))
+        with open(wdir / f"{stage}.groupfile", 'w') as f:
+            f.write('\n'.join(groupfile))
+    
+    with open(Path(__file__).parent / 'run.sh.template') as f:
+        script = f.read()
+    
+    script = script.replace('@NUM_LAMBDA', str(len(lambdas)))
+    script = script.replace('@STAGES', '({})'.format(' '.join(f'"{stage}"' for stage in stages)))
+    script = script.replace('@MD_EXEC', pmemd_exec(True, True))
+
+    with open(wdir / 'run.sh', 'w') as f:
+        f.write(script)

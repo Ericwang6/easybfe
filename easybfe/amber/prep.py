@@ -1,7 +1,7 @@
 import os
 import json
 from pathlib import Path
-from typing import Union, Dict, List, Tuple
+from typing import Union, Dict, List, Tuple, Any
 
 import numpy as np
 import openmm as mm
@@ -119,6 +119,20 @@ def generate_amber_mask(natomsA: int, natomsB: int, mapping: Dict[int, int]):
     return res
 
 
+def hydrogen_mass_repartition(struct: parmed.Structure, hydrogen_mass: float = 3.024, dowater: bool = False):
+    for residue in struct.residues:
+        if (not dowater) and (residue.name in ['WAT', 'HOH']):
+            continue
+        for atom in residue.atoms:
+            if atom.element != 1:
+                subtract_mass = 0
+                for nei in atom.bond_partners:
+                    if nei.element == 1:
+                        subtract_mass += hydrogen_mass - nei.mass
+                        nei.mass = hydrogen_mass
+                atom.mass -= subtract_mass
+
+
 def prep_ligand_rbfe_systems(
     protein_pdb: os.PathLike,
     ligandA_mol: Union[os.PathLike, Chem.Mol],
@@ -129,11 +143,9 @@ def prep_ligand_rbfe_systems(
     wdir: os.PathLike,
     protein_ff: str = 'ff14SB',
     water_ff: str = 'tip3p',
-    neuturalize: bool = True,
-    ionic_strength: float = 0.15 * unit.molar,
-    gas_buffer: float = 2.0 * unit.nanometers,
-    solvent_buffer: float = 1.2 * unit.nanometers,
-    complex_buffer: float = 1.5 * unit.nanometers,
+    gas_config: Dict[str, Any] = dict(),
+    solvent_config: Dict[str, Any] = dict(),
+    complex_config: Dict[str, Any] = dict()
 ):
     # Create working directory
     wdir = Path(wdir).resolve()
@@ -197,9 +209,13 @@ def prep_ligand_rbfe_systems(
     
     ff = app.ForceField(protein_ff_xml, water_ff_xml, ffxml_A, ffxml_B)
 
-    def _save(modeller, basename):
+    def _save(modeller, basename, do_hmr=True, hydrogen_mass=3.024, do_hmr_water=False, **kwargs):
         system = ff.createSystem(modeller.topology, nonbondedMethod=app.PME, constraints=None, rigidWater=False)
         tmp = parmed.openmm.load_topology(modeller.topology, system, xyz=modeller.positions)
+
+        # Hydrogen mass repartition
+        if do_hmr:
+            hydrogen_mass_repartition(tmp, hydrogen_mass, do_hmr_water)
         
         # Note: In AmberTools, TIP3P water will have 3 bonds, 0 angles. If not, pmemd will raise an error:
         # `Error: Fast 3-point water residue, name and bond data incorrect!` 
@@ -231,24 +247,28 @@ def prep_ligand_rbfe_systems(
     modeller.add(ligandB_struct.topology, ligandB_struct.positions)
     
     # Gas-Phase
+    gas_buffer = gas_config.get('buffer', 20.0) / 10 * unit.nanometers
     gasBoxVectors = computeBoxVectorsWithPadding(modeller.positions, gas_buffer)
     modeller.positions = shiftToBoxCenter(modeller.positions, gasBoxVectors)
     modeller.topology.setPeriodicBoxVectors(gasBoxVectors)
-    _save(modeller, 'gas')
+    _save(modeller, 'gas', **gas_config)
     
     # Solvent phase
+    solvent_buffer = solvent_config.get('buffer', 12.0) / 10 * unit.nanometers
     solventBoxVectors = computeBoxVectorsWithPadding(modeller.positions, solvent_buffer)
     modeller.positions = shiftToBoxCenter(modeller.positions, solventBoxVectors)
     modeller.topology.setPeriodicBoxVectors(solventBoxVectors)
     modeller.addSolvent(
         forcefield=ff,
         model=water_ff,
-        neutralize=neuturalize
+        neutralize=True,
+        ionicStrength=solvent_config.get('ionic_strength', 0.0) * unit.molar
     )
-    _save(modeller, 'solvent')
+    _save(modeller, 'solvent', **solvent_config)
 
     # Complex-phase
     if protein_pdb is not None:
+        complex_buffer = complex_config.get('buffer', 15.0) / 10 * unit.nanometers
         pdb = app.PDBFile(str(protein_pdb))
         modeller = app.Modeller(app.Topology(), [])
         modeller.add(ligandA_struct.topology, ligandA_struct.positions)
@@ -260,7 +280,7 @@ def prep_ligand_rbfe_systems(
         modeller.addSolvent(
             forcefield=ff,
             model=water_ff,
-            ionicStrength=ionic_strength,
-            neutralize=neuturalize
+            ionicStrength=solvent_config.get('ionic_strength', 0.15) * unit.molar,
+            neutralize=True
         )
-        _save(modeller, 'complex')
+        _save(modeller, 'complex', **complex_config)
