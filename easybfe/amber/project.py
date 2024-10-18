@@ -79,9 +79,13 @@ class AmberRbfeProject:
     
     @property
     def ligands(self):
-        _list = os.listdir(self.ligands_dir)
-        _list.sort()
-        return _list
+        results = defaultdict(list)
+        for dirname in self.ligands_dir.glob('*/*'):
+            if not Path.is_dir(dirname) or dirname.name.startswith('.'):
+                continue
+            results[dirname.parent.name].append(dirname.name)
+        return results
+
     
     @property
     def perturbations(self) -> Dict[str, List[str]]:
@@ -91,7 +95,21 @@ class AmberRbfeProject:
                 continue
             results[pert_dir.parent.name].append(pert_dir.name)
         return results
-            
+
+    def gather_ligands_info(self):
+        """
+        Gather Ligands info
+        """
+        import pandas as pd
+        infos = []
+        for protein_name in self.ligands:
+            for ligand_name in self.ligands[protein_name]:
+                with open(self.ligands_dir / protein_name / ligand_name / 'info.json') as f:
+                    info = json.load(f)
+                infos.append(info)
+        df = pd.DataFrame(infos)
+        return df
+
     def add_ligand(
         self, 
         mol, 
@@ -106,6 +124,7 @@ class AmberRbfeProject:
         """
         Add ligand
         """
+        import numpy as np
         from rdkit import Chem
         from rdkit.Chem import AllChem, Draw, Descriptors, Crippen, Lipinski
 
@@ -125,7 +144,6 @@ class AmberRbfeProject:
                 raise NotImplementedError(f"Unsupported ligand input format: {suffix}")
 
         if name is None:
-            print(mol.GetPropsAsDict())
             name = mol.GetProp('_Name')
             assert name is not None, "Must provide a name"
 
@@ -168,8 +186,8 @@ class AmberRbfeProject:
         else:
             info['dG.expt'] = None
          
-        self.logger.info(f'Ligand {name} is added to : {lig_file}')
         if parametrize:
+            self.logger.info(f"Parametrizing: {lig_file}")
             ff_name = self.parametrize_ligand(name, protein_name, forcefield, charge_method, overwrite)
             info.update({
                 "forcefield": ff_name, 
@@ -178,11 +196,12 @@ class AmberRbfeProject:
 
         with open(lig_dir / 'info.json', 'w') as f:
             json.dump(info, f, indent=4)
+        self.logger.info(f'Ligand {name} is added to : {lig_file}')
         return True
 
     def add_ligands(
         self, 
-        sdf: os.PathLike,
+        mols,
         num_workers: int = 1,
         **kwargs
     ):
@@ -192,26 +211,51 @@ class AmberRbfeProject:
         import tempfile
         from rdkit import Chem
 
-        mols = [m for m in Chem.SDMolSupplier(sdf, removeHs=False)]
+        if isinstance(mols, list) and all(isinstance(m, Chem.Mol) for m in mols):
+            pass
+        elif isinstance(mols, list) and all(isinstance(m, str) or isinstance(m, Path) for m in mols):
+            mols = [str(m) for m in mols]
+        elif os.path.isfile(str(mols)):
+            self.logger.info(f"Reading molecules from {mols}")
+            if Path(mols).suffix == '.sdf':
+                mols = [m for m in Chem.SDMolSupplier(mols, removeHs=False)]
+        elif isinstance(mols, str):
+            mols = list(glob.glob(mols))
+            mols.sort()
+            self.logger.info("Molecules in these files will be added:\n" + "\n".join(mols))
+        else:
+            raise TypeError("Invalid input")
+        
+        assert len(mols) > 0, "No molecules found."
+        if isinstance(mols[0], Chem.Mol):
+            tmpdir = tempfile.mkdtemp()
+            tmps = []
+            for m in mols:
+                tmpfile = os.path.join(tmpdir, f'{m.GetProp("_Name")}.sdf')
+                with Chem.SDWriter(tmpfile) as w:
+                    w.write(m)
+                tmps.append(tmpfile)
+            mols = tmps
+        
         if len(mols) == 1:
+            # If only one molecule, user can input a name, otherwise default names will be used
             self.add_ligand(sdf, **kwargs)
         else:
+            # Names cannot be the same
+            names = [Path(m).stem for m in mols]
+            for name in names:
+                if names.count(name) > 1:
+                    raise RuntimeError(f"Duplicated ligand: {name}")
             kwargs.pop('name')
+            # Add ligand
             if num_workers == 1:
                 for mol in mols:
                     self.add_ligand(mol, None, **kwargs)
             else:
-                # Here multiprocessing will clear all properties in the molecule (idk why)
-                tmpdir = tempfile.mkdtemp()
-                tmps = []
-                for m in mols:
-                    tmpfile = os.path.join(tmpdir, f'{m.GetProp("_Name")}.sdf')
-                    with Chem.SDWriter(tmpfile) as w:
-                        w.write(m)
-                    tmps.append(tmpfile)
+                # Here multiprocessing will clear all properties in the molecule (idk why), so files are used
                 func = partial(self.add_ligand, **kwargs)
                 with mp.Pool(num_workers) as pool:
-                    pool.map(func, tmps)
+                    pool.map(func, mols)
            
     def parametrize_ligand(self, name: str, protein_name: str, forcefield: str = 'gaff2', charge_method: str = 'bcc', overwrite: bool = False):
         from ..smff import GAFF, OpenFF, CustomForceField, SmallMoleculeForceField

@@ -44,13 +44,13 @@ def parse_args(args: Sequence[str] | None = None):
         help='Name of the protein that the added ligand(s) belong to'
     )
     add_ligands_parser.add_argument(
-        '--forcefield',
+        '-f', '--forcefield',
         dest='forcefield',
         default='bcc',
         help='Ligand forcefield. Valid options: "gaff", "gaff2" (acpype supported) and "openff-*" series (openff supported). When adding only one ligand, users can also specify a .prmtop/.top file as a customized forcefield for the ligand. Default is "gaff2"'
     )
     add_ligands_parser.add_argument(
-        '--charge',
+        '-c', '--charge',
         dest='charge_method',
         help='Charge method. Valid options: "bcc" (default, am1-bcc model), "gas" (gasteiger model, inaccurate, never use it in production)'
     )
@@ -76,7 +76,7 @@ def parse_args(args: Sequence[str] | None = None):
     add_ligands_parser.add_argument(
         '--expt',
         dest='expt',
-        help='Experimental binding affinity of this ligand, in kcal/mol'
+        help='Experimental binding affinity of this ligand, in kcal/mol. Only valid when adding only one molecule, otherwise the binding affinity will be read from <dG.expt> or <affinity.expt> property.'
     )
 
     # Add protein
@@ -224,7 +224,7 @@ def main():
             project.analyze_pert(args.protein_name, args.pert_name, args.skip_traj)
     elif args.command == 'add_ligand':
         project.add_ligands(
-            sdf=args.input,
+            args.input,
             num_workers=args.num_workers,
             protein_name=args.protein_name,
             name=args.name,
@@ -238,7 +238,8 @@ def main():
         project.add_protein(
             fpath=args.input,
             name=args.name,
-            check_ff=args.check_ff
+            check_ff=args.check_ff,
+            overwrite=args.overwrite
         )
     elif args.command == 'add_perturbation':
         kwargs = {
