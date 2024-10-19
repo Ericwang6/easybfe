@@ -29,11 +29,23 @@
         "em": {
             "num_steps": 5000, "step_size": 0.01, "ofreq": 500
         },
-        "heat": {
-            "num_steps": 24000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0, "tempi": 5.0
+        "heat_0": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
         },
-        "pres": {
-            "num_steps": 12500, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        "pres_0": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "heat_1": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "pres_1": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "heat_2": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "pres_2": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
         },
         "pre_prod": {
             "num_steps": 125000, "dt": 0.004, "ofreq": 5000, "restraint_wt": 0.0
@@ -59,11 +71,23 @@
         "em": {
             "num_steps": 5000, "step_size": 0.01, "ofreq": 500
         },
-        "heat": {
-            "num_steps": 24000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0, "tempi": 5.0
+        "heat_0": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
         },
-        "pres": {
-            "num_steps": 12500, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        "pres_0": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "heat_1": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "pres_1": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "heat_2": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "pres_2": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
         },
         "pre_prod": {
             "num_steps": 125000, "dt": 0.004, "ofreq": 5000, "restraint_wt": 0.0

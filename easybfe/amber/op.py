@@ -93,7 +93,6 @@ def em(
     ofreq = int(num_steps // 10) if ofreq is None else ofreq
     
     if free_energy:
-        _fe_var_check(noshakemask, "noshakemask")
         _fe_var_check(timask1, "timask1")
         _fe_var_check(timask2, "timask2")
         _fe_var_check(scmask1, "scmask1")
@@ -112,7 +111,7 @@ def em(
         ifsc=ifsc, icfe=icfe,
         clambda=clambda,
         gti_cut_sc_on=cutoff - 2.0, gti_cut_sc_off=cutoff,
-        noshakemask=noshakemask, timask1=timask1, timask2=timask2,
+        timask1=timask1, timask2=timask2,
         scmask1=scmask1, scmask2=scmask2,
         ntb=ntb, step_size=step_size
     )
@@ -149,7 +148,8 @@ def heat(
     scmask1: str = "",
     scmask2: str = "",
     deffnm: str = 'heat',
-    use_periodic: bool = True
+    use_periodic: bool = True,
+    restart: bool = False
 ):
     """
     Heating the system (NVT equilibrium)
@@ -163,7 +163,6 @@ def heat(
     ofreq = int(num_steps // 10) if ofreq is None else ofreq
     
     if free_energy:
-        _fe_var_check(noshakemask, "noshakemask")
         _fe_var_check(timask1, "timask1")
         _fe_var_check(timask2, "timask2")
         _fe_var_check(scmask1, "scmask1")
@@ -179,6 +178,11 @@ def heat(
     ntb = 1 if use_periodic else 0
     iwrap = 1 if use_periodic else 0
 
+    if restart:
+        ntx, irest = 5, 1
+    else:
+        ntx, irest = 1, 0
+
     inpstr = template.format(
         nstlim=num_steps, ofreq=ofreq, dt=dt,
         ntr=ntr, restraint_wt=restraint_wt,
@@ -187,11 +191,12 @@ def heat(
         clambda=clambda,
         gti_cut_sc_on=cutoff - 2.0, gti_cut_sc_off=cutoff,
         ntf=ntf,
-        noshakemask=noshakemask, timask1=timask1, timask2=timask2,
+        timask1=timask1, timask2=timask2,
         scmask1=scmask1, scmask2=scmask2,
         ntb=ntb, iwrap=iwrap,
         heating_schedule='\n'.join(create_heating_schedule(num_steps, temp0, tempi)),
-        temp0=temp0, tempi=tempi
+        temp0=temp0, tempi=tempi,
+        ntx=ntx, irest=irest
     )
     with open(wdir / f'{deffnm}.in', 'w') as f:
         f.write(inpstr)
@@ -240,7 +245,6 @@ def pressurize(
     ofreq = int(num_steps // 10) if ofreq is None else ofreq
     
     if free_energy:
-        _fe_var_check(noshakemask, "noshakemask")
         _fe_var_check(timask1, "timask1")
         _fe_var_check(timask2, "timask2")
         _fe_var_check(scmask1, "scmask1")
@@ -267,7 +271,7 @@ def pressurize(
         gti_cut_sc_on=cutoff - 2.0, gti_cut_sc_off=cutoff,
         ntf=ntf,
         pres0=pressure,
-        noshakemask=noshakemask, timask1=timask1, timask2=timask2,
+        timask1=timask1, timask2=timask2,
         scmask1=scmask1, scmask2=scmask2,
         ntb=ntb, iwrap=iwrap, ntp=ntp
     )
@@ -324,7 +328,6 @@ def prod(
     ofreq = int(num_steps // 10) if ofreq is None else ofreq
     
     if free_energy:
-        _fe_var_check(noshakemask, "noshakemask")
         _fe_var_check(timask1, "timask1")
         _fe_var_check(timask2, "timask2")
         _fe_var_check(scmask1, "scmask1")
@@ -381,7 +384,7 @@ def prod(
         gti_cut_sc_on=cutoff - 2.0, gti_cut_sc_off=cutoff,
         ntf=ntf,
         pres0=pressure,
-        noshakemask=noshakemask, timask1=timask1, timask2=timask2,
+        timask1=timask1, timask2=timask2,
         scmask1=scmask1, scmask2=scmask2,
         remd_setting=remd_setting, mbar_setting=mbar_setting,
         efreq=efreq,
@@ -410,7 +413,7 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
     prmtop = Path(config['prmtop']).resolve()
 
     mask_config = {
-        key: config[key] for key in ['noshakemask', 'timask1', 'timask2', 'scmask1', 'scmask2']
+        key: config[key] for key in ['timask1', 'timask2', 'scmask1', 'scmask2']
     }
 
     wdir = Path(wdir).resolve()
@@ -444,39 +447,52 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
             **mask_config,
         )
 
-        heat_dir = lambda_dir / 'heat'
-        heat(
-            wdir=heat_dir,
-            prmtop=prmtop,
-            inpcrd=em_dir / "em.rst7",
-            cutoff=cutoff,
-            temp0=temp, 
-            free_energy=True,
-            clambda=clambda,
-            **config['heat'],
-            **mask_config
-        )
-
+        tempi_list = [5.0, 100.0, 200.0]
+        temp0_list = [100.0, 200.0, temp]
         if not gas_phase:
-            pres_dir = lambda_dir / 'pres'
-            pressurize(
-                wdir=pres_dir,
-                prmtop=prmtop,
-                inpcrd=heat_dir / "heat.rst7",
-                cutoff=cutoff,
-                pressure=pres,
-                temp0=temp, 
-                free_energy=True, clambda=clambda,
-                deffnm='pres',
-                **config['pres'],
-                **mask_config
-            )
+            for i in range(3):
+                heat_dir = lambda_dir / f'heat_{i}'
+                if i == 0:
+                    restart = False
+                    heat_inpcrd = em_dir / 'em.rst7' 
+                else:
+                    restart = True
+                    heat_inpcrd = lambda_dir / f'pres_{i-1}/pres_{i-1}.rst7'
+                
+                heat(
+                    wdir=heat_dir,
+                    prmtop=prmtop,
+                    inpcrd=heat_inpcrd,
+                    cutoff=cutoff,
+                    temp0=temp0_list[i],
+                    tempi=tempi_list[i],
+                    free_energy=True,
+                    clambda=clambda,
+                    restart=restart,
+                    deffnm=f'heat_{i}',
+                    **config[f'heat_{i}'],
+                    **mask_config
+                )
+
+                pres_dir = lambda_dir / f'pres_{i}'
+                pressurize(
+                    wdir=pres_dir,
+                    prmtop=prmtop,
+                    inpcrd=heat_dir / f"heat_{i}.rst7",
+                    cutoff=cutoff,
+                    pressure=pres,
+                    temp0=temp0_list[i], 
+                    free_energy=True, clambda=clambda,
+                    deffnm=f'pres_{i}',
+                    **config[f'pres_{i}'],
+                    **mask_config
+                )
 
             pre_prod_dir = lambda_dir / "pre_prod"
             pressurize(
                 wdir=pre_prod_dir,
                 prmtop=prmtop,
-                inpcrd=pres_dir / 'pres.rst7',
+                inpcrd=lambda_dir / 'pres_2/pres_2.rst7',
                 cutoff=cutoff,
                 pressure=pres,
                 temp0=temp, 
@@ -485,8 +501,23 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
                 **config['pre_prod'],
                 **mask_config
             )
+
             prod_inpcrd = pre_prod_dir / 'pre_prod.rst7'
         else:
+            heat_dir = lambda_dir / 'heat'
+            heat(
+                wdir=heat_dir,
+                prmtop=prmtop,
+                inpcrd=lambda_dir / 'em/em.rst7',
+                cutoff=cutoff,
+                temp0=temp, 
+                free_energy=True,
+                clambda=clambda,
+                restart=False,
+                deffnm='heat',
+                **config['heat'],
+                **mask_config
+            )
             prod_inpcrd = heat_dir / 'heat.rst7'
 
         prod_dir = lambda_dir / "prod"
@@ -511,7 +542,7 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
     if gas_phase:
         stages = ['em', 'heat', 'prod']
     else:
-        stages = ['em', 'heat', 'pres', 'pre_prod', 'prod']
+        stages = ['em', 'heat_0', 'pres_0', 'heat_1', 'pres_1', 'heat_2', 'pres_2', 'pre_prod', 'prod']
 
     
     for si in range(1, len(stages)):

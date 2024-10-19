@@ -40,8 +40,6 @@ restraint_wt    = {restraint_wt}
 ifsc            = {ifsc}
 icfe            = {icfe}
 
-!noshakemask     = {noshakemask}
-
 clambda         = {clambda}
 timask1         = {timask1}
 timask2         = {timask2}

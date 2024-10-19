@@ -1,6 +1,6 @@
 &cntrl
-ntx             = 1,          ! 1 - start from scratch; 5 - start from a restart file
-irest           = 0,          ! 0 - start from scratch; 1 - restart
+ntx             = {ntx},          ! 1 - start from scratch; 5 - start from a restart file
+irest           = {irest},          ! 0 - start from scratch; 1 - restart
 
 nstlim          = {nstlim},      ! Number of steps
 dt              = {dt},      ! Time step (in ps)
@@ -32,8 +32,6 @@ restraint_wt    = {restraint_wt}
 
 ifsc            = {ifsc}
 icfe            = {icfe}
-
-!noshakemask     = {noshakemask}
 
 clambda         = {clambda}
 timask1         = {timask1}
