@@ -496,7 +496,7 @@ class AmberRbfeProject:
             self.logger.info(f"FEP simulation workflow is set for leg: {leg}. Config file written to: {leg_dir / 'config.json'}")
 
             with open(leg_dir / 'run.slurm', 'w') as f:
-                f.write('#/bin/bash\n')
+                f.write('#!/bin/bash\n')
                 f.write('\n'.join(config.get('header', [])))
                 f.write('\n')
                 f.write('source run.sh')

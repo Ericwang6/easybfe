@@ -14,8 +14,7 @@ do
   echo "Running em for lambda ${n}"
   source em.sh > em.stdout 2>&1
   if [ $? -ne 0 ]; then
-    touch ../../error.tag
-    echo "Error occurs!"
+    mv ../../running.tag  ../../error.tag && echo "Error occurs!"
     exit 1
   fi
   cd ../..
@@ -26,26 +25,24 @@ done
 length=${#stages[@]}
 
 for ((i=1; i<$length-1; i++)); do
+    stage=${stages[$i]}
     echo "Running ${stage}..."
     mpirun -np $num_lambda ${MD_EXEC} -ng $num_lambda -groupfile ${stage}.groupfile
     if [ $? -ne 0 ]; then
-      touch error.tag
-      echo "Error occurs!"
+      mv running.tag error.tag && echo "Error occurs!"
       exit 1
   fi
 done
 
 # Production
-prod_stage=${my_list[$length-1]}
+prod_stage=${stages[$length-1]}
 echo "Running ${prod_stage}..."
 mpirun -np $num_lambda ${MD_EXEC} -rem 3 -ng $num_lambda -groupfile ${prod_stage}.groupfile -remlog ${prod_stage}.log
 
 if [ $? -eq 0 ]; then
-  rm running.tag
-  touch done.tag
+  mv running.tag done.tag
 else
-  touch error.tag
-  echo "Error occurs!"
+  mv running.tag error.tag && echo "Error occurs!"
   exit 1
 fi
 

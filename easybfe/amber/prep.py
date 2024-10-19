@@ -219,7 +219,6 @@ def prep_ligand_rbfe_systems(
         
         # Note: In AmberTools, TIP3P water will have 3 bonds, 0 angles. If not, pmemd will raise an error:
         # `Error: Fast 3-point water residue, name and bond data incorrect!` 
-        hhtype = parmed.BondType(k=553.000, req=1.514)
         for residue in tmp.residues:
             # Amber uses WAT to identify SETTLE for waters
             if residue.name == 'HOH':
@@ -227,6 +226,8 @@ def prep_ligand_rbfe_systems(
             if residue.name != 'HOH' and residue.name != 'WAT':
                 continue
             atom_dict = {atom.name: atom for atom in residue.atoms}
+            hhtype = parmed.BondType(k=553.000, req=1.514, list=tmp.bond_types)
+            tmp.bond_types.append(hhtype)
             hh_bond = parmed.Bond(atom_dict['H1'], atom_dict['H2'], hhtype)
             tmp.bonds.append(hh_bond)
         

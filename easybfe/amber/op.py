@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 from typing import Dict, Optional, Any, List
 import json
+import math
+
 
 run_sh = '''
 prmtop="{prmtop}"
@@ -34,6 +36,30 @@ def pmemd_exec(use_cuda: bool = True, use_mpi: bool = False):
 
 def pmemd_command(pmemed_exec, prmtop, inpcrd, deffnm):
     return run_sh.format(prmtop=prmtop, inpcrd=inpcrd, deffnm=deffnm, pmemd_exec=pmemed_exec)
+
+
+def create_heating_schedule(nsteps: int, final_temp: float = 298.15, init_temp: float = 5.0):
+    start = math.ceil(init_temp / 100)
+    end = math.ceil(final_temp / 100)
+
+    schedule = [init_temp]
+    for i in range(start, end):
+        schedule.append(i * 100)
+    schedule.append(final_temp)
+
+    nsteps_stage = math.floor(nsteps /(len(schedule) - 1) / 2)
+
+    lines = []
+    for i in range(len(schedule) - 1):
+        lines.append(
+            f'&wt TYPE="TEMP0", istep1 = {i * 2 * nsteps_stage + 1}, istep2 = {(i * 2 + 1) * nsteps_stage}, value1 = {schedule[i]}, value2 = {schedule[i+1]}, /'
+        )
+        lines.append(
+            f'&wt TYPE="TEMP0", istep1 = {(i * 2 + 1) * nsteps_stage + 1}, istep2 = {(i + 1) * 2 * nsteps_stage}, value1 = {schedule[i+1]}, value2 = {schedule[i+1]}, /'
+        )
+    lines.append('&wt TYPE="END", /')
+
+    return lines
 
 
 def em(
@@ -157,15 +183,15 @@ def heat(
         nstlim=num_steps, ofreq=ofreq, dt=dt,
         ntr=ntr, restraint_wt=restraint_wt,
         cut=cutoff, 
-        temp0=temp0, tempi=tempi,
         ifsc=ifsc, icfe=icfe,
         clambda=clambda,
         gti_cut_sc_on=cutoff - 2.0, gti_cut_sc_off=cutoff,
-        istep2=int(num_steps // 2),
         ntf=ntf,
         noshakemask=noshakemask, timask1=timask1, timask2=timask2,
         scmask1=scmask1, scmask2=scmask2,
-        ntb=ntb, iwrap=iwrap
+        ntb=ntb, iwrap=iwrap,
+        heating_schedule='\n'.join(create_heating_schedule(num_steps, temp0, tempi)),
+        temp0=temp0, tempi=tempi
     )
     with open(wdir / f'{deffnm}.in', 'w') as f:
         f.write(inpstr)
@@ -305,7 +331,7 @@ def prod(
         _fe_var_check(scmask2, "scmask2")
         _fe_var_check(clambda, 'clambda')
         ifsc, icfe = 1, 1
-        ntf = 2
+        ntf = 1
     else:
         ifsc, icfe = 0, 0
         ntf = 2

@@ -13,13 +13,13 @@ ntb             = {ntb},          ! Constant volume
 cut             = {cut},       ! Non-bonded cutoff
 
 ntr             = 0 
-restraintmask   = '!:WAT,Cl-,K+,Na+ & !@H='
+restraintmask   = '!:WAT,Cl-,K+,Na+,NA,CL & !@H='
 restraint_wt    = 5 
 
 ifsc            = {ifsc}
 icfe            = {icfe}
 
-noshakemask     = {noshakemask}
+!noshakemask     = {noshakemask}
 
 clambda         = {clambda}
 timask1         = {timask1}

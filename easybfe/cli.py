@@ -132,7 +132,7 @@ def parse_args(args: Sequence[str] | None = None):
     )
     add_pert_parser.add_argument(
         '-n', '--name',
-        dest='name',
+        dest='pert_name',
         help='Name of the perturbation. Default will be `ligandA`~`ligandB`'
     )
     add_pert_parser.add_argument(
@@ -255,7 +255,7 @@ def main():
         
         if args.list is None:
             project.add_perturbation(
-                args.ligandA, args.ligandB, args.protein_name, args.pert_name,
+                args.ligandA_name, args.ligandB_name, args.protein_name, args.pert_name,
                 **kwargs
             )
         else:

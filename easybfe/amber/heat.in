@@ -20,7 +20,6 @@ tempi           = {tempi},       ! Initial temperature
 
 ntc             = 2,         ! SHAKE
 ntf             = {ntf},     ! SHAKE
-tol             = 0.0005,    ! Constraint tolerance
 
 nmropt          = 1,         ! Enable varying temperatures
 
@@ -28,13 +27,13 @@ cut             = {cut},       ! Non-bonded cutoff
 
 ! Restraint
 ntr             = {ntr}
-restraintmask   = '!:WAT,Cl-,K+,Na+ & !@H='
+restraintmask   = '!:WAT,Cl-,K+,Na+,NA,CL & !@H='
 restraint_wt    = {restraint_wt}
 
 ifsc            = {ifsc}
 icfe            = {icfe}
 
-noshakemask     = {noshakemask}
+!noshakemask     = {noshakemask}
 
 clambda         = {clambda}
 timask1         = {timask1}
@@ -62,5 +61,4 @@ gti_syn_mass    = 0
 &ewald
 /
 
-&wt TYPE="TEMP0", istep1 = 0, istep2 = {istep2}, value1 = {tempi}, value2 = {temp0}, /
-&wt TYPE="END", /
+{heating_schedule}

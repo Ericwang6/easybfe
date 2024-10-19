@@ -25,7 +25,6 @@ taup            = 5.0,       ! Pressure relaxation time
     
 ntc             = 2,         ! SHAKE
 ntf             = {ntf},         ! SHAKE
-tol             = 0.0005,    ! Constraint tolerance
 
 nmropt          = 0,          ! Enable varying temperatures
 
@@ -33,13 +32,13 @@ cut             = {cut},        ! Non-bonded cutoff
 
 ! Restraint
 ntr             = {ntr}
-restraintmask   = '!:WAT,Cl-,K+,Na+ & !@H='
+restraintmask   = '!:WAT,Cl-,K+,Na+,NA,CL & !@H='
 restraint_wt    = {restraint_wt}
 
 ifsc            = {ifsc}
 icfe            = {icfe}
 
-noshakemask     = {noshakemask}
+!noshakemask     = {noshakemask}
 
 clambda         = {clambda}
 timask1         = {timask1}

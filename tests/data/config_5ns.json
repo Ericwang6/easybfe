@@ -8,7 +8,7 @@
         "#SBATCH --gres=gpu:A40:2",
         "#SBATCH --mem=16G",
         "#SBATCH --time=24:0:0",
-        "#SBATCH --exclude=n0052.es1",
+        "#SBATCH --exclude=n0052.es1,n0058.es1",
         "",
         "source /global/home/users/ericwangyz/env/amber22.env",
         "echo \"Allocated GPU IDs: $CUDA_VISIBLE_DEVICES on $(hostname)\""
@@ -30,13 +30,13 @@
             "num_steps": 5000, "step_size": 0.01, "ofreq": 500
         },
         "heat": {
-            "num_steps": 50000, "dt": 0.001, "ofreq": 5000, "restraint_wt": 5.0, "tempi": 0.0
+            "num_steps": 24000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0, "tempi": 5.0
         },
         "pres": {
-            "num_steps": 5000, "dt": 0.002, "ofreq": 500, "restraint_wt": 5.0
+            "num_steps": 12500, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
         },
         "pre_prod": {
-            "num_steps": 100000, "dt": 0.004, "ofreq": 5000, "restraint_wt": 0.0
+            "num_steps": 125000, "dt": 0.004, "ofreq": 5000, "restraint_wt": 0.0
         },
         "prod": {
             "num_steps": 250, "dt": 0.004, "numexchg": 5000, "ofreq": 25000
@@ -60,16 +60,16 @@
             "num_steps": 5000, "step_size": 0.01, "ofreq": 500
         },
         "heat": {
-            "num_steps": 50000, "dt": 0.001, "ofreq": 5000, "restraint_wt": 5.0, "tempi": 0.0
+            "num_steps": 24000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0, "tempi": 5.0
         },
         "pres": {
-            "num_steps": 5000, "dt": 0.001, "ofreq": 500, "restraint_wt": 5.0
+            "num_steps": 12500, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
         },
         "pre_prod": {
-            "num_steps": 100000, "dt": 0.001, "ofreq": 5000, "restraint_wt": 0.0
+            "num_steps": 125000, "dt": 0.004, "ofreq": 5000, "restraint_wt": 0.0
         },
         "prod": {
-            "num_steps": 250, "dt": 0.002, "numexchg": 5000, "ofreq": 25000
+            "num_steps": 250, "dt": 0.004, "numexchg": 5000, "ofreq": 25000
         }
     },
     "gas": {
@@ -89,7 +89,7 @@
             "num_steps": 5000, "step_size": 0.01, "ofreq": 500
         },
         "heat": {
-            "num_steps": 50000, "dt": 0.001, "ofreq": 5000, "restraint_wt": 5.0, "tempi": 0.0
+            "num_steps": 12000, "dt": 0.004, "ofreq": 5000, "restraint_wt": 5.0, "tempi": 5.0
         },
         "prod": {
             "num_steps": 250, "dt": 0.004, "numexchg": 1000, "ofreq": 25000
