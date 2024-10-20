@@ -19,6 +19,8 @@ restraint_wt    = 5
 ifsc            = {ifsc}
 icfe            = {icfe}
 
+tishake = 0
+
 clambda         = {clambda}
 timask1         = {timask1}
 timask2         = {timask2}
@@ -29,7 +31,7 @@ scbeta          = 1.0
 
 gti_cut         = 1
 gti_output      = 1
-gti_add_sc      = 5
+gti_add_sc      = 25
 gti_scale_beta  = 1
 gti_cut_sc_on   = {gti_cut_sc_on}
 gti_cut_sc_off  = {gti_cut_sc_off}

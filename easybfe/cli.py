@@ -200,10 +200,10 @@ def parse_args(args: Sequence[str] | None = None):
         help="Skip analyzing simulation trajectories"
     )
     ana_parser.add_argument(
-        '--interactive',
-        dest='interactive',
-        action='store_true',
-        help='Use interactive mode'
+        '-m', '--num_workers',
+        dest='num_workers',
+        default=1,
+        help="Number of processes to run the analysis in parallel"
     )
     
     args = parser.parse_args(args)
@@ -219,10 +219,10 @@ def main():
         
     project = AmberRbfeProject(args.directory, init=(args.command == 'init'))
     if args.command == 'analyze':
-        if args.interactive:
-            project.analyze(interactive=True)
-        else:
+        if args.protein_name and args.pert_name:
             project.analyze_pert(args.protein_name, args.pert_name, args.skip_traj)
+        else:
+            project.analyze(num_workers=args.num_workers, skip_traj=self.skip_traj)
     elif args.command == 'add_ligand':
         project.add_ligands(
             args.input,

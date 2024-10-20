@@ -546,7 +546,7 @@ class AmberRbfeProject:
                 status[leg] = SimulationStatus.FINISHED
             elif Path.is_file(pert_dir / leg / 'error.tag'):
                 status[leg] = SimulationStatus.ERROR
-            elif Path.is_file(pert_dir / leg / 'eq.tag') or Path.is_file(pert_dir / leg / 'prod.tag'):
+            elif Path.is_file(pert_dir / leg / 'running.tag'):
                 status[leg]= SimulationStatus.RUNNING
             else:
                 status[leg] = SimulationStatus.NOTSTART
@@ -586,21 +586,18 @@ class AmberRbfeProject:
         if not skip_traj:
             self.process_traj(protein_name, pert_name)
     
-    def analyze(self, interactive=True):
+    def analyze(self, num_workers: int = 1, skip_traj: bool = False):
         info_df = self.gather_perturbations_info()
         query_str = '~`analysis.finished` & `solvent.status` == "{}" & `complex.status` == "{}"'.format(
             SimulationStatus.FINISHED.name, SimulationStatus.FINISHED.name
         )
         ana_df = info_df.query(query_str)
-        print('Found these perturbations needs analysis:')
-        print(ana_df[['protein_name', 'ligandA_name', 'ligandB_name', 'ddG.expt']])
-        if interactive:
-            start = input('Enter y to start: ') == 'y'
-        else:
-            start = True
-        if start:
-            for _, row in ana_df.iterrows():
-                self.analyze_pert(row['protein_name'], row['pert_name'])
+        print_df = ana_df[['protein_name', 'ligandA_name', 'ligandB_name', 'ddG.expt']]
+        self.logger.info(f"Found these perturbations needs analysis:\n{ana_df}")
+
+        args = [(row['protein_name'], row['pert_name'], skip_traj) for _, row in ana_df.iterrows()]
+        with mp.Pool(num_workers) as pool:
+            pool.starmap(self.analyze_pert, args)
 
     def evaluate_free_energy(self, protein_name: str, pert_name: str):
         """
@@ -720,7 +717,8 @@ class AmberRbfeProject:
             for lmd, resid in zip([0, num_lambdas - 1], [1, 2]):
 
                 # prmtop = os.path.join(perturb_dir, f'prep/{leg}_solvated.prmtop')
-                in_top = os.path.join(perturb_dir, f'{leg}/lambda{lmd}/prod/prod.pdb')
+                # in_top = os.path.join(perturb_dir, f'{leg}/lambda{lmd}/prod/prod.pdb')
+                in_top = os.path.join(perturb_dir / f'prep/{leg}.pdb')
                 in_trj = os.path.join(perturb_dir, f'{leg}/lambda{lmd}/prod/prod.mdcrd')
 
                 out_pdb = os.path.join(perturb_dir, f'{leg}/lambda{lmd}/prod/prod_traj.pdb')

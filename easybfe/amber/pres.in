@@ -46,9 +46,11 @@ scmask2         = {scmask2}
 scalpha         = 0.5
 scbeta          = 1.0
 
+tishake = 0
+
 gti_cut         = 1
 gti_output      = 1
-gti_add_sc      = 5
+gti_add_sc      = 25
 gti_scale_beta  = 1
 gti_cut_sc_on   = {gti_cut_sc_on}
 gti_cut_sc_off  = {gti_cut_sc_off}
