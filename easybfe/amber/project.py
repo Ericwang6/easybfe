@@ -104,10 +104,15 @@ class AmberRbfeProject:
         infos = []
         for protein_name in self.ligands:
             for ligand_name in self.ligands[protein_name]:
-                with open(self.ligands_dir / protein_name / ligand_name / 'info.json') as f:
+                info_json = self.ligands_dir / protein_name / ligand_name / 'info.json'
+                if not info_json.is_file():
+                    self.logger.warning(f"Information for ligand {ligand_name} with protein {protein_name} is not complete.")
+                    continue
+                with open(info_json) as f:
                     info = json.load(f)
                 infos.append(info)
         df = pd.DataFrame(infos)
+        df = df.sort_values(by=['protein', 'name'])
         return df
 
     def add_ligand(
@@ -239,7 +244,7 @@ class AmberRbfeProject:
         
         if len(mols) == 1:
             # If only one molecule, user can input a name, otherwise default names will be used
-            self.add_ligand(sdf, **kwargs)
+            self.add_ligand(mols[0], **kwargs)
         else:
             # Names cannot be the same
             names = [Path(m).stem for m in mols]
@@ -571,6 +576,7 @@ class AmberRbfeProject:
     
     def gather_perturbations_info(self):
         '''Gather data of all perturbations'''
+        import numpy as np
         import pandas as pd
 
         infos = []
@@ -579,6 +585,8 @@ class AmberRbfeProject:
                 info = self.query_perturbation_info(self.rbfe_dir / protein_name / pert_name)
                 infos.append(info)
         df = pd.DataFrame(infos)
+        df['error'] = np.abs(df['ddG.expt'] - df['ddG.total'])
+        df = df.sort_values(by=['protein_name', 'ligandA_name', 'ligandB_name'])
         return df
     
     def analyze_pert(self, protein_name: str, pert_name: str, skip_traj: bool = False):
@@ -598,6 +606,69 @@ class AmberRbfeProject:
         args = [(row['protein_name'], row['pert_name'], skip_traj) for _, row in ana_df.iterrows()]
         with mp.Pool(num_workers) as pool:
             pool.starmap(self.analyze_pert, args)
+    
+    def report(self, save_dir: os.PathLike, protein_name: str = '', verbose: bool = False):
+        """Report data"""
+        import numpy as np
+        from ..analysis import maximum_likelihood_estimator, plot_correlation
+
+        save_dir = Path(save_dir)
+        save_dir.mkdir(exist_ok=True)
+
+        ligands_info = self.gather_ligands_info()
+        perts_info = self.gather_perturbations_info()
+        if protein_name:
+            ligands_info = ligands_info.query(f'`protein` == "{protein_name}"')
+            perts_info = perts_info.query(f'`protein_name` == "{protein_name}"')
+        perts_info = perts_info.sort_values('error')
+        
+        avg_dg_expt = ligands_info.dropna(subset=['dG.expt'])['dG.expt'].mean()
+        dg_mle = maximum_likelihood_estimator(perts_info.dropna(subset=['ddG.total'])).set_index('ligand')
+        dg_mle['dG'] += avg_dg_expt - dg_mle['dG'].mean()
+        for index, row in ligands_info.iterrows():
+            if row['name'] in dg_mle.index:
+                dG = dg_mle.loc[row['name'], 'dG']
+                dG_std = dg_mle.loc[row['name'], 'dG_std']
+            else:
+                dG, dG_std = None, None
+            ligands_info.loc[index, 'dG.calc'] = dG
+            ligands_info.loc[index, 'dG_std.calc'] = dG_std
+        ligands_info['error'] = np.abs(ligands_info['dG.calc'] - ligands_info['dG.expt'])
+        ligands_info = ligands_info.sort_values('error')
+
+        if not verbose:
+            perts_info = perts_info[['protein_name', 'ligandA_name', 'ligandB_name', 'ddG.expt', 'ddG.total', 'ddG_std.total']]
+        
+        ligands_info.to_csv(os.path.join(save_dir, 'ligands.csv'), index=None)
+        perts_info.to_csv(os.path.join(save_dir, 'perturbations.csv'), index=None)
+        
+        ligands_info_with_expt = ligands_info.dropna(subset=['dG.expt', 'dG.calc'])
+        self.logger.info(f"Plotting - Found {ligands_info_with_expt.shape[0]} ligands with both experimental values and calculated values")
+        _, ligands_stats = plot_correlation(
+            xdata=ligands_info_with_expt['dG.expt'],
+            ydata=ligands_info_with_expt['dG.calc'],
+            xerr=None,
+            yerr=ligands_info['dG_std.calc'],
+            xlabel=r'$\Delta G_\mathrm{expt}$ (kcal/mol)',
+            ylabel=r'$\Delta G_\mathrm{FEP}$ (kcal/mol)',
+            savefig=os.path.join(save_dir, 'ligands.png')
+        )
+        with open(os.path.join(save_dir, 'ligands_stat.json'), 'w') as f:
+            json.dump(ligands_stats, f, indent=4)
+
+        perts_info_with_expt = perts_info.dropna(subset=['ddG.expt', 'ddG.total'])
+        self.logger.info(f"Plotting - Found {perts_info_with_expt.shape[0]} perturbations with both experimental values and calculated values")
+        _, perts_stats = plot_correlation(
+            xdata=perts_info_with_expt['ddG.expt'],
+            ydata=perts_info_with_expt['ddG.total'],
+            xerr=None,
+            yerr=perts_info_with_expt['ddG_std.total'],
+            xlabel=r'$\Delta\Delta G_\mathrm{expt}$ (kcal/mol)',
+            ylabel=r'$\Delta\Delta G_\mathrm{FEP}$ (kcal/mol)',
+            savefig=os.path.join(save_dir, 'perturbations.png')
+        )
+        with open(os.path.join(save_dir, 'perturbations_stat.json'), 'w') as f:
+            json.dump(perts_stats, f, indent=4)
 
     def evaluate_free_energy(self, protein_name: str, pert_name: str):
         """

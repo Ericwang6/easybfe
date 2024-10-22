@@ -8,7 +8,7 @@
         "#SBATCH --gres=gpu:A40:2",
         "#SBATCH --mem=16G",
         "#SBATCH --time=24:0:0",
-        "#SBATCH --exclude=n0052.es1,n0058.es1,n0051.es1,n0045.es1",
+        "#SBATCH --exclude=n0052.es1,n0058.es1,n0051.es1,n0045.es1,n0066.es1",
         "",
         "source /global/home/users/ericwangyz/env/amber22.env",
         "echo \"Allocated GPU IDs: $CUDA_VISIBLE_DEVICES on $(hostname)\""

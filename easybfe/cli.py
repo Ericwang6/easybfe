@@ -203,7 +203,29 @@ def parse_args(args: Sequence[str] | None = None):
         '-m', '--num_workers',
         dest='num_workers',
         default=1,
-        help="Number of processes to run the analysis in parallel"
+        help="Number of processes to run the analysis in parallel",
+        type=int
+    )
+
+    # Report
+    report_parser = subparsers.add_parser("report", help='Report calculation results to a specified folder')
+    report_parser.add_argument(
+        '-o', '--output_dir',
+        dest='save_dir',
+        required=True,
+        help='Output directory'
+    )
+    report_parser.add_argument(
+        '-p', '--protein',
+        dest='protein',
+        default='',
+        help='Report data belongs to a specific protein model. If not specified, all data will be reported.'
+    )
+    report_parser.add_argument(
+        '-v', '--verbose',
+        dest='verbose',
+        action='store_true',
+        help='Report verbose information for rbfe'
     )
     
     args = parser.parse_args(args)
@@ -222,7 +244,7 @@ def main():
         if args.protein_name and args.pert_name:
             project.analyze_pert(args.protein_name, args.pert_name, args.skip_traj)
         else:
-            project.analyze(num_workers=args.num_workers, skip_traj=self.skip_traj)
+            project.analyze(num_workers=args.num_workers, skip_traj=args.skip_traj)
     elif args.command == 'add_ligand':
         project.add_ligands(
             args.input,
@@ -263,6 +285,8 @@ def main():
                 args.list, args.protein_name, args.num_workers,
                 **kwargs
             )
+    elif args.command == 'report':
+        project.report(save_dir=args.save_dir, verbose=args.verbose, protein_name=args.protein)
         
 
 if __name__ == '__main__':
