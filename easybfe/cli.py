@@ -1,17 +1,23 @@
 import argparse
 from typing import Sequence
+from . import __version__
 
 
 def parse_args(args: Sequence[str] | None = None):
     """
     EasyBFE command line argument parsers
     """
-    parser = argparse.ArgumentParser(description="EasyBFE - an free, open-source package to easily setup relative binding free energies")
+    parser = argparse.ArgumentParser(description="EasyBFE - a free, open-source software to setup and analyze binding free energy calculations")
     parser.add_argument(
         '--verbose',
         dest='verbose',
         help='Print as much information as possible. Useful for developers',
         action='store_true'
+    )
+    parser.add_argument(
+        '--version',
+        action='version',
+        version=f'EasyBFE - version {__version__}'
     )
     parser.add_argument(
         '-d', '--directory',
