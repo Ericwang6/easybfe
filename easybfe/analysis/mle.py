@@ -1,5 +1,6 @@
 import numpy as np 
 import pandas as pd 
+import warnings
 
 
 def maximum_likelihood_estimator(df: pd.DataFrame, bias: float = 0.0):
@@ -56,6 +57,8 @@ def maximum_likelihood_estimator(df: pd.DataFrame, bias: float = 0.0):
     for _, row in df.iterrows():
         # in the equation, x_ij = x_i - x_j but here in dataframe, ddG is ligandB - ligandA
         edge = (names_to_index[row['ligandB_name']], names_to_index[row['ligandA_name']])
+        if edge in data_as_dict:
+            warnings.warn(f"Found duplicated perturbation for {row['ligandA_name']}~{row['ligandB_name']}. The first one will be used.")
         data_as_dict[edge] = (row['ddG.total'], row['ddG_std.total'])
         
     # ddG_std(i -> j) = ddG_std((j -> i))
@@ -82,6 +85,6 @@ def maximum_likelihood_estimator(df: pd.DataFrame, bias: float = 0.0):
     res = []
     for i in range(N):
         res.append((index_to_names[i], x[i], Finv[i, i] ** (1/2)))
-    res = pd.DataFrame(res, columns=['ligand', 'dG', 'dG.std'])
+    res = pd.DataFrame(res, columns=['ligand', 'dG', 'dG_std'])
     res['dG'] += bias
     return res

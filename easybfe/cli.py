@@ -1,17 +1,23 @@
 import argparse
 from typing import Sequence
+from . import __version__
 
 
 def parse_args(args: Sequence[str] | None = None):
     """
     EasyBFE command line argument parsers
     """
-    parser = argparse.ArgumentParser(description="EasyBFE - an free, open-source package to easily setup relative binding free energies")
+    parser = argparse.ArgumentParser(description="EasyBFE - a free, open-source software to setup and analyze binding free energy calculations")
     parser.add_argument(
         '--verbose',
         dest='verbose',
         help='Print as much information as possible. Useful for developers',
         action='store_true'
+    )
+    parser.add_argument(
+        '--version',
+        action='version',
+        version=f'EasyBFE - version {__version__}'
     )
     parser.add_argument(
         '-d', '--directory',
@@ -200,10 +206,32 @@ def parse_args(args: Sequence[str] | None = None):
         help="Skip analyzing simulation trajectories"
     )
     ana_parser.add_argument(
-        '--interactive',
-        dest='interactive',
+        '-m', '--num_workers',
+        dest='num_workers',
+        default=1,
+        help="Number of processes to run the analysis in parallel",
+        type=int
+    )
+
+    # Report
+    report_parser = subparsers.add_parser("report", help='Report calculation results to a specified folder')
+    report_parser.add_argument(
+        '-o', '--output_dir',
+        dest='save_dir',
+        required=True,
+        help='Output directory'
+    )
+    report_parser.add_argument(
+        '-p', '--protein',
+        dest='protein',
+        default='',
+        help='Report data belongs to a specific protein model. If not specified, all data will be reported.'
+    )
+    report_parser.add_argument(
+        '-v', '--verbose',
+        dest='verbose',
         action='store_true',
-        help='Use interactive mode'
+        help='Report verbose information for rbfe'
     )
     
     args = parser.parse_args(args)
@@ -219,10 +247,10 @@ def main():
         
     project = AmberRbfeProject(args.directory, init=(args.command == 'init'))
     if args.command == 'analyze':
-        if args.interactive:
-            project.analyze(interactive=True)
-        else:
+        if args.protein_name and args.pert_name:
             project.analyze_pert(args.protein_name, args.pert_name, args.skip_traj)
+        else:
+            project.analyze(num_workers=args.num_workers, skip_traj=args.skip_traj)
     elif args.command == 'add_ligand':
         project.add_ligands(
             args.input,
@@ -263,6 +291,8 @@ def main():
                 args.list, args.protein_name, args.num_workers,
                 **kwargs
             )
+    elif args.command == 'report':
+        project.report(save_dir=args.save_dir, verbose=args.verbose, protein_name=args.protein)
         
 
 if __name__ == '__main__':
