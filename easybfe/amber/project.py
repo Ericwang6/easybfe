@@ -8,30 +8,7 @@ import uuid
 import multiprocessing as mp
 from collections import defaultdict
 from enum import Enum
-from ..cmd import run_command, set_directory
-
-
-def init_logger(logname: Optional[os.PathLike] = None) -> logging.Logger:
-    # logging
-    logger = logging.getLogger(str(uuid.uuid4()))
-    logger.propagate = False
-    logger.setLevel(level = logging.INFO)
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-
-    # file
-    if logname is not None:
-        handler = logging.FileHandler(str(logname))
-        handler.setLevel(logging.INFO)
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-
-    # console
-    console = logging.StreamHandler()
-    console.setLevel(logging.INFO)
-    console.setFormatter(formatter)
-    logger.addHandler(console)
-
-    return logger
+from ..cmd import run_command, set_directory, init_logger
 
 
 class SimulationStatus(Enum):
@@ -39,7 +16,6 @@ class SimulationStatus(Enum):
     RUNNING = 1
     FINISHED = 2
     ERROR = 3
-
 
 
 class AmberRbfeProject:

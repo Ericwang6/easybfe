@@ -12,6 +12,31 @@ import shutil
 from pathlib import Path
 from typing import List, Union, Optional, Tuple
 import contextlib
+import logging
+import uuid
+
+
+def init_logger(logname: Optional[os.PathLike] = None) -> logging.Logger:
+    # logging
+    logger = logging.getLogger(str(uuid.uuid4()))
+    logger.propagate = False
+    logger.setLevel(level = logging.INFO)
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+
+    # file
+    if logname is not None:
+        handler = logging.FileHandler(str(logname))
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
+    # console
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    console.setFormatter(formatter)
+    logger.addHandler(console)
+
+    return logger
 
 
 class CommandExecuteError(Exception):
@@ -116,6 +141,10 @@ def run_command(
         cmd = cmd.split()
     elif isinstance(cmd, list):
         cmd = [str(x) for x in cmd]
+
+    logger = kwargs.pop('logger', None)
+    if logger:
+        logger.info(f'The following command is running at: {os.getcwd()}:\n{" ".join(cmd)}')
 
     sub = subprocess.Popen(
         args=cmd,
