@@ -584,8 +584,20 @@ class AmberRbfeProject:
             for pert_name in pert_names:
                 info = self.query_perturbation_info(self.rbfe_dir / protein_name / pert_name)
                 infos.append(info)
+
+                with open(self.ligands_dir / info['protein_name'] / info['ligandA_name'] / 'info.json') as f:
+                    dG_ligA = json.load(f)['dG.expt']
+                with open(self.ligands_dir / info['protein_name'] / info['ligandB_name'] / 'info.json') as f:
+                    dG_ligB = json.load(f)['dG.expt']
+                if dG_ligA is not None and dG_ligB is not None:
+                    info['ddG.expt'] = dG_ligB - dG_ligA
+                else:
+                    info['ddG.expt'] = None
+
+                with open(self.rbfe_dir / protein_name / pert_name / 'info.json', 'w') as f:
+                    json.dump(info, f, indent=4)
+
         df = pd.DataFrame(infos)
-        df['error'] = np.abs(df['ddG.expt'] - df['ddG.total'])
         df = df.sort_values(by=['protein_name', 'ligandA_name', 'ligandB_name'])
         return df
     
@@ -620,7 +632,6 @@ class AmberRbfeProject:
         if protein_name:
             ligands_info = ligands_info.query(f'`protein` == "{protein_name}"')
             perts_info = perts_info.query(f'`protein_name` == "{protein_name}"')
-        perts_info = perts_info.sort_values('error')
         
         avg_dg_expt = ligands_info.dropna(subset=['dG.expt'])['dG.expt'].mean()
         dg_mle = maximum_likelihood_estimator(perts_info.dropna(subset=['ddG.total'])).set_index('ligand')
@@ -636,8 +647,10 @@ class AmberRbfeProject:
         ligands_info['error'] = np.abs(ligands_info['dG.calc'] - ligands_info['dG.expt'])
         ligands_info = ligands_info.sort_values('error')
 
+        perts_info['error'] = np.abs(perts_info['ddG.expt'] - perts_info['ddG.total'])
+        perts_info = perts_info.sort_values('error')
         if not verbose:
-            perts_info = perts_info[['protein_name', 'ligandA_name', 'ligandB_name', 'ddG.expt', 'ddG.total', 'ddG_std.total']]
+            perts_info = perts_info[['protein_name', 'ligandA_name', 'ligandB_name', 'ddG.expt', 'ddG.total', 'ddG_std.total', 'error']]
         
         ligands_info.to_csv(os.path.join(save_dir, 'ligands.csv'), index=None)
         perts_info.to_csv(os.path.join(save_dir, 'perturbations.csv'), index=None)
@@ -648,7 +661,7 @@ class AmberRbfeProject:
             xdata=ligands_info_with_expt['dG.expt'],
             ydata=ligands_info_with_expt['dG.calc'],
             xerr=None,
-            yerr=ligands_info['dG_std.calc'],
+            yerr=ligands_info_with_expt['dG_std.calc'],
             xlabel=r'$\Delta G_\mathrm{expt}$ (kcal/mol)',
             ylabel=r'$\Delta G_\mathrm{FEP}$ (kcal/mol)',
             savefig=os.path.join(save_dir, 'ligands.png')

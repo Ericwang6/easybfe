@@ -6,7 +6,7 @@ EasyBFE is an open-source software for preparing relative binding free energy ca
 
 ### Step 1:
 
-Install the following dependencies with conda:
+Install the following dependencies with conda and `conda-forge` channel:
 
 + setuptools_scm
 + numpy
