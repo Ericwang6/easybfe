@@ -59,15 +59,25 @@ Use this following command to add ligands and parametrize them:
 easybfe add_ligand -p tyk2 -i examples/tyk2_ligands.sdf -f gaff2 -c bcc -m 10
 ```
 Breakdown of the options:
-+ `-p`: specify the name of the protein structure that the ligands belongs to 
++ `-p`: specify the name of the protein structure that the ligands belongs to.
 + `-i`: the input ligand structures (.sdf)
 + `-f`: the forcefield to parametrize the ligand. 
++ `-m`: number of processors to run in parallel.
+
+Note: You can add experimental values with `dG.expt` (in kcal/mol) or `affinity.expt` (in uM) in the sdf file and `easybfe report` will use report them together with the FEP values. 
 
 ## Step 4: Add perturbations
 Use this following command to add perturbations:
 ```bash
 easybfe add_perturbation -p tyk2 -l examples/perturbations.txt --config examples/config_5ns.json -m 10
 ```
+Breakdown of the options:
++ `-p`: specify the name of the protein structure that the ligands belongs to.
++ `-l`: File contains list of perturabtions. In the file, each line contains two ligand names seperated by a whitespace. Besides using `-l` option to add multiple perturbations at the same time, users can also use `--ligandA`, `--ligandB` and `-n` options to add one single perturbation. Use `-h` to see more information.
++ `--config`: Path to the configuration file
++ `-m`: number of processors to run in parallel 
+
+This command will prepare all simulation files (including atom mapping, building dual topology, setting up simulation box, adding solvents/ions) and write a submission file to `perturbations/*/{gas,solvent,complex}/run.slurm` under each perturbation folder. Users need to submit them manually after checking that the atom mapping is good. If you are confident with the atom mapping, you can toogle `--submit` in the command and the files will be submitted automatically. 
 
 ## Step 5: Analyze and report
 

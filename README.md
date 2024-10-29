@@ -4,6 +4,10 @@ EasyBFE is an open-source software for preparing relative binding free energy ca
 
 ## Installation
 
+### Step 0:
+
+EasyBFE now only supports preparing simulation for AMBER22 and newer version that supports ACES enhanced sampling and new soft core potentials. Please refer to the AMBER official website to install GPU-accelerated AMBER.
+
 ### Step 1:
 
 Install the following dependencies with conda and `conda-forge` channel:
@@ -35,7 +39,7 @@ pip install .
 
 ## Usage
 
-+ Command Line Interface (CLI)
++ [Command Line Interface (CLI)](docs/cli.md)
 + Python API
 + Web GUI
 

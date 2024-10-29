@@ -34,13 +34,13 @@ def find_mcs(molA, molB):
     return mcs_struct
 
 
-def get_common_core(molA, molB, mcs, use_position_info=True):
+def get_common_core(molA, molB, mcs, use_positions=True, map_hydrogens=True):
     mcs = Chem.RemoveHs(mcs)
     ccA = molA.GetSubstructMatch(mcs)
     ccB = molB.GetSubstructMatch(mcs)
     cc = []
     
-    if use_position_info:
+    if use_positions:
         posA = molA.GetConformer().GetPositions()
         posB = molB.GetConformer().GetPositions()
         dist_mat = cdist(posA, posB)
@@ -52,20 +52,21 @@ def get_common_core(molA, molB, mcs, use_position_info=True):
         
         cc.append((indexA, indexB))
 
-        if use_position_info:
-            if len(atomA_hs) < len(atomB_hs):
-                for hA in atomA_hs:
-                    hB = np.argmin(dist_mat[hA])
-                    if hB in atomB_hs:
-                        cc.append((hA, hB))
+        if map_hydrogens:
+            if use_positions:
+                if len(atomA_hs) < len(atomB_hs):
+                    for hA in atomA_hs:
+                        hB = np.argmin(dist_mat[hA])
+                        if hB in atomB_hs:
+                            cc.append((hA, hB))
+                else:
+                    for hB in atomB_hs:
+                        hA = np.argmin(dist_mat[:, hB])
+                        if hA in atomA_hs:
+                            cc.append((hA, hB))
             else:
-                for hB in atomB_hs:
-                    hA = np.argmin(dist_mat[:, hB])
-                    if hA in atomA_hs:
-                        cc.append((hA, hB))
-        else:
-            for hA, hB in zip(atomA_hs, atomB_hs):
-                cc.append((hA, hB))
+                for hA, hB in zip(atomA_hs, atomB_hs):
+                    cc.append((hA, hB))
             
     cc.sort(key=lambda x: x[0])
     cc = np.array(cc, dtype=int)
@@ -77,14 +78,15 @@ class LazyMCSMapper(LigandRbfeAtomMapper):
     A lazy implementation of MCS search with RDKit plus geomtry-based mapping for hydrogens.
     Not fully tested and cannot handle all cases
     """
-    def __init__(self, mcs: Chem.Mol, use_positions: bool = True):
+    def __init__(self, mcs: Chem.Mol, use_positions: bool = True, map_hydrogens: bool = True):
         self.mcs = mcs
         self.use_positions = use_positions
+        self.map_hydrogens = map_hydrogens
         
     def run_mapping(self, ligandA: Chem.Mol, ligandB: Chem.Mol) -> Dict[int, int]:
         if self.mcs is None:
             self.mcs = find_mcs(ligandA, ligandB)
-        cc = get_common_core(ligandA, ligandB, self.mcs, use_position_info=self.use_positions)
+        cc = get_common_core(ligandA, ligandB, self.mcs, use_positions=self.use_positions, map_hydrogens=self.map_hydrogens)
         mapping = {int(c[0]): int(c[1]) for c in cc}
         return mapping
 

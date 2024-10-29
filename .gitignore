@@ -170,5 +170,5 @@ tests/_test*
 # trash
 .trash/
 
-# examples
-examples/
+# benchmark
+benchmark

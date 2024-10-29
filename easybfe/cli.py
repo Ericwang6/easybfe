@@ -233,6 +233,15 @@ def parse_args(args: Sequence[str] | None = None):
         action='store_true',
         help='Report verbose information for rbfe'
     )
+
+    # constrain docking
+    dock_parser = subparsers.add_parser("cdock", help='Run constrained docking workflow')
+    dock_parser.add_argument('-i', '--input', required=True, dest='input', help='Input ligand: smiles string or sdf file')
+    dock_parser.add_argument('-r', '--ref', required=True, dest='ref', help='Reference ligand (sdf) containing 3D structure constrained to')
+    dock_parser.add_argument('-p', '--protein', required=True, dest='protein', help='Input protein pdb file')
+    dock_parser.add_argument('-o', '--output', required=True, dest='output', help='Output directory')
+    dock_parser.add_argument('-n', '--name', dest='name', help='Name of the ligand. Required if the input is a SMILES string.')
+    dock_parser.add_argument('--prep_tool', dest='prep_tool', default='adfr', help='Tool used for prepare protein pdbqt. Vaild options: "adfr", "obabel"')
     
     args = parser.parse_args(args)
     return args
@@ -244,8 +253,14 @@ def main():
     args = parse_args()
     if args.verbose:
         print(args)
-        
-    project = AmberRbfeProject(args.directory, init=(args.command == 'init'))
+    
+    if args.command == 'cdock':
+        from .docking import VinaDocking
+        docking = VinaDocking(args.protein, wdir=args.output, protein_prep_tool=args.prep_tool)
+        docking.constr_dock(args.input, args.ref, args.name)
+    else:
+        project = AmberRbfeProject(args.directory, init=(args.command == 'init'))
+
     if args.command == 'analyze':
         if args.protein_name and args.pert_name:
             project.analyze_pert(args.protein_name, args.pert_name, args.skip_traj)

@@ -1,0 +1,122 @@
+{
+    "header": [
+        "#SBATCH -J FEP_AMBER",
+        "#SBATCH -N 1",
+        "#SBATCH -p es1",
+        "#SBATCH -A lr_ninjaone",
+        "#SBATCH --ntasks-per-node 16",
+        "#SBATCH --gres=gpu:A40:2",
+        "#SBATCH --mem=16G",
+        "#SBATCH --time=24:0:0",
+        "#SBATCH --exclude=n0052.es1,n0058.es1,n0051.es1,n0045.es1,n0066.es1,n0064.es1",
+        "",
+        "source /global/home/users/ericwangyz/env/amber22.env",
+        "echo \"Allocated GPU IDs: $CUDA_VISIBLE_DEVICES on $(hostname)\""
+    ],
+    "solvent": {
+        "cutoff": 10.0, 
+        "pressure": 1.01325,
+        "temperature": 298.15,
+        "lambdas": [
+            0.0       , 0.06666667, 0.13333333, 0.2       , 0.26666667,
+            0.33333333, 0.4       , 0.46666667, 0.53333333, 0.6       ,
+            0.66666667, 0.73333333, 0.8       , 0.86666667, 0.93333333,
+            1.0
+        ],
+        "buffer": 15.0,
+        "do_hmr": true,
+        "hydrogen_mass": 3.024,
+        "em": {
+            "num_steps": 5000, "step_size": 0.01, "ofreq": 500
+        },
+        "heat_0": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "pres_0": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "heat_1": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "pres_1": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "heat_2": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "pres_2": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "pre_prod": {
+            "num_steps": 25000, "dt": 0.004, "ofreq": 5000, "restraint_wt": 0.0
+        },
+        "prod": {
+            "num_steps": 250, "dt": 0.004, "numexchg": 5000, "ofreq": 25000
+        }
+    },
+    "complex": {
+        "cutoff": 10.0,
+        "pressure": 1.01325,
+        "temperature": 298.15,
+        "lambdas": [
+            0.0       , 0.06666667, 0.13333333, 0.2       , 0.26666667,
+            0.33333333, 0.4       , 0.46666667, 0.53333333, 0.6       ,
+            0.66666667, 0.73333333, 0.8       , 0.86666667, 0.93333333,
+            1.0
+        ],
+        "buffer": 12.0,
+        "ionic_strength": 0.15,
+        "do_hmr": true,
+        "hydrogen_mass": 3.024,
+        "em": {
+            "num_steps": 5000, "step_size": 0.01, "ofreq": 500
+        },
+        "heat_0": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "pres_0": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "heat_1": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "pres_1": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "heat_2": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "pres_2": {
+            "num_steps": 5000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0
+        },
+        "pre_prod": {
+            "num_steps": 25000, "dt": 0.004, "ofreq": 5000, "restraint_wt": 0.0
+        },
+        "prod": {
+            "num_steps": 250, "dt": 0.004, "numexchg": 5000, "ofreq": 25000
+        }
+    },
+    "gas": {
+        "cutoff": 10.0,
+        "pressure": 1.01325,
+        "temperature": 298.15,
+        "lambdas": [
+            0.0       , 0.06666667, 0.13333333, 0.2       , 0.26666667,
+            0.33333333, 0.4       , 0.46666667, 0.53333333, 0.6       ,
+            0.66666667, 0.73333333, 0.8       , 0.86666667, 0.93333333,
+            1.0
+        ],
+        "buffer": 20.0,
+        "do_hmr": true,
+        "hydrogen_mass": 3.024,
+        "em": {
+            "num_steps": 5000, "step_size": 0.01, "ofreq": 500
+        },
+        "heat": {
+            "num_steps": 12000, "dt": 0.004, "ofreq": 5000, "restraint_wt": 5.0, "tempi": 5.0
+        },
+        "prod": {
+            "num_steps": 250, "dt": 0.004, "numexchg": 1000, "ofreq": 25000
+        }
+    }
+}

@@ -23,7 +23,7 @@ class OpenFEAtomMapper(LigandRbfeAtomMapper):
             # Build Kartograf Atom Mapper
             self.mapper = KartografAtomMapper(**kwargs)
         else:
-            raise NotImplementedError('Unsupported mapping method: {method}')
+            raise NotImplementedError(f'Unsupported mapping method: {method}')
     
     def run_mapping(self, ligandA: Chem.Mol, ligandB: Chem.Mol) -> Dict[int, int]:
         from openfe import SmallMoleculeComponent
