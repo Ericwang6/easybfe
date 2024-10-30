@@ -267,8 +267,10 @@ def main():
         else:
             project.analyze(num_workers=args.num_workers, skip_traj=args.skip_traj)
     elif args.command == 'add_ligand':
+        # this handles where only one sdf is provided and that sdf contains multiple ligands
+        inp = args.input[0] if len(args.input) == 1 else args.input
         project.add_ligands(
-            args.input,
+            inp,
             num_workers=args.num_workers,
             protein_name=args.protein_name,
             name=args.name,
