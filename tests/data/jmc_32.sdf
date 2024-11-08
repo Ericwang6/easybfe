@@ -1,4 +1,4 @@
-
+jmc_32
      RDKit          3D
 
  38 40  0  0  0  0  0  0  0  0999 V2000
@@ -82,6 +82,9 @@
  24 38  1  0
 M  CHG  1  17  -1
 M  END
+>  <affinity.expt>  (1)
+0.0032
+
 >  <ofe-name>  (1) 
 
 
