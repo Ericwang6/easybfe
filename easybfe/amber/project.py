@@ -206,6 +206,9 @@ class AmberRbfeProject:
                 name = kwargs.get('name', None)
                 if len(mols) == 1 and name is not None:
                     mols[0].SetProp('_Name', name)
+                else:
+                    for i, m in enumerate(mols):
+                        assert m.GetProp('_Name'), f'Name in molecule {i} is empty'
         elif isinstance(mols, str):
             mols = list(glob.glob(mols))
             mols.sort()

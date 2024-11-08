@@ -119,7 +119,7 @@ def generate_amber_mask(natomsA: int, natomsB: int, mapping: Dict[int, int], alc
     }
     if alchemical_water_info:
         alchemical_water_mask = {
-            "noshakemask": ',' + ','.join(str(x + 1) for x in alchemical_water_info['alchemical_water_oxygen'] + alchemical_water_info['alchemical_water_hydrogen'] + alchemical_water_info['alchemical_ions']),
+            "noshakemask": ','.join(str(x + 1) for x in alchemical_water_info['alchemical_water_oxygen'] + alchemical_water_info['alchemical_water_hydrogen'] + alchemical_water_info['alchemical_ions']),
             "timask1": ','.join(str(x + 1) for x in alchemical_water_info['alchemical_water_oxygen'] + alchemical_water_info['alchemical_water_hydrogen']),
             "timask2": ','.join(str(x + 1) for x in alchemical_water_info['alchemical_ions']),
             "scmask1": ','.join(str(x + 1) for x in alchemical_water_info['alchemical_water_hydrogen'])
