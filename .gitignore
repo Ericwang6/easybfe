@@ -165,10 +165,12 @@ slurm*.out
 */_version.py
 
 # test cache
-tests/_test*
+_test*
 
 # trash
 .trash/
 
 # benchmark
-benchmark
+benchmark/
+
+dump.rdb

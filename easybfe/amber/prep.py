@@ -6,6 +6,7 @@ from typing import Union, Dict, List, Tuple, Any
 import numpy as np
 import openmm as mm
 import openmm.app as app
+import openmm.app.element as elem
 import openmm.unit as unit
 import parmed
 from rdkit import Chem
@@ -106,16 +107,28 @@ def shiftToBoxCenter(positions: unit.Quantity, boxVectors: Tuple[mm.Vec3]):
     return newPositions
 
 
-def generate_amber_mask(natomsA: int, natomsB: int, mapping: Dict[int, int]):
+def generate_amber_mask(natomsA: int, natomsB: int, mapping: Dict[int, int], alchemical_water_info: Dict[str, List] = dict()):
     scA = [i for i in range(natomsA) if i not in mapping.keys()]
     scB = [i for i in range(natomsB) if i not in mapping.values()]
     res = {
-        "noshakemask": f"'@1-{natomsA+natomsB}'",
-        "timask1": f"'@1-{natomsA}'",
-        "timask2": f"'@{natomsA+1}-{natomsA+natomsB}'",
-        "scmask1": "'@{}'".format(','.join(str(i+1) for i in scA)),
-        "scmask2": "'@{}'".format(','.join(str(i+1+natomsA) for i in scB))
+        "noshakemask": f"@1-{natomsA+natomsB}",
+        "timask1": f"@1-{natomsA}",
+        "timask2": f"@{natomsA+1}-{natomsA+natomsB}",
+        "scmask1": "@{}".format(','.join(str(i+1) for i in scA)),
+        "scmask2": "@{}".format(','.join(str(i+1+natomsA) for i in scB))
     }
+    if alchemical_water_info:
+        alchemical_water_mask = {
+            "noshakemask": ',' + ','.join(str(x + 1) for x in alchemical_water_info['alchemical_water_oxygen'] + alchemical_water_info['alchemical_water_hydrogen'] + alchemical_water_info['alchemical_ions']),
+            "timask1": ','.join(str(x + 1) for x in alchemical_water_info['alchemical_water_oxygen'] + alchemical_water_info['alchemical_water_hydrogen']),
+            "timask2": ','.join(str(x + 1) for x in alchemical_water_info['alchemical_ions']),
+            "scmask1": ','.join(str(x + 1) for x in alchemical_water_info['alchemical_water_hydrogen'])
+        }
+        for key in alchemical_water_mask:
+            res[key] = f'{res[key]},{alchemical_water_mask[key]}'
+    # add single quote mark
+    for key in res:
+        res[key] = f"'{res[key]}'"
     return res
 
 
@@ -133,6 +146,67 @@ def hydrogen_mass_repartition(struct: parmed.Structure, hydrogen_mass: float = 3
                 atom.mass -= subtract_mass
 
 
+def do_co_alchemical_water(modeller: app.Modeller, d_charge: int, positiveIon: str = 'Na+', negativeIon: str = 'Cl-'):
+    top, pos = modeller.topology, modeller.positions
+    posNumpy = np.array([[p.x, p.y, p.z] for p in pos])
+    posIonElements = {
+        'Cs+': elem.cesium, 'K+': elem.potassium, 
+        'Li+': elem.lithium, 'Na+': elem.sodium,
+        'Rb+': elem.rubidium
+    }
+    negIonElements = {
+        'Cl-': elem.chlorine, 'Br-': elem.bromine,
+        'F-': elem.fluorine, 'I-': elem.iodine
+    }
+
+    if d_charge > 0:
+        # counter ions
+        element = negIonElements[negativeIon]
+    else:
+        element = posIonElements[positiveIon]
+
+    atoms = list(top.atoms())
+    waterIndices = np.array([atom.index for atom in atoms if atom.residue.name == 'HOH' and atom.name == 'O'])
+    
+    # compute the distances to solute (the center of solute is [0, 0, 0])
+    # and find the waters farest away from the solute
+
+    distances = np.linalg.norm(posNumpy[waterIndices], axis=1)
+    sorting = waterIndices[np.argsort(distances)[::-1]]
+    selectedIndices = []
+    for index in sorting:
+        if selectedIndices and np.linalg.norm(posNumpy[selectedIndices] - posNumpy[index], axis=1).min() > 0.5:
+            selectedIndices.append(index)
+        elif len(selectedIndices) == 0:
+            selectedIndices.append(index)
+        if len(selectedIndices) == abs(d_charge):
+            break
+
+    info = {
+        "alchemical_ions": [],
+        "alchemical_water_residues": [],
+        "alchemical_water_oxygen": [],
+        "alchemical_water_hydrogen": []
+    }
+    for index in selectedIndices:
+        ionChain = top.addChain()
+        ionResidue = top.addResidue(element.symbol.upper(), ionChain)
+        ion = top.addAtom(element.symbol, element, ionResidue)
+        pos.append(pos[index])
+        info['alchemical_ions'].append(ion.index)
+        water = atoms[index].residue
+        info['alchemical_water_residues'].append(water.index)
+        for atom in water.atoms():
+            if atom.element.symbol == 'O':
+                info['alchemical_water_oxygen'].append(atom.index)
+            else:
+                info['alchemical_water_hydrogen'].append(atom.index)
+    
+    modeller.topology = top
+    modeller.positions = pos
+    return info
+    
+
 def prep_ligand_rbfe_systems(
     protein_pdb: os.PathLike,
     ligandA_mol: Union[os.PathLike, Chem.Mol],
@@ -145,7 +219,8 @@ def prep_ligand_rbfe_systems(
     water_ff: str = 'tip3p',
     gas_config: Dict[str, Any] = dict(),
     solvent_config: Dict[str, Any] = dict(),
-    complex_config: Dict[str, Any] = dict()
+    complex_config: Dict[str, Any] = dict(),
+    use_charge_change: bool = True
 ):
     # Create working directory
     wdir = Path(wdir).resolve()
@@ -155,6 +230,12 @@ def prep_ligand_rbfe_systems(
         ligandA_mol = Chem.SDMolSupplier(ligandA_mol, removeHs=False)[0]
     if not isinstance(ligandB_mol, Chem.Mol):
         ligandB_mol = Chem.SDMolSupplier(ligandB_mol, removeHs=False)[0]
+
+    ligandA_charge = sum([at.GetFormalCharge() for at in ligandA_mol.GetAtoms()])
+    ligandB_charge = sum([at.GetFormalCharge() for at in ligandB_mol.GetAtoms()])
+
+    d_charge = ligandB_charge - ligandA_charge
+    use_charge_change = use_charge_change and (d_charge != 0)
     
     ligandA_struct = parmed.load_file(str(ligandA_top))
     ligandA_struct.residues[0].name = 'MOLA'
@@ -182,12 +263,7 @@ def prep_ligand_rbfe_systems(
         w.write(ligandB_renum)
 
     # Write amber mask
-    with open(wdir / 'mask.json', 'w') as fp:
-        json.dump(
-            generate_amber_mask(ligandA_mol.GetNumAtoms(), ligandB_mol.GetNumAtoms(), {i:i for i in range(len(mapping))}),
-            fp,
-            indent=4
-        )
+    num_atoms_A, num_atoms_B, mapping_renum = ligandA_mol.GetNumAtoms(), ligandB_mol.GetNumAtoms(), {i:i for i in range(len(mapping))}
 
     renumber_parmed_structure(ligandA_struct, renum_map_A)
     renumber_parmed_structure(ligandB_struct, renum_map_B)
@@ -213,13 +289,12 @@ def prep_ligand_rbfe_systems(
         system = ff.createSystem(modeller.topology, nonbondedMethod=app.PME, constraints=None, rigidWater=False)
         tmp = parmed.openmm.load_topology(modeller.topology, system, xyz=modeller.positions)
 
-        # Hydrogen mass repartition
-        if do_hmr:
-            hydrogen_mass_repartition(tmp, hydrogen_mass, do_hmr_water)
-        
         # Note: In AmberTools, TIP3P water will have 3 bonds, 0 angles. If not, pmemd will raise an error:
         # `Error: Fast 3-point water residue, name and bond data incorrect!` 
-        for residue in tmp.residues:
+        for residx, residue in enumerate(tmp.residues):
+            # Give alchemical water a unique name
+            if residx in kwargs.get('alchemical_water_residues', []):
+                residue.name = 'ALW'
             # Amber uses WAT to identify SETTLE for waters
             if residue.name == 'HOH':
                 residue.name = 'WAT'
@@ -239,6 +314,10 @@ def prep_ligand_rbfe_systems(
         for item in reversed(to_del):
             tmp.angles.pop(item)
 
+        # Hydrogen mass repartition
+        if do_hmr:
+            hydrogen_mass_repartition(tmp, hydrogen_mass, do_hmr_water)
+
         tmp.save(str(wdir / f'{basename}.prmtop'), overwrite=True)
         tmp.save(str(wdir / f'{basename}.inpcrd'), overwrite=True)
         tmp.save(str(wdir / f'{basename}.pdb'), overwrite=True)
@@ -252,6 +331,7 @@ def prep_ligand_rbfe_systems(
     gasBoxVectors = computeBoxVectorsWithPadding(modeller.positions, gas_buffer)
     modeller.positions = shiftToBoxCenter(modeller.positions, gasBoxVectors)
     modeller.topology.setPeriodicBoxVectors(gasBoxVectors)
+    gas_config.update(generate_amber_mask(num_atoms_A, num_atoms_B, mapping_renum))
     _save(modeller, 'gas', **gas_config)
     
     # Solvent phase
@@ -265,7 +345,14 @@ def prep_ligand_rbfe_systems(
         neutralize=True,
         ionicStrength=solvent_config.get('ionic_strength', 0.0) * unit.molar
     )
-    _save(modeller, 'solvent', **solvent_config)
+
+    if use_charge_change:
+        alchem_water_info = do_co_alchemical_water(modeller, d_charge)
+    else:
+        alchem_water_info = dict()
+
+    _save(modeller, 'solvent', **solvent_config, **alchem_water_info)
+    solvent_config.update(generate_amber_mask(num_atoms_A, num_atoms_B, mapping_renum, alchem_water_info))
 
     # Complex-phase
     if protein_pdb is not None:
@@ -284,4 +371,10 @@ def prep_ligand_rbfe_systems(
             ionicStrength=solvent_config.get('ionic_strength', 0.15) * unit.molar,
             neutralize=True
         )
-        _save(modeller, 'complex', **complex_config)
+        if use_charge_change:
+            alchem_water_info = do_co_alchemical_water(modeller, d_charge)
+        else:
+            alchem_water_info = dict()
+
+        _save(modeller, 'complex', **complex_config, **alchem_water_info)
+        complex_config.update(generate_amber_mask(num_atoms_A, num_atoms_B, mapping_renum, alchem_water_info))

@@ -183,7 +183,7 @@ class AmberRbfeProject:
     def add_ligands(
         self, 
         mols,
-        num_workers: int = 1,
+        num_workers: str | int = 'auto',
         **kwargs
     ):
         """
@@ -191,6 +191,9 @@ class AmberRbfeProject:
         """
         import tempfile
         from rdkit import Chem
+
+        if num_workers == 'auto':
+            num_workers = max(1, mp.cpu_count() - 2)
 
         if isinstance(mols, list) and all(isinstance(m, Chem.Mol) for m in mols):
             pass
@@ -452,8 +455,6 @@ class AmberRbfeProject:
             solvent_config=config.get('solvent', {}),
             complex_config=config.get('complex', {})
         )
-        with open(prep_dir / 'mask.json') as f:
-            mask = json.load(f)
 
         # Prep workflow
         self.logger.info("Preparing Amber simulation inputs")
@@ -468,7 +469,6 @@ class AmberRbfeProject:
                 "prmtop": str(prmtop),
             }
             leg_config.update(config[leg])
-            leg_config.update(mask)
 
             with open(leg_dir / 'config.json', 'w') as f:
                 json.dump(leg_config, f, indent=4)
@@ -494,12 +494,15 @@ class AmberRbfeProject:
         self,
         perts: os.PathLike | List[Tuple[str, str]],
         protein_name: str,
-        num_workers: int = 1,
+        num_workers: str | int = 'auto',
         **kwargs
     ):
         """
         Add Perturbations
         """
+        if num_workers == 'auto':
+            num_workers = max(1, mp.cpu_count() - 2)
+
         if isinstance(perts, str) or isinstance(perts, Path):
             with open(perts) as f:
                 perts = [line.split() for line in f.read().strip().split('\n')]

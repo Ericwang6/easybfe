@@ -123,3 +123,20 @@ def test_amber_ligand_rbfe_prep():
         xyz=os.path.join(wdir, 'gas.inpcrd')
     )
     assert np.allclose(struct.coordinates[:len(mapping)], struct.coordinates[num_atoms_A:][:len(mapping)])
+
+
+def test_amber_charge_change():
+    datadir = os.path.join(os.path.dirname(__file__), 'data')
+    proj_dir = os.path.join(os.path.dirname(__file__), '_test_ligand_rbfe_charge_change')
+    if os.path.isdir(proj_dir):
+        shutil.rmtree(proj_dir)
+    proj = AmberRbfeProject(proj_dir, init=True)
+    proj.add_protein(os.path.join(datadir, 'tyk2_pdbfixer.pdb'), name='tyk2')
+    proj.add_ligand(os.path.join(datadir, 'jmc_23.sdf'), name='jmc_23', protein_name='tyk2', parametrize=True, charge_method='gas', overwrite=True)
+    proj.add_ligand(os.path.join(datadir, 'jmc_32.sdf'), name='jmc_32', protein_name='tyk2', parametrize=True, charge_method='gas', overwrite=True)
+    proj.add_perturbation('jmc_23', 'jmc_32', 'tyk2', config=os.path.join(datadir, 'config_5ns.json'))
+    struct = parmed.load_file(os.path.join(proj_dir, 'rbfe/tyk2/jmc_23~jmc_32/prep/solvent.prmtop'))
+    for residue in struct.residues:
+        if residue.name == 'ALW':
+            assert np.allclose([at.mass for at in residue.atoms[-2:]], 3.024)
+    assert struct.angles[-1].atom1.residue.name == 'ALW'
