@@ -176,7 +176,7 @@ def heat(
     
     ntr = 1 if restraint_wt != 0 else 0
     ntb = 1 if use_periodic else 0
-    iwrap = 1 if use_periodic else 0
+    iwrap = 0
 
     if restart:
         ntx, irest = 5, 1
@@ -258,7 +258,7 @@ def pressurize(
     
     ntr = 1 if restraint_wt != 0 else 0
     ntb = 2 if use_periodic else 0
-    iwrap = 1 if use_periodic else 0
+    iwrap = 0
     ntp = 1 if use_periodic else 0
 
     inpstr = template.format(
