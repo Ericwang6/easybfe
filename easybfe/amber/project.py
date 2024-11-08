@@ -459,7 +459,8 @@ class AmberRbfeProject:
             water_ff=config.get('water_ff', 'tip3p'),
             gas_config=config.get('gas', {}),
             solvent_config=config.get('solvent', {}),
-            complex_config=config.get('complex', {})
+            complex_config=config.get('complex', {}),
+            use_charge_change=config.get('use_charge_change', True)
         )
 
         # Prep workflow
@@ -797,9 +798,9 @@ class AmberRbfeProject:
                     os.mkdir(trj_dir)
 
                 if leg == 'complex':
-                    sele_str = f'protein or resid {resid}'
+                    sele_str = f'protein or resid {resid} or resname ALW'
                 else:
-                    sele_str = f'resid {resid}'
+                    sele_str = f'resid {resid} or resname ALW'
 
                 u = mda.Universe(in_top, in_trj, format='NCDF')
                 u_ref = mda.Universe(in_top, in_trj, format='NCDF')
