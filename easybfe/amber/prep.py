@@ -220,7 +220,8 @@ def prep_ligand_rbfe_systems(
     gas_config: Dict[str, Any] = dict(),
     solvent_config: Dict[str, Any] = dict(),
     complex_config: Dict[str, Any] = dict(),
-    use_charge_change: bool = True
+    use_charge_change: bool = True,
+    use_settle_for_alchemical_water: bool = True
 ):
     # Create working directory
     wdir = Path(wdir).resolve()
@@ -293,7 +294,7 @@ def prep_ligand_rbfe_systems(
         # `Error: Fast 3-point water residue, name and bond data incorrect!` 
         for residx, residue in enumerate(tmp.residues):
             # Give alchemical water a unique name
-            if residx in kwargs.get('alchemical_water_residues', []):
+            if (not use_settle_for_alchemical_water) and residx in kwargs.get('alchemical_water_residues', []):
                 residue.name = 'ALW'
             # Amber uses WAT to identify SETTLE for waters
             if residue.name == 'HOH':

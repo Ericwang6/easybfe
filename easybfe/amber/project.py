@@ -460,7 +460,8 @@ class AmberRbfeProject:
             gas_config=config.get('gas', {}),
             solvent_config=config.get('solvent', {}),
             complex_config=config.get('complex', {}),
-            use_charge_change=config.get('use_charge_change', True)
+            use_charge_change=config.get('use_charge_change', True),
+            use_settle_for_alchemical_water=config.get('use_settle_for_alchemical_water', True)
         )
 
         # Prep workflow
