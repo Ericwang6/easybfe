@@ -51,7 +51,7 @@ tishake = 0
 {mbar_setting}
 
 gti_cut         = 1
-gti_output      = 1
+gti_output      = 0
 gti_add_sc      = 25
 gti_scale_beta  = 1
 gti_cut_sc_on   = {gti_cut_sc_on}
