@@ -381,8 +381,8 @@ def prep_ligand_rbfe_systems(
         halfVec = (solventBoxVectors[0] + solventBoxVectors[1] + solventBoxVectors[2]) / 2
         length = np.linalg.norm([halfVec.x, halfVec.y, halfVec.z]) * 10
         mdin_mod['solvent'] += [
-            f'&rst iat={scmask1[0][1:]},{waterOIndex}, r1=15.0, r2=15.0, r3={length:.2f}, r4={length:.2f}, rk2=100.0, rk3=100.0, /',
-            f'&rst iat={scmask2[0][1:]},{ionIndex}, r1=15.0, r2=15.0, r3={length:.2f}, r4={length:.2f}, rk2=100.0, rk3=100.0, /'
+            f'&rst iat={scmask1[0][1:]},{waterOIndex}, r1=10.0, r2=15.0, r3={length:.2f}, r4={length:.2f}, rk2=10000.0, rk3=10000.0, /',
+            f'&rst iat={scmask2[0][1:]},{ionIndex}, r1=10.0, r2=15.0, r3={length:.2f}, r4={length:.2f}, rk2=10000.0, rk3=10000.0, /'
         ]
     
     solvent_config.update(mask)
