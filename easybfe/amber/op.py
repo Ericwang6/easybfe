@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from typing import Dict, Optional, Any, List
-import json
+import shutil
 import math
 
 
@@ -231,7 +231,8 @@ def pressurize(
     scmask1: str = "",
     scmask2: str = "",
     deffnm: str = 'pres_0',
-    use_periodic: bool = True
+    use_periodic: bool = True,
+    charge_change_mdin_mod: List[str] = list(),
 ):
     """
     Pressurize the system (NPT equilibrium)
@@ -260,6 +261,7 @@ def pressurize(
     ntb = 2 if use_periodic else 0
     iwrap = 0
     ntp = 1 if use_periodic else 0
+    nmropt = 1 if charge_change_mdin_mod else 0
 
     inpstr = template.format(
         nstlim=num_steps, ofreq=ofreq, dt=dt,
@@ -273,8 +275,10 @@ def pressurize(
         pres0=pressure,
         timask1=timask1, timask2=timask2,
         scmask1=scmask1, scmask2=scmask2,
-        ntb=ntb, iwrap=iwrap, ntp=ntp
+        ntb=ntb, iwrap=iwrap, ntp=ntp,
+        nmropt=nmropt
     )
+    inpstr += '\n' + '\n'.join(charge_change_mdin_mod)
     with open(wdir / f'{deffnm}.in', 'w') as f:
         f.write(inpstr)
     
@@ -314,7 +318,8 @@ def prod(
     deffnm: str = 'prod',
     use_periodic: bool = True,
     use_hremd: bool = True,
-    use_nvt: bool = False
+    use_nvt: bool = False,
+    charge_change_mdin_mod: List[str] = list()
 ):
     """
     Production run
@@ -373,7 +378,8 @@ def prod(
         remd_setting = '\n'.join(remd_setting)
     else:
         remd_setting = ""
-        
+    
+    nmropt = 1 if charge_change_mdin_mod else 0
     inpstr = template.format(
         nstlim=num_steps, ofreq=ofreq, dt=dt,
         ntr=ntr, restraint_wt=restraint_wt,
@@ -388,8 +394,10 @@ def prod(
         scmask1=scmask1, scmask2=scmask2,
         remd_setting=remd_setting, mbar_setting=mbar_setting,
         efreq=efreq,
-        ntb=ntb, iwrap=iwrap, ntp=ntp
+        ntb=ntb, iwrap=iwrap, ntp=ntp,
+        nmropt=nmropt
     )
+    inpstr += '\n' + '\n'.join(charge_change_mdin_mod)
     with open(wdir / f'{deffnm}.in', 'w') as f:
         f.write(inpstr)
     
@@ -407,7 +415,7 @@ def prod(
         f.write(cmdstr)
 
 
-def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start: bool = True):
+def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start: bool = True, charge_change_mdin_mod: List[str] = list()):
     lambdas = config['lambdas']
     inpcrd = Path(config['inpcrd']).resolve()
     prmtop = Path(config['prmtop']).resolve()
@@ -498,10 +506,10 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
                 temp0=temp, 
                 free_energy=True, clambda=clambda,
                 deffnm='pre_prod',
+                charge_change_mdin_mod=charge_change_mdin_mod,
                 **config['pre_prod'],
                 **mask_config
             )
-
             prod_inpcrd = pre_prod_dir / 'pre_prod.rst7'
         else:
             heat_dir = lambda_dir / 'heat'
@@ -534,6 +542,7 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
             deffnm='prod',
             lambdas=lambdas,
             use_nvt=gas_phase,
+            charge_change_mdin_mod=charge_change_mdin_mod,
             **config['prod'],
             **mask_config
         )

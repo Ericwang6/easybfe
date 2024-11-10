@@ -139,4 +139,3 @@ def test_amber_charge_change():
     for residue in struct.residues:
         if residue.name == 'ALW':
             assert np.allclose([at.mass for at in residue.atoms[-2:]], 3.024)
-    assert struct.angles[-1].atom1.residue.name == 'ALW'

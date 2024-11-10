@@ -349,11 +349,31 @@ def prep_ligand_rbfe_systems(
 
     if use_charge_change:
         alchem_water_info = do_co_alchemical_water(modeller, d_charge)
+        mdin_mod = {
+            'solvent': ['&wt TYPE="DUMPFREQ", istep1=100, /', '&wt TYPE="END", /', 'DUMPAVE=dist'], 
+            'complex': ['&wt TYPE="DUMPFREQ", istep1=100, /', '&wt TYPE="END", /', 'DUMPAVE=dist']
+        }
     else:
         alchem_water_info = dict()
+        mdin_mod = dict()
 
     _save(modeller, 'solvent', **solvent_config, **alchem_water_info)
-    solvent_config.update(generate_amber_mask(num_atoms_A, num_atoms_B, mapping_renum, alchem_water_info))
+    mask = generate_amber_mask(num_atoms_A, num_atoms_B, mapping_renum, alchem_water_info)
+    if use_charge_change:
+        waterOIndex = mask['timask1'].strip("'").split(',')[-3]
+        ionIndex = mask['timask2'].strip("'").split(',')[-1]
+        scmask1 = mask['scmask1'].strip("'").split(',')
+        scmask2 = mask['scmask2'].strip("'").split(',')
+        # TODO: need to handle this when scmask1 or scmask2 is empty (although it is not very likely to happen)
+        assert len(scmask1) > 2 and len(scmask2) > 1
+        halfVec = (solventBoxVectors[0] + solventBoxVectors[1] + solventBoxVectors[2]) / 2
+        length = np.linalg.norm([halfVec.x, halfVec.y, halfVec.z]) * 10
+        mdin_mod['solvent'] += [
+            f'&rst iat={scmask1[0][1:]},{waterOIndex}, r1=15.0, r2=15.0, r3={length:.2f}, r4={length:.2f}, rk2=100.0, rk3=100.0, /',
+            f'&rst iat={scmask2[0][1:]},{ionIndex}, r1=15.0, r2=15.0, r3={length:.2f}, r4={length:.2f}, rk2=100.0, rk3=100.0, /'
+        ]
+    
+    solvent_config.update(mask)
 
     # Complex-phase
     if protein_pdb is not None:
@@ -378,4 +398,19 @@ def prep_ligand_rbfe_systems(
             alchem_water_info = dict()
 
         _save(modeller, 'complex', **complex_config, **alchem_water_info)
-        complex_config.update(generate_amber_mask(num_atoms_A, num_atoms_B, mapping_renum, alchem_water_info))
+        mask = generate_amber_mask(num_atoms_A, num_atoms_B, mapping_renum, alchem_water_info)
+        if use_charge_change:
+            waterOIndex = mask['timask1'].strip("'").split(',')[-3]
+            ionIndex = mask['timask2'].strip("'").split(',')[-1]
+            scmask1 = mask['scmask1'].strip("'").split(',')
+            scmask2 = mask['scmask2'].strip("'").split(',')
+            # TODO: need to handle this when scmask1 or scmask2 is empty (although it is not very likely to happen)
+            assert len(scmask1) > 2 and len(scmask2) > 1
+            halfVec = (complexBoxVectors[0] + complexBoxVectors[1] + complexBoxVectors[2]) / 2
+            length = np.linalg.norm([halfVec.x, halfVec.y, halfVec.z]) * 10
+            mdin_mod['complex'] += [
+                f'&rst iat={scmask1[0][1:]},{waterOIndex}, r1=15.0, r2=15.0, r3={length:.2f}, r4={length:.2f}, rk2=100.0, rk3=100.0, /',
+                f'&rst iat={scmask2[0][1:]},{ionIndex}, r1=15.0, r2=15.0, r3={length:.2f}, r4={length:.2f}, rk2=100.0, rk3=100.0, /'
+            ]
+        complex_config.update(mask)   
+    return mdin_mod

@@ -447,7 +447,7 @@ class AmberRbfeProject:
         self.logger.info("Preparing simulation system")
         prep_dir = pert_dir / 'prep'
         prep_dir.mkdir(exist_ok=True)
-        prep_ligand_rbfe_systems(
+        charge_change_mdin_mod = prep_ligand_rbfe_systems(
             self.proteins_dir / protein_name / f'{protein_name}.pdb',
             ligandA,
             self.ligands_dir / protein_name / ligandA_name / f'{ligandA_name}.prmtop',
@@ -480,8 +480,12 @@ class AmberRbfeProject:
 
             with open(leg_dir / 'config.json', 'w') as f:
                 json.dump(leg_config, f, indent=4)
-        
-            fep_workflow(leg_config, leg_dir, gas_phase=(leg == 'gas'))
+
+            fep_workflow(
+                leg_config, leg_dir, 
+                gas_phase=(leg == 'gas'), 
+                charge_change_mdin_mod=charge_change_mdin_mod.get(leg, [])
+            )
             self.logger.info(f"FEP simulation workflow is set for leg: {leg}. Config file written to: {leg_dir / 'config.json'}")
 
             with open(leg_dir / 'run.slurm', 'w') as f:
