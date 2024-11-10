@@ -149,7 +149,8 @@ def heat(
     scmask2: str = "",
     deffnm: str = 'heat',
     use_periodic: bool = True,
-    restart: bool = False
+    restart: bool = False,
+    charge_change_mdin_mod: List[str] = list()
 ):
     """
     Heating the system (NVT equilibrium)
@@ -194,10 +195,15 @@ def heat(
         timask1=timask1, timask2=timask2,
         scmask1=scmask1, scmask2=scmask2,
         ntb=ntb, iwrap=iwrap,
-        heating_schedule='\n'.join(create_heating_schedule(num_steps, temp0, tempi)),
         temp0=temp0, tempi=tempi,
         ntx=ntx, irest=irest
     )
+
+    mdin_mod = create_heating_schedule(num_steps, temp0, tempi)
+    if charge_change_mdin_mod:
+        mdin_mod = mdin_mod[:-1] + charge_change_mdin_mod
+    inpstr += '\n' + '\n'.join(mdin_mod)
+
     with open(wdir / f'{deffnm}.in', 'w') as f:
         f.write(inpstr)
     
@@ -478,6 +484,7 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
                     clambda=clambda,
                     restart=restart,
                     deffnm=f'heat_{i}',
+                    charge_change_mdin_mod=charge_change_mdin_mod,
                     **config[f'heat_{i}'],
                     **mask_config
                 )
@@ -491,6 +498,7 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
                     pressure=pres,
                     temp0=temp0_list[i], 
                     free_energy=True, clambda=clambda,
+                    charge_change_mdin_mod=charge_change_mdin_mod,
                     deffnm=f'pres_{i}',
                     **config[f'pres_{i}'],
                     **mask_config

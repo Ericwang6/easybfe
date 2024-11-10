@@ -60,5 +60,3 @@ gti_syn_mass    = 0
 
 &ewald
 /
-
-{heating_schedule}

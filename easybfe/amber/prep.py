@@ -146,7 +146,7 @@ def hydrogen_mass_repartition(struct: parmed.Structure, hydrogen_mass: float = 3
                 atom.mass -= subtract_mass
 
 
-def do_co_alchemical_water(modeller: app.Modeller, d_charge: int, positiveIon: str = 'Na+', negativeIon: str = 'Cl-'):
+def do_co_alchemical_water(modeller: app.Modeller, d_charge: int, scIndices: List[int], positiveIon: str = 'Na+', negativeIon: str = 'Cl-'):
     top, pos = modeller.topology, modeller.positions
     boxVec = top.getPeriodicBoxVectors()
     boxHalf = (boxVec[0] + boxVec[1] + boxVec[2]) / 2
@@ -171,19 +171,13 @@ def do_co_alchemical_water(modeller: app.Modeller, d_charge: int, positiveIon: s
 
     atoms = list(top.atoms())
     
-    soluteIndices = []
-    for i, residue in enumerate(top.residues()):
-        for atom in residue.atoms():
-            soluteIndices.append(atom.index)
-        if i == 1:
-            break
-    solutePositions = posNumpy[soluteIndices]
+    scPositions = posNumpy[scIndices]
 
     waterIndices = np.array([atom.index for atom in atoms if atom.residue.name == 'HOH' and atom.name == 'O'])
     waterPositions = posNumpy[waterIndices]
 
     selectedIndices = []
-    min_dist = np.min(cdist(waterPositions, solutePositions), axis=1)
+    min_dist = np.min(cdist(waterPositions, scPositions), axis=1)
     waterIndicesWithDist = [(index, dist) for index, dist in zip(waterIndices, min_dist)]
     waterIndicesWithDist.sort(key=lambda x: x[1])
     for index, dist in waterIndicesWithDist:
@@ -346,8 +340,12 @@ def prep_ligand_rbfe_systems(
     gasBoxVectors = computeBoxVectorsWithPadding(modeller.positions, gas_buffer)
     modeller.positions = shiftToBoxCenter(modeller.positions, gasBoxVectors)
     modeller.topology.setPeriodicBoxVectors(gasBoxVectors)
-    gas_config.update(generate_amber_mask(num_atoms_A, num_atoms_B, mapping_renum))
+    mask = generate_amber_mask(num_atoms_A, num_atoms_B, mapping_renum)
+    gas_config.update(mask)
     _save(modeller, 'gas', **gas_config)
+
+    scIndices = mask['scmask1'].strip("'")[1:].split(',') + mask['scmask2'].strip("'")[1:].split(',')
+    scIndices = [int(x) -1 for x in scIndices]
     
     # Solvent phase
     solvent_buffer = solvent_config.get('buffer', 12.0) / 10 * unit.nanometers
@@ -362,7 +360,7 @@ def prep_ligand_rbfe_systems(
     )
 
     if use_charge_change:
-        alchem_water_info = do_co_alchemical_water(modeller, d_charge)
+        alchem_water_info = do_co_alchemical_water(modeller, d_charge, scIndices)
         mdin_mod = {
             'solvent': ['&wt TYPE="DUMPFREQ", istep1=100, /', '&wt TYPE="END", /', 'DUMPAVE=dist'], 
             'complex': ['&wt TYPE="DUMPFREQ", istep1=100, /', '&wt TYPE="END", /', 'DUMPAVE=dist']
@@ -407,7 +405,7 @@ def prep_ligand_rbfe_systems(
             neutralize=True
         )
         if use_charge_change:
-            alchem_water_info = do_co_alchemical_water(modeller, d_charge)
+            alchem_water_info = do_co_alchemical_water(modeller, d_charge, scIndices)
         else:
             alchem_water_info = dict()
 
