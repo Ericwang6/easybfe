@@ -10,7 +10,7 @@ import openmm.app.element as elem
 import openmm.unit as unit
 import parmed
 from rdkit import Chem
-
+from scipy.spatial.distance import cdist
 from ..smff.utils import convert_to_xml
 
 
@@ -148,6 +148,10 @@ def hydrogen_mass_repartition(struct: parmed.Structure, hydrogen_mass: float = 3
 
 def do_co_alchemical_water(modeller: app.Modeller, d_charge: int, positiveIon: str = 'Na+', negativeIon: str = 'Cl-'):
     top, pos = modeller.topology, modeller.positions
+    boxVec = top.getPeriodicBoxVectors()
+    boxHalf = (boxVec[0] + boxVec[1] + boxVec[2]) / 2
+    maxLen = np.linalg.norm([boxHalf.x, boxHalf.y, boxHalf.z])
+
     posNumpy = np.array([[p.x, p.y, p.z] for p in pos])
     posIonElements = {
         'Cs+': elem.cesium, 'K+': elem.potassium, 
@@ -166,15 +170,25 @@ def do_co_alchemical_water(modeller: app.Modeller, d_charge: int, positiveIon: s
         element = posIonElements[positiveIon]
 
     atoms = list(top.atoms())
-    waterIndices = np.array([atom.index for atom in atoms if atom.residue.name == 'HOH' and atom.name == 'O'])
     
-    # compute the distances to solute (the center of solute is [0, 0, 0])
-    # and find the waters farest away from the solute
+    soluteIndices = []
+    for i, residue in enumerate(top.residues()):
+        for atom in residue.atoms():
+            soluteIndices.append(atom.index)
+        if i == 1:
+            break
+    solutePositions = posNumpy[soluteIndices]
 
-    distances = np.linalg.norm(posNumpy[waterIndices], axis=1)
-    sorting = waterIndices[np.argsort(distances)[::-1]]
+    waterIndices = np.array([atom.index for atom in atoms if atom.residue.name == 'HOH' and atom.name == 'O'])
+    waterPositions = posNumpy[waterIndices]
+
     selectedIndices = []
-    for index in sorting:
+    min_dist = np.min(cdist(waterPositions, solutePositions), axis=1)
+    waterIndicesWithDist = [(index, dist) for index, dist in zip(waterIndices, min_dist)]
+    waterIndicesWithDist.sort(key=lambda x: x[1])
+    for index, dist in waterIndicesWithDist:
+        if dist < min(2.0, maxLen):
+            continue
         if selectedIndices and np.linalg.norm(posNumpy[selectedIndices] - posNumpy[index], axis=1).min() > 0.5:
             selectedIndices.append(index)
         elif len(selectedIndices) == 0:
