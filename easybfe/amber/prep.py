@@ -373,7 +373,7 @@ def prep_ligand_rbfe_systems(
         scmask1 = mask['scmask1'].strip("'").split(',')
         scmask2 = mask['scmask2'].strip("'").split(',')
         # TODO: need to handle this when scmask1 or scmask2 is empty (although it is not very likely to happen)
-        assert len(scmask1) > 2 and len(scmask2) > 1
+        assert len(scmask1) > 2 and len(scmask2) > 0
         maxLen = min([
             np.linalg.norm([solventBoxVectors[0].x, solventBoxVectors[0].y, solventBoxVectors[0].z]),
             np.linalg.norm([solventBoxVectors[1].x, solventBoxVectors[1].y, solventBoxVectors[1].z]),
