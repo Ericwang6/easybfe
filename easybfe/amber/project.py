@@ -88,6 +88,9 @@ class AmberRbfeProject:
                     info = json.load(f)
                 infos.append(info)
         df = pd.DataFrame(infos)
+        # empty
+        if df.shape[0] == 0:
+            return df
         df = df.sort_values(by=['protein', 'name'])
         return df
 
@@ -320,8 +323,6 @@ class AmberRbfeProject:
         ligandB_name: str, 
         protein_name: str,
         pert_name: Optional[str] = None, 
-        atom_mapping_method: str = 'kartograf',
-        atom_mapping_options: Dict[str, Any] = dict(), 
         config: Dict[str, Any] | os.PathLike = dict(),
         submit: bool = False,
         skip_gas: bool = True,
@@ -406,7 +407,12 @@ class AmberRbfeProject:
             json.dump(basic_info, f, indent=4)
 
         # Atom Mapping
-        self.logger.info("Generate atom mapping")
+        atom_mapping_method = config.get('atom_mapping_method', "kartograf")
+        atom_mapping_options = config.get('atom_mapping_options', dict())
+        self.logger.info(f"Generate atom mapping with {atom_mapping_method}")
+        if atom_mapping_options:
+            self.logger.info(f"The following customized options are used for atom mapping: {atom_mapping_options}")
+        
         if atom_mapping_method == 'lazymcs':
             mcs = atom_mapping_options.get('mcs', None)
             if mcs is None:
@@ -589,6 +595,9 @@ class AmberRbfeProject:
                     json.dump(info, f, indent=4)
 
         df = pd.DataFrame(infos)
+        # empty df
+        if df.shape[0] == 0:
+            return df
         df = df.sort_values(by=['protein_name', 'ligandA_name', 'ligandB_name'])
         return df
     

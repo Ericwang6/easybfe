@@ -291,13 +291,9 @@ def main():
         kwargs = {
             'skip_gas': args.skip_gas,
             'submit': args.submit,
-            'atom_mapping_method': args.atom_mapping_method,
             'config': args.config,
             'overwrite': args.overwrite
         }
-        if args.atom_mapping_method == 'lazymcs':
-            kwargs['atom_mapping_options'] = {'mcs': args.mcs}
-        
         if args.list is None:
             project.add_perturbation(
                 args.ligandA_name, args.ligandB_name, args.protein_name, args.pert_name,
