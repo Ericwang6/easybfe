@@ -382,8 +382,8 @@ def prep_ligand_rbfe_systems(
         r1, r2 = 10.0, 15.0
         assert maxLen > 2 * r2, "The box is too small for charge change FEP"
         mdin_mod['solvent'] += [
-            f'&rst iat={scmask1[0][1:]},{waterOIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=10000.0, rk3=10000.0, /',
-            f'&rst iat={scmask2[0][1:]},{ionIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=10000.0, rk3=10000.0, /'
+            f'&rst iat={scmask1[0][1:]},{waterOIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=100.0, rk3=100.0, /',
+            f'&rst iat={scmask2[0][1:]},{ionIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=100.0, rk3=100.0, /'
         ]
     
     solvent_config.update(mask)
@@ -427,8 +427,8 @@ def prep_ligand_rbfe_systems(
             r1, r2 = 10.0, 15.0
             assert maxLen > 2 * r2, "The box is too small for charge change FEP"
             mdin_mod['complex'] += [
-                f'&rst iat={scmask1[0][1:]},{waterOIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=10000.0, rk3=10000.0, /',
-                f'&rst iat={scmask2[0][1:]},{ionIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=10000.0, rk3=10000.0, /'
+                f'&rst iat={scmask1[0][1:]},{waterOIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=100.0, rk3=100.0, /',
+                f'&rst iat={scmask2[0][1:]},{ionIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=100.0, rk3=100.0, /'
             ]
         complex_config.update(mask)   
     return mdin_mod
