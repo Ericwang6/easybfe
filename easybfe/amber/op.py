@@ -58,6 +58,7 @@ def create_heating_schedule(nsteps: int, final_temp: float = 298.15, init_temp: 
             f'&wt TYPE="TEMP0", istep1 = {(i * 2 + 1) * nsteps_stage + 1}, istep2 = {(i + 1) * 2 * nsteps_stage}, value1 = {schedule[i+1]}, value2 = {schedule[i+1]}, /'
         )
     lines.append('&wt TYPE="END", /')
+    lines.append("")
 
     return lines
 
