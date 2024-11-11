@@ -148,10 +148,6 @@ def hydrogen_mass_repartition(struct: parmed.Structure, hydrogen_mass: float = 3
 
 def do_co_alchemical_water(modeller: app.Modeller, d_charge: int, scIndices: List[int], positiveIon: str = 'Na+', negativeIon: str = 'Cl-'):
     top, pos = modeller.topology, modeller.positions
-    boxVec = top.getPeriodicBoxVectors()
-    boxHalf = (boxVec[0] + boxVec[1] + boxVec[2]) / 2
-    maxLen = np.linalg.norm([boxHalf.x, boxHalf.y, boxHalf.z])
-
     posNumpy = np.array([[p.x, p.y, p.z] for p in pos])
     posIonElements = {
         'Cs+': elem.cesium, 'K+': elem.potassium, 
@@ -181,7 +177,7 @@ def do_co_alchemical_water(modeller: app.Modeller, d_charge: int, scIndices: Lis
     waterIndicesWithDist = [(index, dist) for index, dist in zip(waterIndices, min_dist)]
     waterIndicesWithDist.sort(key=lambda x: x[1])
     for index, dist in waterIndicesWithDist:
-        if dist < min(2.0, maxLen):
+        if dist < 2.0:
             continue
         if selectedIndices and np.linalg.norm(posNumpy[selectedIndices] - posNumpy[index], axis=1).min() > 0.5:
             selectedIndices.append(index)
@@ -378,12 +374,16 @@ def prep_ligand_rbfe_systems(
         scmask2 = mask['scmask2'].strip("'").split(',')
         # TODO: need to handle this when scmask1 or scmask2 is empty (although it is not very likely to happen)
         assert len(scmask1) > 2 and len(scmask2) > 1
-        halfVec = (solventBoxVectors[0] + solventBoxVectors[1] + solventBoxVectors[2]) / 2
-        length = np.linalg.norm([halfVec.x, halfVec.y, halfVec.z]) * 10
-        assert length > 30, "The box is too small for charge change FEP"
+        maxLen = min([
+            np.linalg.norm([solventBoxVectors[0].x, solventBoxVectors[0].y, solventBoxVectors[0].z]),
+            np.linalg.norm([solventBoxVectors[1].x, solventBoxVectors[1].y, solventBoxVectors[1].z]),
+            np.linalg.norm([solventBoxVectors[2].x, solventBoxVectors[2].y, solventBoxVectors[2].z])
+        ]) * 10
+        r1, r2 = 10.0, 15.0
+        assert maxLen > 2 * r2, "The box is too small for charge change FEP"
         mdin_mod['solvent'] += [
-            f'&rst iat={scmask1[0][1:]},{waterOIndex}, r1=10.0, r2=15.0, r3=30.0, r4={length:.2f}, rk2=10000.0, rk3=10000.0, /',
-            f'&rst iat={scmask2[0][1:]},{ionIndex}, r1=10.0, r2=15.0, r3=30.0, r4={length:.2f}, rk2=10000.0, rk3=10000.0, /'
+            f'&rst iat={scmask1[0][1:]},{waterOIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=10000.0, rk3=10000.0, /',
+            f'&rst iat={scmask2[0][1:]},{ionIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=10000.0, rk3=10000.0, /'
         ]
     
     solvent_config.update(mask)
@@ -419,12 +419,16 @@ def prep_ligand_rbfe_systems(
             scmask2 = mask['scmask2'].strip("'").split(',')
             # TODO: need to handle this when scmask1 or scmask2 is empty (although it is not very likely to happen)
             assert len(scmask1) > 2 and len(scmask2) > 1
-            halfVec = (complexBoxVectors[0] + complexBoxVectors[1] + complexBoxVectors[2]) / 2
-            length = np.linalg.norm([halfVec.x, halfVec.y, halfVec.z]) * 10
-            assert length > 30, "The box is too small for charge change FEP"
+            maxLen = min([
+                np.linalg.norm([complexBoxVectors[0].x, complexBoxVectors[0].y, complexBoxVectors[0].z]),
+                np.linalg.norm([complexBoxVectors[1].x, complexBoxVectors[1].y, complexBoxVectors[1].z]),
+                np.linalg.norm([complexBoxVectors[2].x, complexBoxVectors[2].y, complexBoxVectors[2].z])
+            ]) * 10
+            r1, r2 = 10.0, 15.0
+            assert maxLen > 2 * r2, "The box is too small for charge change FEP"
             mdin_mod['complex'] += [
-                f'&rst iat={scmask1[0][1:]},{waterOIndex}, r1=10.0, r2=15.0, r3=30.0, r4={length:.2f}, rk2=10000.0, rk3=10000.0, /',
-                f'&rst iat={scmask2[0][1:]},{ionIndex}, r1=10.0, r2=15.0, r3=30.0, r4={length:.2f}, rk2=10000.0, rk3=10000.0, /'
+                f'&rst iat={scmask1[0][1:]},{waterOIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=10000.0, rk3=10000.0, /',
+                f'&rst iat={scmask2[0][1:]},{ionIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=10000.0, rk3=10000.0, /'
             ]
         complex_config.update(mask)   
     return mdin_mod
