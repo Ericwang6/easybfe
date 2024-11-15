@@ -34,7 +34,7 @@ class OpenFF(SmallMoleculeForceField):
             mol = None
         Chem.AssignStereochemistry(mol, cleanIt=True, force=True)
         off_mol = Molecule.from_rdkit(mol, allow_undefined_stereo=True, hydrogens_are_explicit=True)
-        off_mol.assign_partial_charges(self.charge_method)
+        off_mol.assign_partial_charges(self.charge_method, use_conformers=off_mol.conformers)
         generator = SMIRNOFFTemplateGenerator(molecules=[off_mol], forcefield=self.forcefield).generator
         ff = app.ForceField()
         ff.registerTemplateGenerator(generator)
