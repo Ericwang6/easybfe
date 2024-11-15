@@ -130,10 +130,10 @@ class VinaDocking:
         self.logger.info(f"Results are written to: {out_sdf}")
         return out_sdf
     
-    def constr_dock(self, in_smi_or_sdf: str | os.PathLike, ref_sdf: os.PathLike, name: str | None = None, thresh: float = 5.0):
+    def constr_dock(self, in_smi_or_sdf: str | os.PathLike, ref_sdf: os.PathLike, name: str = "", thresh: float = 5.0):
         if os.path.isfile(in_smi_or_sdf):
             mol = Chem.SDMolSupplier(in_smi_or_sdf, removeHs=False)[0]
-            name = Path(in_smi_or_sdf).stem
+            name = Path(in_smi_or_sdf).stem if not name else name
         else:
             mol = Chem.AddHs(Chem.MolFromSmiles(in_smi_or_sdf))
             AllChem.EmbedMolecule(mol)
