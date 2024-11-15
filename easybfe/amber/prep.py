@@ -341,7 +341,7 @@ def prep_ligand_rbfe_systems(
     _save(modeller, 'gas', **gas_config)
 
     scIndices = mask['scmask1'].strip("'")[1:].split(',') + mask['scmask2'].strip("'")[1:].split(',')
-    scIndices = [int(x) -1 for x in scIndices]
+    scIndices = [int(x) - 1 for x in scIndices if x]
     
     # Solvent phase
     solvent_buffer = solvent_config.get('buffer', 12.0) / 10 * unit.nanometers
