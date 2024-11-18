@@ -206,8 +206,8 @@ class AmberRbfeProject:
             self.logger.info(f"Reading molecules from {mols}")
             if Path(mols).suffix == '.sdf':
                 mols = [m for m in Chem.SDMolSupplier(mols, removeHs=False)]
-                name = kwargs.get('name', None)
-                if len(mols) == 1 and name is not None:
+                if len(mols) == 1:
+                    name = kwargs.get('name', Path(mols).stem)
                     mols[0].SetProp('_Name', name)
                 else:
                     for i, m in enumerate(mols):
