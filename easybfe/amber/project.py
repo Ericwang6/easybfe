@@ -419,20 +419,20 @@ class AmberRbfeProject:
                 self.logger.info("No MCS passed in. Will use RDKit to generate one.")
                 pass
             elif isinstance(mcs, Chem.Mol):
-                pass
+                mcs_mol = mcs
             elif isinstance(mcs, Path) or (isinstance(mcs, str) and os.path.isfile(mcs)):
                 self.logger.info(f"Read MCS from {mcs}")
-                mcs = Chem.SDMolSupplier(str(mcs), removeHs=True)[0]
+                mcs_mol = Chem.SDMolSupplier(str(mcs), removeHs=True)[0]
             else:
-                mcs = Chem.MolFromSmiles(mcs)
-                if mcs is None:
+                mcs_mol = Chem.MolFromSmiles(mcs)
+                if mcs_mol is None:
                     self.logger.info("MCS is not a valid SMILES. Parsing MCS as a SMARTS.")
-                    mcs = Chem.MolFromSmarts(mcs)
-                if mcs is None:
+                    mcs_mol = Chem.MolFromSmarts(mcs)
+                if mcs_mol is None:
                     msg = f"Unrecognized MCS: '{mcs}'. Maybe this is not a valid SMILES or SMARTS or file path"
                     self.logger.error(msg)
-                    raise RuntimeError(mcs)
-            atom_mapping_options['mcs'] = mcs
+                    raise RuntimeError(msg)
+            atom_mapping_options['mcs'] = mcs_mol
             mapper = LazyMCSMapper(**atom_mapping_options)
         else:
             mapper = OpenFEAtomMapper(method=atom_mapping_method, **atom_mapping_options)    
