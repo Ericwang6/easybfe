@@ -416,6 +416,7 @@ class AmberRbfeProject:
         if atom_mapping_method == 'lazymcs':
             mcs = atom_mapping_options.get('mcs', None)
             if mcs is None:
+                mcs_mol = None
                 self.logger.info("No MCS passed in. Will use RDKit to generate one.")
                 pass
             elif isinstance(mcs, Chem.Mol):
@@ -633,7 +634,7 @@ class AmberRbfeProject:
             ligands_info = ligands_info.query(f'`protein` == "{protein_name}"')
             perts_info = perts_info.query(f'`protein_name` == "{protein_name}"')
         
-        avg_dg_expt = ligands_info.dropna(subset=['dG.expt'])['dG.expt'].mean()
+        avg_dg_expt = ligands_info.dropna(subset=['dG.expt', 'dG.calc'])['dG.expt'].mean()
         dg_mle = maximum_likelihood_estimator(perts_info.dropna(subset=['ddG.total'])).set_index('ligand')
         dg_mle['dG'] += avg_dg_expt - dg_mle['dG'].mean()
         for index, row in ligands_info.iterrows():
