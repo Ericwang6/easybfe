@@ -28,7 +28,7 @@ def setup(scm=None):
             'Free Energy Calculation', 'FEP'
         ],
         license='MIT',
-        packages=setuptools.find_packages(exclude=["tests"]),
+        packages=setuptools.find_packages(exclude=["tests", "examples", "docs"]),
         include_package_data=True,
         classifiers=[
             'Development Status :: 4 - Beta',
