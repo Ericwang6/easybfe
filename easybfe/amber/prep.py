@@ -125,7 +125,10 @@ def generate_amber_mask(natomsA: int, natomsB: int, mapping: Dict[int, int], alc
             "scmask1": ','.join(str(x + 1) for x in alchemical_water_info['alchemical_water_hydrogen'])
         }
         for key in alchemical_water_mask:
-            res[key] = f'{res[key]},{alchemical_water_mask[key]}'
+            if not res[key]:
+                res[key] = alchemical_water_mask[key]
+            else:
+                res[key] = f'{res[key]},{alchemical_water_mask[key]}'
     # add single quote mark
     for key in res:
         res[key] = f"'{res[key]}'"
@@ -246,10 +249,14 @@ def prep_ligand_rbfe_systems(
     ligandA_struct.residues[0].name = 'MOLA'
     ligandA_struct.residues[0].resname = 'MOLA'
     ligandA_struct.coordinates = ligandA_mol.GetConformer().GetPositions()
+    for atom in ligandA_struct.atoms:
+        atom.name = f'{atom.name}a'
 
     ligandB_struct = parmed.load_file(str(ligandB_top))
     ligandB_struct.residues[0].name = 'MOLB'
     ligandB_struct.coordinates = ligandB_mol.GetConformer().GetPositions()
+    for atom in ligandB_struct.atoms:
+        atom.name = f'{atom.name}b'
 
     # Make renumbered topologies based on atom mapping
     # This make the order of common core atoms the same, which is a requirement of Amber hybrid topologies
@@ -291,7 +298,15 @@ def prep_ligand_rbfe_systems(
     ff = app.ForceField(protein_ff_xml, water_ff_xml, ffxml_A, ffxml_B)
 
     def _save(modeller, basename, do_hmr=True, hydrogen_mass=3.024, do_hmr_water=False, **kwargs):
-        system = ff.createSystem(modeller.topology, nonbondedMethod=app.PME, constraints=None, rigidWater=False)
+        # This is for cases if A and B are stereo-isomers
+        residueTemplates = {}
+        for res in modeller.topology.residues():
+            if res.name in ['MOLA', 'MOLB']:
+                residueTemplates[res] = res.name
+            if all(name in residueTemplates for name in ['MOLA', 'MOLB']):
+                break
+
+        system = ff.createSystem(modeller.topology, nonbondedMethod=app.PME, constraints=None, rigidWater=False, residueTemplates=residueTemplates)
         tmp = parmed.openmm.load_topology(modeller.topology, system, xyz=modeller.positions)
 
         # Note: In AmberTools, TIP3P water will have 3 bonds, 0 angles. If not, pmemd will raise an error:
@@ -330,7 +345,7 @@ def prep_ligand_rbfe_systems(
     modeller = app.Modeller(app.Topology(), [])
     modeller.add(ligandA_struct.topology, ligandA_struct.positions)
     modeller.add(ligandB_struct.topology, ligandB_struct.positions)
-    
+
     # Gas-Phase
     gas_buffer = gas_config.get('buffer', 20.0) / 10 * unit.nanometers
     gasBoxVectors = computeBoxVectorsWithPadding(modeller.positions, gas_buffer)
@@ -352,7 +367,8 @@ def prep_ligand_rbfe_systems(
         forcefield=ff,
         model=water_ff,
         neutralize=True,
-        ionicStrength=solvent_config.get('ionic_strength', 0.0) * unit.molar
+        ionicStrength=solvent_config.get('ionic_strength', 0.0) * unit.molar,
+        residueTemplates={res: res.name for res in modeller.topology.residues() if res.name in ['MOLA', 'MOLB']}
     )
 
     if use_charge_change:
@@ -403,7 +419,8 @@ def prep_ligand_rbfe_systems(
             forcefield=ff,
             model=water_ff,
             ionicStrength=solvent_config.get('ionic_strength', 0.15) * unit.molar,
-            neutralize=True
+            neutralize=True,
+            residueTemplates={res: res.name for res in modeller.topology.residues() if res.name in ['MOLA', 'MOLB']}
         )
         if use_charge_change:
             alchem_water_info = do_co_alchemical_water(modeller, d_charge, scIndices)
