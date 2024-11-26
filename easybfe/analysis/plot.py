@@ -33,8 +33,8 @@ def plot_correlation(
     ax=None,
     savefig=None
 ):
-
-    xdata, ydata = np.array(xdata), np.array(ydata)
+    # forcibly convert input to numpy array to avoid issues
+    xdata, ydata = np.array(xdata, dtype=float), np.array(ydata, dtype=float)
     
     stats = report_stats(xdata, ydata)
 
