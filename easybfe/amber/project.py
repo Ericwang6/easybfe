@@ -794,6 +794,8 @@ class AmberRbfeProject:
         from tqdm import tqdm
         import MDAnalysis as mda
         from MDAnalysis.analysis import align
+        import numpy as np
+        import matplotlib.pyplot as plt
         
         perturb_dir = self.rbfe_dir / protein_name / pert_name
         
@@ -832,3 +834,28 @@ class AmberRbfeProject:
                             selection.write(os.path.join(trj_dir, f'traj{i}.pdb'))
                         if i == 0:
                             selection.write(out_pdb)
+
+            fig, ax = plt.subplots(1, 1, figsize=(5, 4), constrained_layout=True)
+            for i in [0, num_lambdas - 1]:
+                top = os.path.join(perturb_dir, f'{leg}/lambda{i}/prod/prod_traj.pdb')
+                trj = os.path.join(perturb_dir, f'{leg}/lambda{i}/prod/prod_traj.xtc')
+
+                u = mda.Universe(top, trj)
+                ligand = u.select_atoms('resname MOL')
+                ref_pos = ligand.positions.copy()
+                start_time = u.trajectory[0].time
+                rmsd_list = []
+                time_list = []
+                for ts in u.trajectory:
+                    rmsd = np.sqrt(np.sum((ligand.positions - ref_pos) ** 2) / ref_pos.shape[0])
+                    rmsd_list.append(rmsd)
+                    time_list.append((ts.time - start_time) / 1000)
+                
+                data = np.array([time_list, rmsd_list]).T
+                np.savetxt(os.path.join(perturb_dir, f'{leg}/lambda{i}/prod/rmsd.txt'), data)
+                ax.plot(time_list, rmsd_list, label=f'Lambda {i}')
+
+            ax.legend()
+            ax.set_ylabel(r'RMSD ($\mathrm{\mathring{A}}$)')
+            ax.set_xlabel('Time (ns)')
+            fig.savefig(os.path.join(perturb_dir, f'{leg}/rmsd.png'), dpi=300)
