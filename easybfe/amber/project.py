@@ -203,11 +203,12 @@ class AmberRbfeProject:
         elif isinstance(mols, list) and all(isinstance(m, str) or isinstance(m, Path) for m in mols):
             mols = [str(m) for m in mols]
         elif os.path.isfile(str(mols)):
+            stem = Path(mols).stem
             self.logger.info(f"Reading molecules from {mols}")
             if Path(mols).suffix == '.sdf':
                 mols = [m for m in Chem.SDMolSupplier(mols, removeHs=False)]
                 if len(mols) == 1:
-                    name = kwargs.get('name', Path(mols).stem)
+                    name = stem if kwargs.get('name', None) is None else kwargs['name']
                     mols[0].SetProp('_Name', name)
                 else:
                     for i, m in enumerate(mols):
