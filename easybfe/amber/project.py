@@ -788,75 +788,88 @@ class AmberRbfeProject:
         
         self.logger.info(f"Finished - free energy evaulation. Results written to {pert_dir / 'result.json'}")
 
-    def process_traj(self, protein_name: str, pert_name: str):
+    def process_traj(self, protein_name: str, pert_name: str, remove_tmp: bool = True):
         """
         Processing trajectory of RBFE simulation endpoints: remove unphysical atoms, remove PBC, alignment 
         """
-        from tqdm import tqdm
-        import MDAnalysis as mda
-        from MDAnalysis.analysis import align
         import numpy as np
         import matplotlib.pyplot as plt
+        from tqdm import tqdm
+        from rdkit import Chem
+        import MDAnalysis as mda
+        from MDAnalysis.analysis import align
+        from MDAnalysis.transformations import wrap, unwrap, center_in_box
+        from ..analysis.trajectory import compute_rmsd, plot_dihe_with_mol
         
         perturb_dir = self.rbfe_dir / protein_name / pert_name
         
         for leg in ['solvent', 'complex']:
             num_lambdas = len(glob.glob(os.path.join(perturb_dir, f'{leg}/lambda*/')))
+            rmsd_fig, rmsd_ax = plt.subplots(1, 1, figsize=(5, 4), constrained_layout=True)
 
             for lmd, resid in zip([0, num_lambdas - 1], [1, 2]):
-
-                # prmtop = os.path.join(perturb_dir, f'prep/{leg}_solvated.prmtop')
-                # in_top = os.path.join(perturb_dir, f'{leg}/lambda{lmd}/prod/prod.pdb')
-                in_top = os.path.join(perturb_dir / f'prep/{leg}.pdb')
+                # Remove PBC and align
+                in_top = os.path.join(perturb_dir, f'prep/{leg}.prmtop')
                 in_trj = os.path.join(perturb_dir, f'{leg}/lambda{lmd}/prod/prod.mdcrd')
 
                 out_pdb = os.path.join(perturb_dir, f'{leg}/lambda{lmd}/prod/prod_traj.pdb')
                 out_trj = os.path.join(perturb_dir, f'{leg}/lambda{lmd}/prod/prod_traj.xtc')
+                tmp_trj = os.path.join(perturb_dir, f'{leg}/lambda{lmd}/prod/prod_traj_tmp.xtc')
                 trj_dir = os.path.join(perturb_dir, f'{leg}/lambda{lmd}/prod/traj')
                 if leg == 'complex' and not os.path.isdir(trj_dir):
                     os.mkdir(trj_dir)
 
                 if leg == 'complex':
-                    sele_str = f'protein or resid {resid} or resname ALW'
+                    center_str = 'protein'
+                    solute_str = f'protein or resid {resid}'
+                    align_str = 'backbone'
+                    ligand_str = f'resid {resid}'
                 else:
-                    sele_str = f'resid {resid} or resname ALW'
+                    center_str = f'resid {resid}'
+                    solute_str = f'resid {resid}'
+                    align_str = f'resid {resid}'
+                    ligand_str = f'resid {resid}'
 
                 u = mda.Universe(in_top, in_trj, format='NCDF')
-                u_ref = mda.Universe(in_top, in_trj, format='NCDF')
+                transformations = [
+                    center_in_box(u.select_atoms(center_str)),
+                    wrap(u.atoms),
+                    unwrap(u.atoms)
+                ]
+                u.trajectory.add_transformations(*transformations)
 
-                alignment = align.AlignTraj(u, u_ref, select=sele_str, in_memory=True)
-                alignment.run()
-
-                selection = u.select_atoms(sele_str)
-                with mda.Writer(out_trj, n_atoms=selection.n_atoms) as W:
-                    for i, ts in tqdm(enumerate(u.trajectory), total=len(u.trajectory)):
+                selection = u.select_atoms(solute_str)
+                with mda.Writer(tmp_trj, n_atoms=selection.n_atoms) as W:
+                    for i, ts in tqdm(enumerate(u.trajectory), total=len(u.trajectory), desc='Processing PBC'):
                         W.write(selection)
-                        if leg == 'complex':
-                            selection.write(os.path.join(trj_dir, f'traj{i}.pdb'))
                         if i == 0:
                             selection.write(out_pdb)
-
-            fig, ax = plt.subplots(1, 1, figsize=(5, 4), constrained_layout=True)
-            for i in [0, num_lambdas - 1]:
-                top = os.path.join(perturb_dir, f'{leg}/lambda{i}/prod/prod_traj.pdb')
-                trj = os.path.join(perturb_dir, f'{leg}/lambda{i}/prod/prod_traj.xtc')
-
-                u = mda.Universe(top, trj)
-                ligand = u.select_atoms('resname MOL')
-                ref_pos = ligand.positions.copy()
-                start_time = u.trajectory[0].time
-                rmsd_list = []
-                time_list = []
-                for ts in u.trajectory:
-                    rmsd = np.sqrt(np.sum((ligand.positions - ref_pos) ** 2) / ref_pos.shape[0])
-                    rmsd_list.append(rmsd)
-                    time_list.append((ts.time - start_time) / 1000)
                 
-                data = np.array([time_list, rmsd_list]).T
-                np.savetxt(os.path.join(perturb_dir, f'{leg}/lambda{i}/prod/rmsd.txt'), data)
-                ax.plot(time_list, rmsd_list, label=f'Lambda {i}')
+                u_tmp = mda.Universe(out_pdb, tmp_trj)
+                u_ref = mda.Universe(out_pdb, tmp_trj)
+                alignment = align.AlignTraj(u_tmp, u_ref, select=align_str, in_memory=True)
+                alignment.run()
 
-            ax.legend()
-            ax.set_ylabel(r'RMSD ($\mathrm{\mathring{A}}$)')
-            ax.set_xlabel('Time (ns)')
-            fig.savefig(os.path.join(perturb_dir, f'{leg}/rmsd.png'), dpi=300)
+                with mda.Writer(out_trj, n_atoms=u_tmp.atoms.n_atoms) as W:
+                    for i, ts in tqdm(enumerate(u_tmp.trajectory), total=len(u_tmp.trajectory), desc='Align'):
+                        W.write(u_tmp.atoms)
+                        if leg == 'complex':
+                            u_tmp.atoms.write(os.path.join(trj_dir, f'traj{i}.pdb'))
+
+                u_out = mda.Universe(out_pdb, out_trj)
+                if remove_tmp:
+                    os.remove(tmp_trj)
+
+                # rmsd
+                rmsd_data = compute_rmsd(u_out, ligand_str, os.path.join(perturb_dir, f'{leg}/lambda{lmd}/prod/rmsd.txt'))
+                rmsd_ax.plot(rmsd_data[:, 0], rmsd_data[:, 1], label=f'Lambda {lmd}')
+                # dihedral
+                char = 'A' if resid == 1 else 'B'
+                ligand = Chem.SDMolSupplier(os.path.join(perturb_dir, f'prep/ligand{char}_renum.sdf'), removeHs=False)[0]
+                plot_dihe_with_mol(u_out, ligand, os.path.join(perturb_dir, leg, f'lambda{lmd}', 'prod'))
+            
+            rmsd_ax.legend()
+            rmsd_ax.set_ylabel(r'RMSD ($\mathrm{\mathring{A}}$)')
+            rmsd_ax.set_xlabel('Time (ns)')
+            rmsd_fig.savefig(os.path.join(perturb_dir, f'{leg}/rmsd.png'), dpi=300)
+            plt.close(rmsd_fig)
