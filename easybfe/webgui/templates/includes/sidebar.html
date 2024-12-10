@@ -111,9 +111,33 @@
     </li>
 
     <li class="nav-item">
-        <a class="nav-link" href="{{ url_for('ligand') }}">
+        <a class="nav-link collapsed" href="#" data-toggle="collapse" data-target="#collapseLigands"
+            aria-expanded="true" aria-controls="collapseLigands">
             <i class="fas fa-fw fa-circle"></i>
-            <span>Ligands</span></a>
+            <span>Ligands</span>
+        </a>
+        <div id="collapseLigands" class="collapse" aria-labelledby="headingLigands" data-parent="#accordionSidebar">
+            <div class="bg-white py-2 collapse-inner rounded">
+                <h6 class="collapse-header">Actions:</h6>
+                <a class="collapse-item" href="{{ url_for('ligand_page') }}">Dashboard</a>
+                <a class="collapse-item" href="{{ url_for('add_ligand_page') }}">Add New Ligands</a>
+            </div>
+        </div>
+    </li>
+
+    <li class="nav-item">
+        <a class="nav-link collapsed" href="#" data-toggle="collapse" data-target="#collapsePerturbations"
+            aria-expanded="true" aria-controls="collapsePerturbations">
+            <i class="fas fa-fw fa-circle"></i>
+            <span>Perturbations</span>
+        </a>
+        <div id="collapsePerturbations" class="collapse" aria-labelledby="headingPerturbations" data-parent="#accordionSidebar">
+            <div class="bg-white py-2 collapse-inner rounded">
+                <h6 class="collapse-header">Actions:</h6>
+                <a class="collapse-item" href="{{ url_for('perturbation_page') }}">Dashboard</a>
+                <a class="collapse-item" href="{{ url_for('add_perturbation_page') }}">Add New Perturbations</a>
+            </div>
+        </div>
     </li>
 
     <!-- Divider -->

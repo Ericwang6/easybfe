@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+
+{% block extrastyle %}
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/pdbe-molstar@3.3.0/build/pdbe-molstar-light.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.css">
+
+{% endblock %}
+
+{% block content %}
+<!-- Begin Page Content -->
+<div class="container-fluid">
+
+    <!-- Page Heading -->
+    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 mb-0 text-gray-800">Add Perturbations</h1>
+    </div>
+
+    <div class="row">
+
+        <div class="col-lg-8">
+
+            <!-- Collapsable Card Example -->
+            <div class="card shadow mb-4">
+                <!-- Card Header - Accordion -->
+                <a href="#collapseCardExample" class="d-block card-header py-3" data-toggle="collapse"
+                    role="button" aria-expanded="true" aria-controls="collapseCardExample">
+                    <h6 class="m-0 font-weight-bold text-primary">Add New Perturbations</h6>
+                </a>
+                <!-- Card Content - Collapse -->
+                <div class="collapse show" id="collapseCardExample">
+                    
+                    <div class="card-body">
+                        <form id="addPerturbationForm">
+                            <div class="form-group row">
+                                <div class="col-auto">
+                                    <label for="proteinName" class="col-form-label">Choose Protein:</label>
+                                </div>
+                                <div class="col-auto">
+                                    <select class="form-select form-control" id="proteinName">
+                                        {% for protein in proteins %}
+                                        <option value="{{ protein }}">{{ protein }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div id="pairList">
+                                <div class="form-group row addPair">
+                                    <div class="col-1">
+                                        <div class="col-form-label"><b>Pair 1:</b></div>
+                                    </div>
+                                    <div class="col-auto">
+                                        <label class="col-form-label">Ligand A:</label>
+                                    </div>
+                                    <div class="col-auto">
+                                        <select class="form-select form-control" name="ligandNames">
+                                        </select>
+                                    </div>
+                                    <div class="col-auto">
+                                        <label class="col-form-label">Ligand B:</label>
+                                    </div>
+                                    <div class="col-auto">
+                                        <select class="form-select form-control" name="ligandNames">
+                                        </select>
+                                    </div>
+                                    <div class="col-auto">
+                                        <label class="col-form-label">Name:</label>
+                                    </div>
+                                    <div class="col-auto">
+                                        <input type="text" class="form-control" name="pertName">
+                                    </div>
+                                    <div class="col-auto">
+                                        <button type="button" class="btn btn-outline-danger btn-circle btn-sm removePairButton">
+                                            <i class="fas fa-minus"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-outline-primary btn-circle btn-sm addPairButton">
+                                            <i class="fas fa-plus"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-group row">
+                                <div class="col-auto">
+                                    <label for="editorLaunchButton" class="col-form-label">Simulation Settings:</label>
+                                </div>
+                                <div class="col-auto">
+                                    <button type="button" class="btn btn-primary" data-toggle="modal" data-target="#exampleModal" id="editorLaunchButton">
+                                        Launch Editor
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="form-group row">
+                                <button type="submit" class="btn btn-outline-primary btn-block">Add Perturbations</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="modal fade" id="exampleModal" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-xl modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="exampleModalLabel">Simulation Settings</h5>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                    </div>
+                    <div class="modal-body">
+                        <div><textarea id="editor"></textarea></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-primary" data-dismiss="modal">Save & Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+<!-- /.container-fluid -->
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/javascript/javascript.min.js"></script>
+<script>
+    function isValidJSON(str) {
+        try {
+            JSON.parse(str);
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // init editor
+    var editor;
+    var isEditorInit = false;
+    $('#exampleModal').on('shown.bs.modal', function () {
+        if (!isEditorInit) {
+            editor = CodeMirror.fromTextArea(document.getElementById("editor"), {
+                lineNumbers: true,
+                mode: "javascript",
+                theme: "default",
+                tabSize: 2
+            });
+            fetch("{{ url_for('getPresetConfig') }}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ setting: "16lambda_5ns" })
+            })
+            .then(response => response.json())
+            .then(jdata => {
+                editor.setValue(jdata.content);
+            });
+            editor.setSize("100%", window.innerHeight * 0.8 + 'px');
+            editor.setCursor(0, 0);
+
+            window.addEventListener('resize', function () {
+                editor.setSize("100%", window.innerHeight * 0.8 + 'px')
+            });
+            isEditorInit = true;
+        }
+        
+    });
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const proteinNameSelection = document.getElementById('proteinName');
+        function displayLigandOptions() {
+            fetch("{{ url_for('getLigands') }}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ protein_name: proteinNameSelection.value })
+            })
+            .then(response => response.json())
+            .then(jdata => {
+                const ligandOptions = '<option value="" disabled selected>Select</option>' + jdata.ligands.map(ligand => `<option value="${ligand}">${ligand}</option>`).join('');
+                console.log(ligandOptions);
+                document.querySelectorAll('select[name="ligandNames"]').forEach(element => {
+                    element.innerHTML = ligandOptions;
+                });
+            })
+            .catch(error => console.error("Error:", error));
+        }
+        proteinNameSelection.addEventListener('change', displayLigandOptions);
+        displayLigandOptions();
+    });
+
+    function numberPairs () {
+        var addPairRows = document.querySelectorAll('.addPair');
+        for (var i = 0; i < addPairRows.length; i++) {
+            addPairRows[i].querySelector('b').innerText = `Pair ${i+1}:`; 
+        }
+    }
+
+    // Remove button
+    function addRemoveButtonListener(button) {
+        button.addEventListener('click', function () {
+            var addPairsDiv = document.getElementById('pairList');
+            var addPairRows = addPairsDiv.querySelectorAll('.addPair');
+            if (addPairRows.length == 1) {
+                return 
+            }
+            addPairsDiv.removeChild(this.parentElement.parentElement);
+            var addPairRows = addPairsDiv.querySelectorAll('.addPair');
+            var addPairButton = addPairRows[addPairRows.length - 1].querySelector('.addPairButton');
+            addPairButton.disabled = false;
+            addPairButton.style.display = "inline";
+            numberPairs();
+        })
+    }
+    addRemoveButtonListener(document.querySelector('.removePairButton'));
+
+    // Add button
+    function addAddButtonListener(button) {
+        button.addEventListener('click', function () {
+            var addPairsDiv = document.getElementById('pairList');
+            var addPairRows = addPairsDiv.querySelectorAll('.addPair');
+            var newAddPairRow = addPairRows[addPairRows.length - 1].cloneNode(true);
+            newAddPairRow.querySelectorAll('input, select').forEach(element => {
+                if (element.tagName === 'INPUT') {
+                    element.value = '';
+                } else if (element.tagName === 'SELECT') {
+                    element.selectedIndex = 0;
+                }
+            });
+            addAddButtonListener(newAddPairRow.querySelector('.addPairButton'));
+            addRemoveButtonListener(newAddPairRow.querySelector('.removePairButton'));
+            pairList.appendChild(newAddPairRow);
+            this.disabled = true;
+            this.style.display = "none";
+            numberPairs();
+        })
+    }
+    addAddButtonListener(document.querySelector('.addPairButton'));
+
+</script>
+{% endblock %}

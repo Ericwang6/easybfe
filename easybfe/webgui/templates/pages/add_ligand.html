@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+
+{% block extrastyle %}
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/pdbe-molstar@3.3.0/build/pdbe-molstar-light.css" />
+{% endblock %}
+
+{% block content %}
+<!-- Begin Page Content -->
+<div class="container-fluid">
+
+    <!-- Page Heading -->
+    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 mb-0 text-gray-800">Add Ligands</h1>
+    </div>
+
+    <div class="row">
+
+        <div class="col-lg-6">
+
+            <!-- Collapsable Card Example -->
+            <div class="card shadow mb-4">
+                <!-- Card Header - Accordion -->
+                <a href="#collapseCardExample" class="d-block card-header py-3" data-toggle="collapse"
+                    role="button" aria-expanded="true" aria-controls="collapseCardExample">
+                    <h6 class="m-0 font-weight-bold text-primary">Add New Ligands</h6>
+                </a>
+                <!-- Card Content - Collapse -->
+                <div class="collapse show" id="collapseCardExample">
+                    
+                    <div class="card-body">
+                        <form id="uploadLigandForm">
+                            <div class="form-group row" id="addLigandOptions">
+                                <div class="col-auto">
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="radio" name="addLigandOption" value="multiple" id="addLigandOptions1" onclick="updateAddLigandOption()">
+                                        <label class="form-check-label" for="addLigandOptions1">Multiple ligands in one SDF</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="radio" name="addLigandOption" value="single" id="addLigandOptions2" checked="" onclick="updateAddLigandOption()">
+                                        <label class="form-check-label" for="addLigandOptions2">Single ligand in one SDF</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="radio" name="addLigandOption" value="draw" id="addLigandOptions3" onclick="updateAddLigandOption()" disabled>
+                                        <label class="form-check-label" for="addLigandOptions3">Draw</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row g-2 align-items-center mb-3" id="enterLigandName">
+                                <div class="col-auto">
+                                    <label for="ligandNameInput" class="col-form-label">Ligand Name:</label>
+                                </div>
+                                <div class="col-auto">
+                                    <input type="text" id="ligandNameInput" class="form-control">
+                                </div>
+                            </div>
+
+                            <div class="row g-2 align-items-center mb-3">
+                                <div class="col-auto">
+                                    <label for="ligandFileUpload" class="col-form-label">Upload Ligand SDF:</label>
+                                </div>
+                                <div class="col-auto">
+                                    <input class="form-control-file" type="file" accept=".sdf" id="ligandFileUpload" name="ligandFile">
+                                </div>
+                            </div>
+
+                            <div class="row g-2 align-items-center mb-3">
+                                <div class="col-auto">
+                                    <label for="proteinName" class="col-form-label">Protein:</label>
+                                </div>
+                                <div class="col-auto">
+                                    <select class="form-select form-control" id="proteinName">
+                                        {% for protein in proteins %}
+                                        <option value="{{ protein }}">{{ protein }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="row g-2 align-items-center mb-3">
+                                <div class="col-auto">
+                                    <label for="ligandForceField" class="col-form-label">ForceField:</label>
+                                </div>
+                                <div class="col-auto">
+                                    <select class="form-select form-control" id="ligandForceField">
+                                        <option selected value="gaff">gaff</option>
+                                        <option value="gaff2">gaff2</option>
+                                        <option value="openff-2.1.0">openff-2.1.0</option>
+                                        <option value="custom">openff-2.1.0</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="row g-2 align-items-center mb-3">
+                                <div class="col-auto">
+                                    <label for="ligandChargeMethod" class="col-form-label">Charge Method:</label>
+                                </div>
+                                <div class="col-auto">
+                                    <select class="form-select form-control" id="ligandChargeMethod">
+                                        <option selected value="bcc">bcc</option>
+                                        <option value="gas">gas</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary">Add Ligand</button>
+                        </form>
+
+                        <div id="uploadLigandResponseMessage" style="color: red"></div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <script>
+            var counter = 0;
+            function updateLigandStatus() {
+                counter ++;
+                var elements = document.getElementsByClassName('ligandInfo');
+                for (var i = 0; i < elements.length; i++ ) {
+                    elements[i].textContent = 'Counter:' + counter;
+                }
+            }
+            // setInterval(updateLigandStatus, 1000);
+
+            function updateAddLigandOption () {
+                const option = document.querySelector('input[name="addLigandOption"]:checked').value;
+                const ligandNameInputElement = document.getElementById("ligandNameInput");
+                if (option == "multiple") {
+                    ligandNameInputElement.disabled = true;
+                }
+                else {
+                    ligandNameInputElement.disabled = false;
+                }
+            }
+
+            // upload ligand
+            document.getElementById('uploadLigandForm').addEventListener('submit', function(event) {
+                document.getElementById('uploadLigandResponseMessage').textContent = '';
+                event.preventDefault(); // Prevent the default form submission behavior
+                
+                // Get the file input element
+                var fileInput = document.getElementById('ligandFileUpload');
+                var file = fileInput.files[0]; // Get the first file (if multiple files are allowed, handle them accordingly)
+                
+                if (!file) {
+                    document.getElementById('uploadLigandResponseMessage').textContent = 'No file selected';
+                    return; // Exit if no file was selected
+                }
+
+                // Create a FormData object to hold the file
+                var formData = new FormData();
+                formData.append('file', file); // Append the file to the FormData object
+                formData.append('name', document.getElementById('ligandNameInput').value);
+                formData.append('forcefield', document.getElementById("ligandForceField").value);
+                formData.append('charge', document.getElementById("ligandChargeMethod").value);
+                formData.append('protein', document.getElementById('proteinName').value);
+
+                // Send the FormData to the server using fetch
+                fetch("{{ url_for('uploadLigand') }}", {
+                    method: 'POST',
+                    body: formData,
+                })
+                .then(response => response.json())
+                .then(jdata => {
+                    console.log(jdata);
+                    location.reload();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('responseMessage').textContent = 'Error uploading file';
+                });
+            });
+        </script>
+
+    </div>
+
+</div>
+<!-- /.container-fluid -->
+{% endblock %}

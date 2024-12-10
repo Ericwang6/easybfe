@@ -1,3 +1,4 @@
+import os
 import setuptools
 import datetime
 
@@ -39,7 +40,8 @@ def setup(scm=None):
         zip_safe=False,
         entry_points={
             "console_scripts": [
-                "easybfe = easybfe.cli:main"
+                "easybfe = easybfe.cli:main",
+                "easybfe-gui = easybfe.webgui:main"
             ]
         }
     )

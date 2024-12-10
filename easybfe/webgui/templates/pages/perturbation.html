@@ -12,7 +12,7 @@
 
     <!-- Page Heading -->
     <div class="d-sm-flex align-items-center justify-content-between mb-4">
-        <h1 class="h3 mb-0 text-gray-800">Ligands</h1>
+        <h1 class="h3 mb-0 text-gray-800">Perturbations</h1>
     </div>
 
     <div class="row">
@@ -21,15 +21,15 @@
 
             <div class="card shadow mb-4">
                 <!-- Card Header - Accordion -->
-                <a href="#ligandInfo" class="d-block card-header py-3" data-toggle="collapse"
+                <a href="#pertInfo" class="d-block card-header py-3" data-toggle="collapse"
                     role="button" aria-expanded="true" aria-controls="collapseCardExample">
-                    <h6 class="m-0 font-weight-bold text-primary">Ligand Information</h6>
+                    <h6 class="m-0 font-weight-bold text-primary">Perturbations Information</h6>
                 </a>
                 <!-- Card Content - Collapse -->
-                <div class="collapse show" id="ligandInfo">
+                <div class="collapse show" id="pertInfo">
                     <div class="card-body">
                         <div class="table-responsive">
-                            {{ ligand_table | safe }}
+                            {{ pert_table | safe }}
                         </div>
                     </div>
                 </div>
@@ -39,17 +39,17 @@
 
         <div class="col-lg-4">
 
-            <img src="" id="ligandPic" width="100%" />
+            <img src="" id="mappingPic" width="100%" />
 
         </div>
 
         <script>
-            function displayLigand(row) {
-                var protein = row.querySelector('td[name="protein"]').textContent;
-                var name = row.querySelector('td[name="name"]').textContent;
-                var ligandPicUrl = "{{ url_for('serve_ligand_png', protein_name='__protein_name__', ligand_name='__ligand_name__') }}";
-                ligandPicUrl = ligandPicUrl.replace('__protein_name__', protein).replace('__ligand_name__', name);
-                document.getElementById('ligandPic').src = ligandPicUrl;
+            function displayPert(row) {
+                var protein = row.querySelector('td[name="protein_name"]').textContent;
+                var name = row.querySelector('td[name="pert_name"]').textContent;
+                var picUrl = "{{ url_for('serve_perturbation_mapping_png', protein_name='__protein_name__', pert_name='__pert_name__') }}";
+                picUrl = picUrl.replace('__protein_name__', protein).replace('__pert_name__', name);
+                document.getElementById('mappingPic').src = picUrl;
                 // var name = element.getElementsByName("name")[0].textContent;
                 // var protein = element.getElementsByName("protein")[0].textContent;
                 // console.log(name, protein);
