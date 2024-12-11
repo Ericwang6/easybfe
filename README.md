@@ -12,6 +12,7 @@ EasyBFE now only supports preparing simulation for AMBER22 and newer version tha
 
 Install the following dependencies with conda and `conda-forge` channel:
 
++ python >=3.10,<3.13
 + setuptools_scm
 + numpy
 + pandas
