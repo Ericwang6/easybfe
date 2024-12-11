@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 from collections import OrderedDict
 from .settings import AmberMdin
+from ..cmd import run_command, set_directory
 
 
 class Step:
@@ -58,7 +59,7 @@ class Step:
             self.input = mdin
     
     def write_input(self):
-        with open(self.dirname / f"{self.name}.in", 'w') as f:
+        with open(self.wdir / f"{self.name}.in", 'w') as f:
             f.write(self.input)
 
     def create_cmd(self, use_relpath: bool = True, relative_to: os.PathLike | None = None, export_pdb = True):
@@ -78,7 +79,7 @@ class Step:
         
         cmd = f'{self.exec} -O -i {input} -p {prmtop} -c {inpcrd} -ref {inpcrd} '
         for out, file in outputs.items():
-            cmd += f'-{out} {os.path.realpath(file, self.wdir)}'
+            cmd += f'-{out} {file} '
         if export_pdb:
             cmd += f' && ambpdb -p {prmtop} -c {outputs["r"]} > {pdb}'
         return cmd
@@ -88,17 +89,19 @@ class Step:
         self.wdir.mkdir(exist_ok=True)
         self.write_input()
         cmd = self.create_cmd(use_relpath, relative_to, export_pdb)
-        with open(self.dirname / f'{self.name}.sh', 'w') as f:
-            f.write('\n'.join(cmd.split('&&')))
+        with open(self.wdir / f'{self.name}.sh', 'w') as f:
+            f.write('\n'.join(cmd.split(' && ')))
 
     def link_prev_step(self, step):
         self.prev_step = step
+        if self.prmtop is None:
+            self.set_prmtop(self.prev_step.prmtop)
         assert self.prev_step.prmtop == self.prmtop, "Not the same topology"
         self.set_inpcrd(self.prev_step.outputs['r'])
 
 
 class Workflow:
-    def __init__(self, wdir: os.PathLike, prmtop: os.PathLike, inpcrd: os.PathLike, steps: List[Step]):
+    def __init__(self, wdir: os.PathLike, prmtop: os.PathLike, inpcrd: os.PathLike, steps: List[Step], header: List[str] | str = ""):
         self.wdir = Path(wdir).resolve()
         self.steps = OrderedDict()
         steps[0].set_inpcrd(inpcrd)
@@ -108,11 +111,41 @@ class Workflow:
             self.steps[step.name] = step
             if i > 0:
                 step.link_prev_step(steps[i - 1])
+        
+        if isinstance(header, list):
+            self.header = '\n'.join(header)
+        else:
+            self.header = header
     
     def create(self, **kwargs):
-        self.wdir.mkdir(True)
+        self.wdir.mkdir(exist_ok=True)
         for name, step in self.steps.items():
             step.create(**kwargs)
+        with open(self.wdir / 'run.sh', 'w') as f:
+            for name, step in self.steps.items():
+                f.write(f'cd {name}\n')
+                f.write(f'echo Running {name} && touch running.tag\n')
+                f.write('if [ ! -f done.tag ]; then\n')
+                f.write(f'  source {name}.sh > {name}.stdout 2>&1\n')
+                f.write('  if [ $? -ne 0 ]; then\n')
+                f.write('    mv running.tag error.tag && echo "Error occurs!" && exit 1\n')
+                f.write('  fi\n')
+                f.write('  mv running.tag done.tag')
+                f.write('fi\n')
+                f.write('cd ..\n\n')
+        with open(self.wdir / 'run.submit', 'w') as f:
+            f.write(self.header + '\n')
+            f.write('source run.sh')
+        
+    def submit(self, platform: str = "slurm"):
+        if platform == 'slurm':
+            with set_directory(self.wdir):
+                run_command(['sbatch', 'run.submit'])
+        elif platform == 'local':
+            with set_directory(self.wdir):
+                run_command(['source run.submit'])
+        else:
+            raise NotImplementedError('Unsupported platform')
 
 
 def create_groupfile_from_steps(steps: List[Step], dirname: os.PathLike | None = None, fpath: os.PathLike | None = None):
