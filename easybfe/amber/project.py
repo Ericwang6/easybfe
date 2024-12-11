@@ -34,6 +34,7 @@ class AmberRbfeProject:
         self.proteins_dir = self.wdir / 'proteins'
         self.rbfe_dir = self.wdir / 'rbfe'
         self.upload_dir = self.wdir / 'upload'
+        self.md_dir = self.wdir / 'md'
         self.logger = init_logger()
 
         if init:
@@ -42,6 +43,7 @@ class AmberRbfeProject:
             self.proteins_dir.mkdir(exist_ok=True)
             self.rbfe_dir.mkdir(exist_ok=True)
             self.upload_dir.mkdir(exist_ok=True)
+            self.md_dir.mkdir(exist_ok=True)
         else:
             assert all(d.is_dir() for d in [self.wdir, self.ligands_dir, self.proteins_dir, self.rbfe_dir, self.upload_dir]), "Not an existing project directory, please use init=True to create one"
     
@@ -871,3 +873,62 @@ class AmberRbfeProject:
             rmsd_ax.set_xlabel('Time (ns)')
             rmsd_fig.savefig(os.path.join(perturb_dir, f'{leg}/rmsd.png'), dpi=300)
             plt.close(rmsd_fig)
+    
+    def run_plain_md(
+        self, 
+        protein_name: str, 
+        ligand_name: str = "",
+        task_name: str = "",
+        config: os.PathLike = "",
+        ligand_only: bool = False,
+        submit: bool = False,
+    ):
+        """
+        Setup a plain MD job
+        """
+        from .plain_md import create_system, create_workflow
+
+        assert task_name, "Must provide a task_name"
+        wdir = self.md_dir / task_name
+        wdir.mkdir()
+
+        if ligand_only:
+            protein_pdb = ""
+        else:
+            protein_pdb = self.proteins_dir / protein_name / f'{protein_name}.pdb'
+        
+        if ligand_name:
+            ligand_prmtop = self.ligands_dir / protein_name / ligand_name / f'{ligand_name}.prmtop'
+            ligand_inpcrd = self.ligands_dir / protein_name / ligand_name / f'{ligand_name}.inpcrd'
+        else:
+            ligand_prmtop = ligand_inpcrd = ""
+        
+        with open(config) as f:
+            config = json.load(f)
+
+        create_system(
+            protein_pdb,
+            ligand_prmtop,
+            ligand_inpcrd,
+            wdir,
+            protein_ff=config.get('protein_ff', 'ff14SB'),
+            water_ff=config.get('water_ff', 'tip3p'),
+            buffer=config.get('buffer', 20.0),
+            ionic_strength=config.get('ionic_strength', 0.15),
+            do_hmr=config.get('do_hmr', True),
+            do_hmr_water=config.get('do_hmr_water', False)
+        )
+
+        prmtop = wdir / 'system.prmtop'
+        inpcrd = wdir / 'system.inpcrd'
+
+        wf = create_workflow(
+            prmtop,
+            inpcrd,
+            config['workflow'],
+            wdir,
+            exec=config.get('exec', 'pmemd.cuda')
+        )
+        wf.create()
+        if submit:
+            wf.submit(platform=config.get('submit_platform', 'slurm'))
