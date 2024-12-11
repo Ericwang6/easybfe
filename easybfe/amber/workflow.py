@@ -130,10 +130,11 @@ class Workflow:
                 f.write('  if [ $? -ne 0 ]; then\n')
                 f.write('    mv running.tag error.tag && echo "Error occurs!" && exit 1\n')
                 f.write('  fi\n')
-                f.write('  mv running.tag done.tag')
+                f.write('  mv running.tag done.tag\n')
                 f.write('fi\n')
                 f.write('cd ..\n\n')
         with open(self.wdir / 'run.submit', 'w') as f:
+            f.write('#!/bin/bash\n')
             f.write(self.header + '\n')
             f.write('source run.sh')
         
@@ -143,7 +144,7 @@ class Workflow:
                 run_command(['sbatch', 'run.submit'])
         elif platform == 'local':
             with set_directory(self.wdir):
-                run_command(['source run.submit'])
+                run_command(['source', 'run.submit'])
         else:
             raise NotImplementedError('Unsupported platform')
 

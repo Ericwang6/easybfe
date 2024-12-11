@@ -905,7 +905,22 @@ class AmberRbfeProject:
         
         with open(config) as f:
             config = json.load(f)
+        
+        if ligand_only:
+            task_msg = f'ligand {ligand_name}'
+            task_type = 'ligand'
+        elif ligand_name:
+            task_msg = f'protein {protein_name} with ligand {ligand_name}'
+            task_type = 'complex'
+        else:
+            task_msg = f'protein {protein_name}'
+            task_type = 'protein'
+        
+        config['task_type'] = task_type
+        with open(wdir / 'config.json', 'w') as f:
+            json.dump(config, f, indent=4)
 
+        self.logger.info(f"Setting up plain MD task for {task_msg}")
         create_system(
             protein_pdb,
             ligand_prmtop,
@@ -929,6 +944,8 @@ class AmberRbfeProject:
             wdir,
             exec=config.get('exec', 'pmemd.cuda')
         )
+        wf.header = '\n'.join(config.get('header', []))
         wf.create()
         if submit:
             wf.submit(platform=config.get('submit_platform', 'slurm'))
+            self.logger.info("Job submitted")

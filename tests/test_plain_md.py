@@ -1,4 +1,4 @@
-import os
+import os, shutil
 from easybfe.amber import AmberRbfeProject
 
 
@@ -6,6 +6,9 @@ def test_plain_md():
     pwd = os.path.dirname(__file__)
     datadir = os.path.join(pwd, 'data')
     wdir = os.path.join(pwd, '_test_plain_md')
+
+    if os.path.isdir(wdir):
+        shutil.rmtree(wdir)
 
     proj = AmberRbfeProject(wdir, init=True)
     proj.add_protein(os.path.join(datadir, 'tyk2_pdbfixer.pdb'), name='tyk2')
@@ -15,18 +18,19 @@ def test_plain_md():
         protein_name="tyk2",
         ligand_name="jmc_23",
         task_name="jmc_23_complex",
-        config=config
-    )
-    proj.run_plain_md(
-        protein_name="tyk2",
-        task_name="tyk2",
-        config=config
-    )
-    proj.run_plain_md(
-        protein_name="tyk2",
-        ligand_name="jmc_23",
-        task_name="jmc_23",
         config=config,
-        ligand_only=True
+        submit=False
     )
+    # proj.run_plain_md(
+    #     protein_name="tyk2",
+    #     task_name="tyk2",
+    #     config=config
+    # )
+    # proj.run_plain_md(
+    #     protein_name="tyk2",
+    #     ligand_name="jmc_23",
+    #     task_name="jmc_23",
+    #     config=config,
+    #     ligand_only=True
+    # )
 

@@ -81,7 +81,7 @@ class AmberCntrlSettings(AmberNamelist):
     cut: float = 10.0  # non-bonded cutoff, in angstrom
     nmropt: int = 0  # Varying conditions, useful in heating
     # Heat/Pressure coupling
-    ntb: int = 1  # 0 - non-preodic; 1 - constant volume; 2 - constant pressure
+    ntb: int = 2  # 0 - non-preodic; 1 - constant volume; 2 - constant pressure
     ntp: int = 1  # 0 - no pressure coupling; 1 - isotropic coupling; 2 - anisotropic coupling
     ntt: int = 3  # 0 - NVE; 1 - weak coupling; 2 - Andersen-like coupling; 3 - Langevin dynamics
     gamma_ln: float = 2.0 # collision freq, in ps^-1
@@ -194,12 +194,13 @@ class AmberMdin(BaseModel):
             lines.append(item.model_dump_mdin())
         for item in self.rst:
             lines.append(item.model_dump_mdin())
+        lines.append('')
         return '\n'.join(lines)
 
 
 def create_default_setting(
     em: bool = False, 
-    heat: bool = True, 
+    nvt: bool = True, 
     restraint: bool = False, 
     free_energy: bool = False,
     restart: bool = False
@@ -211,9 +212,11 @@ def create_default_setting(
     }
     if em:
         settings['cntrl']['imin'] = 1
-    if heat:
         settings['cntrl']['ntp'] = 0
-        settings['cntrl']['nmropt'] = 1
+        settings['cntrl']['ntb'] = 1
+    if nvt:
+        settings['cntrl']['ntp'] = 0
+        settings['cntrl']['ntb'] = 1
     if restraint:
         settings['cntrl']['ntr'] = 1
     if restart:
@@ -224,7 +227,7 @@ def create_default_setting(
         settings['cntrl']['icfe'] = 1
         settings['cntrl']['ntf'] = 1
         settings['cntrl']['ifmbar'] = 1
-    return AmberMdin(**settings)
+    return settings
 
 
 if __name__ == '__main__':

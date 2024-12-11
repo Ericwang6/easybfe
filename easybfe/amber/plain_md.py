@@ -116,11 +116,28 @@ def create_workflow(
         restart = i > 0 and step_settings[i - 1]['type'] != 'em'
         
         if predef == 'em':
-            mdin = create_default_setting(em=True, heat=False, restraint=False, restart=restart)
-            mdin.cntrl = mdin.cntrl.model_copy(update=setting)
+            # energy minimization
+            predef_settings = create_default_setting(em=True, nvt=True, restraint=False, restart=restart)
         elif predef == 'heat':
-            mdin = create_default_setting(em=False, heat=True, restraint=True, restart=restart)
-            mdin.cntrl = mdin.cntrl.model_copy(update=setting)
+            # nvt - heating up (equilibrition)
+            predef_settings = create_default_setting(em=False, nvt=True, restraint=True, restart=restart)
+            predef_settings['cntrl']['nmropt'] = 1
+        elif predef == "pres":
+            # npt - pressurize (equilibrition)
+            predef_settings = create_default_setting(em=False, nvt=False, restraint=True, restart=restart)
+        elif predef == "nvt":
+            # production with NVT
+            predef_settings = create_default_setting(em=False, nvt=True, restraint=False, restart=restart)
+        else:
+            # production with NPT
+            predef_settings = create_default_setting(em=False, nvt=False, restraint=False, restart=restart)
+            if predef != 'prod':
+                warnings.warn("Unrecognized pre-defined setting types. NPT production pre-defined settings are used with user-specified &cntrl options")
+
+        predef_settings['cntrl'].update(setting['cntrl'])
+        mdin = AmberMdin(**predef_settings)
+        if predef == 'heat':
+            # heating schedule: first half heat up, second half equilibriation
             mdin.wt.append(
                 AmberWtSettings(
                     type='TEMP0', 
@@ -130,14 +147,6 @@ def create_workflow(
                     value2=mdin.cntrl.temp0
                 )
             )
-        elif predef == "pres":
-            mdin = create_default_setting(em=False, heat=False, restraint=True, restart=restart)
-            mdin.cntrl = mdin.cntrl.model_copy(update=setting)
-        else:
-            mdin = create_default_setting(em=False, heat=False, restraint=False, restart=restart)
-            mdin.cntrl = mdin.cntrl.model_copy(update=setting)
-            if predef != 'prod':
-                warnings.warn("Unrecognized setting types. User input settings.")
 
         step = Step(
             name=name,

@@ -1,14 +1,14 @@
 {
     "header": [
-        "#SBATCH -J FEP_AMBER",
+        "#SBATCH -J MD_AMBER",
         "#SBATCH -N 1",
-        "#SBATCH -p es1",
-        "#SBATCH -A lr_ninjaone",
-        "#SBATCH --ntasks-per-node 16",
-        "#SBATCH --gres=gpu:A40:2",
-        "#SBATCH --mem=16G",
+        "#SBATCH -p savio4_gpu",
+        "#SBATCH -A ac_armada2",
+        "#SBATCH --gres=gpu:A5000:1",
+        "#SBATCH --qos=a5k_gpu4_normal",
         "#SBATCH --time=24:0:0",
-        "#SBATCH --exclude=n0052.es1,n0058.es1,n0051.es1,n0045.es1,n0066.es1,n0064.es1",
+        "#SBATCH --ntasks-per-node 16",
+        "#SBATCH --mem=16G",
         "",
         "source /global/home/users/ericwangyz/env/amber22.env",
         "echo \"Allocated GPU IDs: $CUDA_VISIBLE_DEVICES on $(hostname)\""
@@ -17,7 +17,7 @@
     "exec": "pmemd.cuda",
     "protein_ff": "ff14SB",
     "water_ff": "tip3p",
-    "buffer": 20.0,
+    "buffer": 15.0,
     "ionic_strength": 0.15,
     "do_hmr": true,
     "workflow": [
