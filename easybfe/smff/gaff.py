@@ -8,7 +8,7 @@ import warnings
 import os, shutil
 from pathlib import Path
 from typing import List, Union, Optional
-
+import parmed
 from rdkit import Chem
 
 from .base import SmallMoleculeForceField
@@ -75,6 +75,7 @@ class GAFF(SmallMoleculeForceField):
     
     def parametrize(self, ligand_file: os.PathLike, wdir: os.PathLike | None = None):
         ligand_file = Path(ligand_file).resolve()
+        assert ligand_file.suffix == '.sdf'
         wdir = Path(wdir).resolve()
         with set_directory(wdir):
             run_acpype(
@@ -86,6 +87,9 @@ class GAFF(SmallMoleculeForceField):
             )
             # amber format
             shutil.copyfile('MOL.acpype/MOL_AC.prmtop', ligand_file.stem + '.prmtop')
+            struct = parmed.load_file('MOL.acpype/MOL_AC.prmtop')
+            struct.coordinates = Chem.SDMolSupplier(str(ligand_file), removeHs=False)[0].GetConformer().GetPositions()
+            struct.save(ligand_file.stem + '.inpcrd', overwrite=True)
             # gmx format
             fp = open(ligand_file.stem + '.top', 'w')
             with open('MOL.acpype/MOL_GMX.itp') as f:
