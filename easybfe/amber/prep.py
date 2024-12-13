@@ -82,13 +82,15 @@ def renumber_parmed_structure(struct: parmed.Structure, mapping: Dict[int, int])
     return struct
 
 
-def computeBoxVectorsWithPadding(positions: unit.Quantity, buffer: unit.Quantity):
+def computeBoxVectorsWithPadding(positions: unit.Quantity, buffer: unit.Quantity, boxShape: str = 'cubic'):
     min_x, min_y, min_z = min(pos.x for pos in positions), min(pos.y for pos in positions), min(pos.z for pos in positions)
     max_x, max_y, max_z = max(pos.x for pos in positions), max(pos.y for pos in positions), max(pos.z for pos in positions)
     buffer = buffer.value_in_unit(unit.nanometer)
     box_x = (max_x - min_x) + buffer * 2
     box_y = (max_y - min_y) + buffer * 2
     box_z = (max_z - min_z) + buffer * 2
+    if boxShape == 'cubic':
+        box_x = box_y = box_z = max(box_x, box_y, box_z)
     return (
         mm.Vec3(box_x, 0.0, 0.0),
         mm.Vec3(0.0, box_y, 0.0),
@@ -131,6 +133,8 @@ def generate_amber_mask(natomsA: int, natomsB: int, mapping: Dict[int, int], alc
                 res[key] = f'{res[key]},{alchemical_water_mask[key]}'
     # add single quote mark
     for key in res:
+        if res[key].startswith('@,'):
+            res[key] = '@' + res[key][2:]
         res[key] = f"'{res[key]}'"
     return res
 
@@ -384,12 +388,30 @@ def prep_ligand_rbfe_systems(
     _save(modeller, 'solvent', **solvent_config, **alchem_water_info)
     mask = generate_amber_mask(num_atoms_A, num_atoms_B, mapping_renum, alchem_water_info)
     if use_charge_change:
-        waterOIndex = mask['timask1'].strip("'").split(',')[-3]
-        ionIndex = mask['timask2'].strip("'").split(',')[-1]
-        scmask1 = mask['scmask1'].strip("'").split(',')
-        scmask2 = mask['scmask2'].strip("'").split(',')
-        # TODO: need to handle this when scmask1 or scmask2 is empty (although it is not very likely to happen)
-        assert len(scmask1) > 2 and len(scmask2) > 0
+        waterOIndex = mask['timask1'].strip("'").strip('@').split(',')[-3]
+        ionIndex = mask['timask2'].strip("'").strip('@').split(',')[-1]
+        scmask1 = mask['scmask1'].strip("'").strip('@').split(',')[:-2]
+        scmask2 = mask['scmask2'].strip("'").strip('@').split(',')
+
+        # determine the anchor on the sc region
+        # "anchor" defines the distance restraint between the ligand and the alchemical water
+        positions = np.array(modeller.positions.value_in_unit(unit.nanometers))
+        if len(scmask1) == 0:
+            anchor2 = scmask2[0]
+            anchor1 = np.argmin(np.linalg.norm(
+                positions[:num_atoms_A] - positions[int(anchor2) - 1],
+                axis=1
+            )) + 1
+        elif len(scmask2) == 0:
+            anchor1 = scmask1[0]
+            anchor2 = np.argmin(np.linalg.norm(
+                positions[num_atoms_A:num_atoms_A+num_atoms_B] - positions[int(anchor1) - 1],
+                axis=1
+            )) + num_atoms_A
+        else:
+            anchor1 = scmask1[0]
+            anchor2 = scmask2[0]
+
         maxLen = min([
             np.linalg.norm([solventBoxVectors[0].x, solventBoxVectors[0].y, solventBoxVectors[0].z]),
             np.linalg.norm([solventBoxVectors[1].x, solventBoxVectors[1].y, solventBoxVectors[1].z]),
@@ -398,8 +420,8 @@ def prep_ligand_rbfe_systems(
         r1, r2 = 10.0, 15.0
         assert maxLen > 2 * r2, "The box is too small for charge change FEP"
         mdin_mod['solvent'] += [
-            f'&rst iat={scmask1[0][1:]},{waterOIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=100.0, rk3=100.0, /',
-            f'&rst iat={scmask2[0][1:]},{ionIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=100.0, rk3=100.0, /'
+            f'&rst iat={anchor1},{waterOIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=1000.0, rk3=1000.0, /',
+            f'&rst iat={anchor2},{ionIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=1000.0, rk3=1000.0, /'
         ]
     
     solvent_config.update(mask)
@@ -430,12 +452,30 @@ def prep_ligand_rbfe_systems(
         _save(modeller, 'complex', **complex_config, **alchem_water_info)
         mask = generate_amber_mask(num_atoms_A, num_atoms_B, mapping_renum, alchem_water_info)
         if use_charge_change:
-            waterOIndex = mask['timask1'].strip("'").split(',')[-3]
-            ionIndex = mask['timask2'].strip("'").split(',')[-1]
-            scmask1 = mask['scmask1'].strip("'").split(',')
-            scmask2 = mask['scmask2'].strip("'").split(',')
-            # TODO: need to handle this when scmask1 or scmask2 is empty (although it is not very likely to happen)
-            assert len(scmask1) > 2 and len(scmask2) > 0
+            waterOIndex = mask['timask1'].strip("'").strip('@').split(',')[-3]
+            ionIndex = mask['timask2'].strip("'").strip('@').split(',')[-1]
+            scmask1 = mask['scmask1'].strip("'").strip('@').split(',')[:-2]
+            scmask2 = mask['scmask2'].strip("'").strip('@').split(',')
+            
+            # determine the anchor on the sc region
+            # "anchor" defines the distance restraint between the ligand and the alchemical water
+            positions = np.array(modeller.positions.value_in_unit(unit.nanometers))
+            if len(scmask1) == 0:
+                anchor2 = scmask2[0]
+                anchor1 = np.argmin(np.linalg.norm(
+                    positions[:num_atoms_A] - positions[int(anchor2) - 1],
+                    axis=1
+                )) + 1
+            elif len(scmask2) == 0:
+                anchor1 = scmask1[0]
+                anchor2 = np.argmin(np.linalg.norm(
+                    positions[num_atoms_A:num_atoms_A+num_atoms_B] - positions[int(anchor1) - 1],
+                    axis=1
+                )) + num_atoms_A
+            else:
+                anchor1 = scmask1[0]
+                anchor2 = scmask2[0]
+
             maxLen = min([
                 np.linalg.norm([complexBoxVectors[0].x, complexBoxVectors[0].y, complexBoxVectors[0].z]),
                 np.linalg.norm([complexBoxVectors[1].x, complexBoxVectors[1].y, complexBoxVectors[1].z]),
@@ -444,8 +484,8 @@ def prep_ligand_rbfe_systems(
             r1, r2 = 10.0, 15.0
             assert maxLen > 2 * r2, "The box is too small for charge change FEP"
             mdin_mod['complex'] += [
-                f'&rst iat={scmask1[0][1:]},{waterOIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=100.0, rk3=100.0, /',
-                f'&rst iat={scmask2[0][1:]},{ionIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=100.0, rk3=100.0, /'
+                f'&rst iat={anchor1},{waterOIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=1000.0, rk3=1000.0, /',
+                f'&rst iat={anchor2},{ionIndex}, r1={r1:.2f}, r2={r2:.2f}, r3={maxLen - r2:.2f}, r4={maxLen - r1:.2f}, rk2=1000.0, rk3=1000.0, /'
             ]
         complex_config.update(mask)   
     return mdin_mod
