@@ -95,7 +95,7 @@ Use `easybfe add_ligand -h` for more information.
 3. When `-i` option takes only one sdf file with one ligand, users can also pass in a customized forcefield (topology) for this ligand through `-f` option. This customized forcefield file has to be in Amber .prmtop format or Gromacs .top format. However, the customized force field should not contain terms other than harmonic bond/angles, peroidic torsions, Lennard-Jones, charge-charge interactions. Torsion-torsion coupling (CMAP) term, virtual sites are not supported.
 
 ```bash
-easybfe add_ligand -p tyk2 -i example/ejm_44.sdf -f example/ejm_44.prmtop
+easybfe add_ligand -p tyk2 -i examples/ejm_44.sdf -f examples/ejm_44.prmtop
 ```
 4. You can add experimental values with property name `dG.expt` (in kcal/mol) or `affinity.expt` (in uM) in the sdf file and `easybfe report` will use report them together with the FEP values. 
 5. Gasteiger charges is ONLY suitable for debugging. It is strongly not recommended in pratical use. 
@@ -103,7 +103,7 @@ easybfe add_ligand -p tyk2 -i example/ejm_44.sdf -f example/ejm_44.prmtop
 ## Step 4: Add perturbations
 This following command will add a perturbation between `ejm_44` and `ejm_42`:
 ```bash
-easybfe add_perturbation -p tyk2 --ligandA ejm_44 --ligandB ejm_42 -n "ejm_44~ejm_42" --config example/config_5ns.json
+easybfe add_perturbation -p tyk2 --ligandA ejm_44 --ligandB ejm_42 -n "ejm_44~ejm_42" --config examples/config_5ns.json
 ```
 Breakdown of the options:
 + `-p`: specify the name of the protein structure that the ligands belongs to.
@@ -115,12 +115,13 @@ This command will prepare all simulation files (including atom mapping, building
 
 **Note**:
 
-1. If you are confident with the atom mapping, you can toogle `--submit` in the command and the files will be submitted automatically. 
-2. If there has already been a perturbation with the same name, easybfe will raise an error. Users can toogle `--overwrite` option to overwrite the existing perturbation.
-2. Users can also prepare multiple perturbations with one command:
+1. The RBFE result for perturbation `ligandA~ligandB` is $\Delta G_{ligandB}-\Delta G_{ligandA}$
+2. If you are confident with the atom mapping, you can toogle `--submit` in the command and the files will be submitted automatically. 
+3. If there has already been a perturbation with the same name, easybfe will raise an error. Users can toogle `--overwrite` option to overwrite the existing perturbation.
+4. Users can also prepare multiple perturbations with one command:
 
    ```bash
-   easybfe add_perturbation -p tyk2 -l example/perturbations.txt --config example/config_5ns.json -m 10
+   easybfe add_perturbation -p tyk2 -l perturbations.txt --config example/config_5ns.json -m 2
    ```
 
    + `-l`: File contains list of perturabtions. In the file, each line contains two ligand names seperated by a whitespace. For example,
