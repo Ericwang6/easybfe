@@ -56,14 +56,13 @@ Then you will see in the proteins directory that a protein with name specified i
 
 Use this following command to add ligands and parametrize them:
 ```bash
-easybfe add_ligand -p tyk2 -i examples/tyk2_ligands.sdf -f gaff2 -c bcc -m 10
+easybfe add_ligand -p tyk2 -i examples/tyk2/ejm_44.sdf -f gaff2 -c bcc
 ```
 Breakdown of the options:
 + `-p`: specify the name of the protein structure that the ligands belongs to.
 + `-i`: the input ligand structures (.sdf)
 + `-f`: the forcefield to parametrize the ligand. Supported values: `gaff`, `gaff2`, openff series supported by `openff-toolkit` (e.g. `openff-2.1.0`)
 + `-c`: method to assign atomic partial charges. Supported values: `bcc` (AM1-BCC), `gas` (Gasteiger)
-+ `-m`: number of processors to run in parallel.
 
 Use `easybfe add_ligand -h` for more information.
 
@@ -71,28 +70,40 @@ Use `easybfe add_ligand -h` for more information.
 
 1. The `-i` option supports the following types of input:
 
-   + One sdf file contains multiple ligands. In this case, the name of each ligand specified in the sdf file (the first line of each mol block) will be used as the name in the project.
-   + One sdf file contains one ligand. In this case, by default, the name of this ligand will be the basename of the file. For example, `jmc_23` for `examples/jmc_23.sdf`. Users can also specify its name with `-n` option in this case:
+   + One sdf file contains one ligand. In this case, by default, the name of this ligand will be the basename of the file. For example, `ejm_44` for `examples/ejm_44.sdf`. Users can also specify its name with `-n` option in this case:
+
    ```bash
-   easybfe add_ligand -p tyk2 -i example/jmc_23.sdf -f gaff2 -c bcc -n jmc_23_custom_name
+   easybfe add_ligand -p tyk2 -i example/ejm_44.sdf -f gaff2 -c bcc -n ejm_44_custom_name
    ```
+
+   + One sdf file contains multiple ligands. In this case, the name of each ligand specified in the sdf file (the first line of each mol block) will be used as the name in the project.
+
+   ```bash
+   easybfe add_ligand -p tyk2 -i example/tyk2_ligands.sdf -f gaff2 -c bcc -m 10
+   ```
+
+   The `-m` option specifies how many CPU cores to run the jobs in parallel.
+
    + Multiple sdf files with pattern matching but each file must contain one ligand. If not, only the first ligand will be added. In this case, the basename of each sdf file will be used as the ligand's name.
+
    ```bash
    easybfe add_ligand -p tyk2 -i example/*.sdf -f gaff2 -c bcc -m 10
    ```
 
-2. When `-i` option takes only one sdf file with one ligand, users can also pass in a customized forcefield (topology) for this ligand through `-f` option. This customized forcefield file has to be in Amber .prmtop format or Gromacs .top format. However, the customized force field should not contain terms other than harmonic bond/angles, peroidic torsions, Lennard-Jones, charge-charge interactions. Torsion-torsion coupling (CMAP) term, virtual sites are not supported.
+2. If there has already been a ligand with the same name, easybfe will raise an error. Users can toogle `--overwrite` option to overwrite the existing ligand.
+
+3. When `-i` option takes only one sdf file with one ligand, users can also pass in a customized forcefield (topology) for this ligand through `-f` option. This customized forcefield file has to be in Amber .prmtop format or Gromacs .top format. However, the customized force field should not contain terms other than harmonic bond/angles, peroidic torsions, Lennard-Jones, charge-charge interactions. Torsion-torsion coupling (CMAP) term, virtual sites are not supported.
 
 ```bash
-easybfe add_ligand -p tyk2 -i example/jmc_23.sdf -f example/jmc_23.prmtop
+easybfe add_ligand -p tyk2 -i example/ejm_44.sdf -f example/ejm_44.prmtop
 ```
-3. You can add experimental values with property name `dG.expt` (in kcal/mol) or `affinity.expt` (in uM) in the sdf file and `easybfe report` will use report them together with the FEP values. 
-4. Gasteiger charges is ONLY suitable for debugging. It is strongly not recommended in pratical use. 
+4. You can add experimental values with property name `dG.expt` (in kcal/mol) or `affinity.expt` (in uM) in the sdf file and `easybfe report` will use report them together with the FEP values. 
+5. Gasteiger charges is ONLY suitable for debugging. It is strongly not recommended in pratical use. 
 
 ## Step 4: Add perturbations
-This following command will add a perturbation between `jmc_23` and `jmc_30`:
+This following command will add a perturbation between `ejm_44` and `ejm_42`:
 ```bash
-easybfe add_perturbation -p tyk2 --ligandA jmc_23 --ligandB jmc_30 -n "jmc_23~jmc_30" --config example/config_5ns.json
+easybfe add_perturbation -p tyk2 --ligandA ejm_44 --ligandB ejm_42 -n "ejm_44~ejm_42" --config example/config_5ns.json
 ```
 Breakdown of the options:
 + `-p`: specify the name of the protein structure that the ligands belongs to.
@@ -105,18 +116,23 @@ This command will prepare all simulation files (including atom mapping, building
 **Note**:
 
 1. If you are confident with the atom mapping, you can toogle `--submit` in the command and the files will be submitted automatically. 
+2. If there has already been a perturbation with the same name, easybfe will raise an error. Users can toogle `--overwrite` option to overwrite the existing perturbation.
 2. Users can also prepare multiple perturbations with one command:
+
    ```bash
    easybfe add_perturbation -p tyk2 -l example/perturbations.txt --config example/config_5ns.json -m 10
    ```
+
    + `-l`: File contains list of perturabtions. In the file, each line contains two ligand names seperated by a whitespace. For example,
+
    ```
-   jmc_23 jmc_30
-   jmc_23 ejm_44
+   ejm_45 ejm_42
+   ejm_44 ejm_42
    ```
+
    + `-m`: number of processors to run in parallel 
 
-   In this option, the perturbations will be named as `jmc_23~jmc_30`, `jmc_23~ejm_44` by default.
+   In this option, the perturbations will be named as `ejm_44~ejm_42`, `ejm_45~ejm_42` by default.
 
 ## Step 5: Analyze
 Use the following command to analyze the simulation. This command will automatically found all perturbations that are finished yet not analyzed and then analyze them. 
@@ -133,7 +149,9 @@ Here `-m` specify the number of processors to run in parallel. The analysis will
 
 ## Step 6: Report
 The following command will report the result of the whole project and dump to directory `./report/`.
+
 ```bash
 easybfe report -o ./report/
 ```
+
 Easybfe will collect all calculated binding free energies (RBFE) and use the maximum likelihood estimation (MLE) algorithm to give the calculated absolute binding free energy (ABFE) of each ligand. The ABFEs are shifted to make the average of calculated ABFEs the same as the average experimental values.
