@@ -10,7 +10,20 @@ EasyBFE now only supports preparing simulation for AMBER22 and newer version tha
 
 ### Step 1:
 
-Install the following dependencies with conda and `conda-forge` channel:
+Clone the repoistory
+
+```bash
+git clone https://github.com/Ericwang6/easybfe.git
+```
+
+Use the `environment.yml` to install the dependencies:
+
+```bash
+cd easybfe
+conda env create -f environment.yml
+```
+
+Or you can install the following dependencies with conda and `conda-forge` channel:
 
 + python >=3.10,<3.13
 + setuptools_scm
@@ -21,7 +34,7 @@ Install the following dependencies with conda and `conda-forge` channel:
 + rdkit
 + ambertools
 + acpype
-+ openmm
++ openmm >= 8.2.0
 + openmmtools
 + openmmforcefields
 + openff-toolkit
@@ -29,11 +42,11 @@ Install the following dependencies with conda and `conda-forge` channel:
 + [lomap2](https://github.com/OpenFreeEnergy/Lomap)
 + [kartograf](https://github.com/OpenFreeEnergy/kartograf)
 
-### Step 2:
+### Step 2
 
 Run the following command to install EasyBFE:
 ```bash
-git clone https://github.com/Ericwang6/easybfe.git
+conda activate easybfe
 cd easybfe
 pip install .
 ```
@@ -46,4 +59,4 @@ pip install .
 
 ## Developing Notes
 
-If you want to get involved in the development of have any questions, please contact Yingze (Eric) Wang: ericwangyz@berkeley.edu
+If you want to get involved in the development of have any questions, please create an issuse oe contact Yingze (Eric) Wang: ericwangyz@berkeley.edu
