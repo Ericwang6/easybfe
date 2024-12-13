@@ -19,9 +19,9 @@ def get_sc_atoms_and_bonds(mol, cc_list):
     for atom in mol.GetAtoms():
         if atom.GetIdx() not in cc_list:
             atoms.append(atom.GetIdx())
-            for bo in atom.GetBonds():
-                if bo.GetIdx() not in bonds:
-                    bonds.append(bo.GetIdx())
+    for bond in mol.GetBonds():
+        if bond.GetBeginAtomIdx() not in cc_list and bond.GetEndAtomIdx() not in cc_list:
+            bonds.append(bond.GetIdx())
     return atoms, bonds
 
 
