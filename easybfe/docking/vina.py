@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Dict, List
 import tempfile
 import shutil
+from copy import deepcopy
 
 import numpy as np
 from rdkit import Chem
@@ -130,7 +131,30 @@ class VinaDocking:
         self.logger.info(f"Results are written to: {out_sdf}")
         return out_sdf
     
+    def rescore(self, inp: os.PathLike | Chem.Mol):
+        in_pdbqt = tempfile.mkstemp(suffix='.pdbqt')[1]
+        if isinstance(inp, Chem.Mol):
+            convert_mol_to_pdbqt(inp, in_pdbqt)
+        else:
+            convert_sdf_to_pdbqt(inp, in_pdbqt)
+        cmd = [
+            self.vina_binary, '--ligand', in_pdbqt, '--receptor', self.protein_pdbqt, '--score_only', '--autobox'
+        ]
+        return_code, out, err = run_command(cmd)
+        # parse output
+        lines = out.split('\n')
+        energies = {'binding': 0.0, 'inter': 0.0, 'torsion': 0.0}
+        for line in lines:
+            if line.startswith('Estimated Free Energy of Binding'):
+                energies['binding'] = float(line.split()[-3])
+            elif line.startswith('(1) Final Intermolecular Energy'):
+                energies['inter'] = float(line.split()[-2])
+            elif line.startswith('(3) Torsional Free Energy'):
+                energies['torsion'] = float(line.split()[-2])
+        return energies
+    
     def constr_dock(self, in_smi_or_sdf: str | os.PathLike, ref_sdf: os.PathLike, name: str = "", thresh: float = 5.0):
+        # set up name and result directory
         if os.path.isfile(in_smi_or_sdf):
             mol = Chem.SDMolSupplier(in_smi_or_sdf, removeHs=False)[0]
             name = Path(in_smi_or_sdf).stem if not name else name
@@ -140,6 +164,9 @@ class VinaDocking:
             AllChem.MMFFOptimizeMolecule(mol)
             assert name, "Must provide a name"
         
+        output_dir = self.wdir / name
+        output_dir.mkdir(exist_ok=True)
+
         # Update box according to reference sdf
         ref = Chem.SDMolSupplier(ref_sdf, removeHs=False)[0]
         center, box = compute_box_from_coordinates(ref.GetConformer().GetPositions())
@@ -154,7 +181,7 @@ class VinaDocking:
         
         mols = [m for m in Chem.SDMolSupplier(str(out_sdf), removeHs=False)]
 
-        mapping = OpenFEAtomMapper('lomap', element_change=False, max3d=10.0).run(mols[0], ref, self.wdir / name)
+        mapping = OpenFEAtomMapper('lomap', element_change=False, max3d=10.0).run(mols[0], ref, output_dir)
 
         mapping_heavy_only = {}
         for k, v in mapping.items():
@@ -182,7 +209,7 @@ class VinaDocking:
             mol.SetDoubleProp("rmsd", rmsd)
         
         assert len(accepted) > 0, f"Constrained docking fails because no poses with RMSD < {thresh:.2f} angstrom w.r.t reference"
-        tmp_sdf = self.wdir / name / f'{name}_selected.sdf'
+        tmp_sdf = output_dir / f'{name}_selected.sdf'
         writer = Chem.SDWriter(tmp_sdf)
         for i, mol in enumerate(accepted):
             writer.write(mol)
@@ -190,25 +217,27 @@ class VinaDocking:
         self.logger.info(f"Found {len(accepted)} docked pose with RMSD < {thresh} angstrom w.r.t reference. Results in {tmp_sdf}")
         
         # Gather all conformers to a single molecule object
-        out_mol = accepted[0]
+        out_mol = deepcopy(accepted[0])
         for m in accepted[1:]:
             out_mol.AddConformer(m.GetConformer(), assignId=True)
 
         self.logger.info("Running optimization")
-        coord_map = {k: ref.GetConformer().GetPositions()[v] for k, v in mapping.items()}
+        coord_map = {k: ref.GetConformer().GetPositions()[v] for k, v in mapping_heavy_only.items()}
         assert self.protein.suffix == '.pdb', 'Input protein must be a .pdb file'
         out_mol, energies = constrained_optimization(out_mol, self.protein, coord_map, constr=True, restr=10)
         for i, m in enumerate(accepted):
-            m.SetDoubleProp("energy", float(energies[i]))
+            m.SetProp("_Name", name)
+            m.ClearComputedProps()
+            m.SetDoubleProp("ff.energy", float(energies[i]))
+            m.GetConformer().SetPositions(out_mol.GetConformer(i).GetPositions())
+            rescore = self.rescore(m)
+            m.SetDoubleProp('vina.score', rescore['binding'])
+            m.SetProp('vina.score.details', str(rescore))
+        accepted.sort(key=lambda m: m.GetDoubleProp('vina.score'))
 
-        resdir = self.wdir / name / 'constr_dock'
-        resdir.mkdir(exist_ok=True)
         for i, mol in enumerate(accepted):
-            mol.GetConformer().SetPositions(
-                out_mol.GetConformer(i).GetPositions()
-            )
-            out_sdf = resdir / f'{name}_constr_dock_{i}.sdf'
+            out_sdf = output_dir / f'{name}_constr_dock_{i}.sdf'
             writer = Chem.SDWriter(out_sdf)
             writer.write(mol)
             writer.close()
-        self.logger.info(f"Results written to: {resdir}")
+        self.logger.info(f"Results written to: {output_dir}")
