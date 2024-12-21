@@ -222,7 +222,7 @@ class VinaDocking:
             out_mol.AddConformer(m.GetConformer(), assignId=True)
 
         self.logger.info("Running optimization")
-        coord_map = {k: ref.GetConformer().GetPositions()[v] for k, v in mapping_heavy_only.items()}
+        coord_map = {k: ref.GetConformer().GetPositions()[v] for k, v in mapping.items()}
         assert self.protein.suffix == '.pdb', 'Input protein must be a .pdb file'
         out_mol, energies = constrained_optimization(out_mol, self.protein, coord_map, constr=True, restr=10)
         for i, m in enumerate(accepted):
