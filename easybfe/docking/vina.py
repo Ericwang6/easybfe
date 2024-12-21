@@ -118,8 +118,6 @@ class VinaDocking:
         else:
             dock_dir = Path(output_dir)
         
-        if dock_dir.is_dir():
-            self.logger.warning(f"{dock_dir} exists. Contents in this folder will be overwritten")
         dock_dir.mkdir(exist_ok=True)
 
         in_pdbqt = dock_dir / f'{stem}.pdbqt'
