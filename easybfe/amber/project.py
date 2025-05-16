@@ -631,14 +631,18 @@ class AmberRbfeProject:
 
         ligands_info = self.gather_ligands_info()
         perts_info = self.gather_perturbations_info()
-        if protein_name:
-            ligands_info = ligands_info.query(f'`protein` == "{protein_name}"')
-            perts_info = perts_info.query(f'`protein_name` == "{protein_name}"')
+
+        if not protein_name:
+            protein_name = self.proteins[0]
+            self.logger.info(f"No protein name is provided. Will use the first protein in the project: {protein_name}")
+        ligands_info = ligands_info.query(f'`protein` == "{protein_name}"')
+        perts_info = perts_info.query(f'`protein_name` == "{protein_name}"')
         
+        ligands_with_expt = ligands_info.dropna(subset=['dG.expt'])['name'].tolist()
         dg_mle = maximum_likelihood_estimator(perts_info.dropna(subset=['ddG.total'])).set_index('ligand')
-        ligands_with_expt = list(dg_mle.index)
-        avg_dg_expt = ligands_info.dropna(subset=['dG.expt']).query('name in @ligands_with_expt')['dG.expt'].mean()
-        dg_mle['dG'] += avg_dg_expt - dg_mle['dG'].mean()
+        avg_dg_expt = ligands_info.query('name in @ligands_with_expt')['dG.expt'].mean()
+        avg_dg_calc = dg_mle.loc[ligands_with_expt, 'dG'].mean()
+        dg_mle['dG'] += avg_dg_expt - avg_dg_calc
         for index, row in ligands_info.iterrows():
             if row['name'] in dg_mle.index:
                 dG = dg_mle.loc[row['name'], 'dG']
