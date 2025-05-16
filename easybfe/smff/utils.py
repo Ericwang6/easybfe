@@ -8,6 +8,39 @@ import parmed.unit as u
 from parmed.periodic_table import Element as ELEMENT
 
 
+def safe_join_dihedrals(struct: parmed.Structure):
+    # parmed can't add two DihedralType instances with the same periodicity 
+    # to the same DihedralTypeList
+    if not struct.dihedral_types:
+        return  # nothing to do
+    if any(isinstance(t, list) for t in struct.dihedral_types):
+        return  # already done
+    if any(d.type is None for d in struct.dihedrals):
+        return  # Not fully parametrized
+    dihedrals_to_delete = list()
+    dihedrals_processed = dict()
+    new_dihedral_types = parmed.TrackedList()
+    for i, d in enumerate(struct.dihedrals):
+        if d.atom1 < d.atom4:
+            key = (d.atom1, d.atom2, d.atom3, d.atom4)
+        else:
+            key = (d.atom4, d.atom3, d.atom2, d.atom1)
+        
+        if key in dihedrals_processed:
+            dihedrals_processed[key].append(d.type)
+            dihedrals_to_delete.append(i)
+        else:
+            dihedrals_processed[key] = dtl = list()
+            dtl.append(d.type)
+            new_dihedral_types.append(dtl)
+            d.type = dtl
+    # Now drop the new dihedral types into place
+    struct.dihedral_types = new_dihedral_types
+    # Remove the "duplicate" dihedrals
+    for i in reversed(dihedrals_to_delete):
+        struct.dihedrals[i].delete()
+        del struct.dihedrals[i]
+
 
 def convert_to_xml(struct, ff_xml):
     if not isinstance(struct, parmed.Structure):
@@ -43,7 +76,12 @@ class OpenmmXML:
     def from_parmed(cls, struct: parmed.Structure, useAtrributeFromResidue: bool = True, onlyCharges: bool = False):
         if onlyCharges:
             assert useAtrributeFromResidue, "useAtrributeFromResidue must be True when onlyCharges is True"
-        struct.join_dihedrals()
+        
+        # need to join all dihedral types to one dihedral
+        # but parmed cannot join dihedrals when two dihedral types are with 
+        # the same perioidicity
+        safe_join_dihedrals(struct)
+        
         ffxml = ET.Element("ForceField")
         topxml = ET.Element("Residues")
         
@@ -130,7 +168,7 @@ class OpenmmXML:
             def _set_dihedral(dihe: parmed.Dihedral, diheElement: ET.Element):
                 if isinstance(dihe.type, parmed.DihedralType):
                     _set_dihedral_type(dihe.type, 1, diheElement)
-                elif isinstance(dihe.type, parmed.DihedralTypeList):
+                elif isinstance(dihe.type, list):
                     for i, dtype in enumerate(dihe.type):
                         _set_dihedral_type(dtype, i+1, diheElement)
                 else:
@@ -162,7 +200,7 @@ class OpenmmXML:
             def _determine_14scales(dihe: parmed.Dihedral):
                 if isinstance(dihe.type, parmed.DihedralType):
                     return dihe.type.scee, dihe.type.scnb
-                elif isinstance(dihe.type, parmed.DihedralTypeList):
+                elif isinstance(dihe.type, list):
                     # In prmtop file, sometimes the scee/scnb will be tagged to 1.0 for ignore_end=True
                     # And sometimes, for a torsion with more than one periodicity,
                     # one periodicity type will have scee=1.0 & scnb=1.0
@@ -261,11 +299,10 @@ class OpenmmXML:
             if useAtrributeFromResidue:
                 useChargeElement = ET.SubElement(nbsElement, "UseAttributeFromResidue")
                 useChargeElement.set("name", "charge")
-            params = parmed.ParameterSet.from_structure(struct, allow_unequal_duplicates=True)
+            
             for atom in struct.atoms:
-                sigma = params.atom_types[atom.type].sigma / 10 # in nm
-                #### NBFIX ####
-                epsilon = params.atom_types[atom.type].epsilon * conv # in kJ
+                sigma = atom.sigma / 10 # in nm
+                epsilon = atom.epsilon * conv # in kJ
                 nbElement = ET.SubElement(nbsElement, "Atom")
                 nbElement.set("type", atomTypes[atom.idx])
                 nbElement.set("sigma", f'{sigma:.10f}')

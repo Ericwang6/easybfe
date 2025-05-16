@@ -132,3 +132,8 @@ def test_openmm_xml_gaff():
     ene_convert = getEnergyDecomposition(system, pos)
     diagnose_torsion(system, prmtop.topology)
     assert np.allclose(ene_read['total'], ene_convert['total'])
+
+
+def test_join_dihedrals():
+    prmtop = Path(__file__).parent / 'data/enamine_19451.prmtop'
+    convert_to_xml(str(prmtop), prmtop.with_name('enamine_19451.xml'))

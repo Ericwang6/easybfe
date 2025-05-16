@@ -37,7 +37,7 @@ Description of each sub-folder:
 Use this command to add a protein PDB file.
 
 ```bash
-easybfe add_protein -i examples/tyk2_pdbfixer.pdb -n tyk2
+easybfe add_protein -i examples/tyk2/tyk2_pdbfixer.pdb -n tyk2
 ```
 Here, users needs to add a **"prepared"** protein PDB file, which means that being hetero atoms deleted, missing atoms/residues added, terminal properly treated, and hydrogens added. It is recommended to use [PDBFixer](https://github.com/openmm/pdbfixer) to prepare a protein file. EasyBFE will check if the added protein PDB file is able to be parametrized with Amber14SB force field with OpenMM, and if you want to disable this check, use `--no-check-ff` flag.
 
@@ -45,12 +45,10 @@ Then you will see in the proteins directory that a protein with name specified i
 
 ```
 -- /path/to/project/
-   |-- proteins/
-       |-- tyk2
+   |-- ligands/
+       |-- tyk2/
            |-- tyk2.pdb
 ```
-
-*New features to add: Wrap PDBFixer in easybfe and offer API*
 
 ## Step 3: Add ligands
 
@@ -58,36 +56,51 @@ Use this following command to add ligands and parametrize them:
 ```bash
 easybfe add_ligand -p tyk2 -i examples/tyk2/ejm_44.sdf -f gaff2 -c bcc
 ```
-Breakdown of the options:
+Breakdown of the options or use `easybfe add_ligand -h` for more information.:
 + `-p`: specify the name of the protein structure that the ligands belongs to.
 + `-i`: the input ligand structures (.sdf)
 + `-f`: the forcefield to parametrize the ligand. Supported values: `gaff`, `gaff2`, openff series supported by `openff-toolkit` (e.g. `openff-2.1.0`)
 + `-c`: method to assign atomic partial charges. Supported values: `bcc` (AM1-BCC), `gas` (Gasteiger)
 
-Use `easybfe add_ligand -h` for more information.
+Then you will see the ligand has been added:
+
+```
+-- /path/to/project/
+   |-- proteins/
+       |-- tyk2/
+           |-- ejm_44/
+               |-- ejm_44.sdf     # sdf file (molecule structure)
+               |-- ejm_44.png     # 2D visulization
+               |-- ejm_44.prmtop  # Amber-formatted topology file with force field parameters
+               |-- ejm_44.inpcrd  # Amber-formatted coordinate file
+               |-- ejm_44.top     # Gromacs-formatted topology file with force field parameters
+               |-- info.json      # basic information of this molecule
+```
+
+*New features to add: Wrap PDBFixer in easybfe and offer API*
 
 **Note**
 
 1. The `-i` option supports the following types of input:
 
-   + One sdf file contains one ligand. In this case, by default, the name of this ligand will be the basename of the file. For example, `ejm_44` for `examples/ejm_44.sdf`. Users can also specify its name with `-n` option in this case:
+   + One sdf file contains one ligand. In this case, by default, the name of this ligand will be the basename of the file. For example, `ejm_44` for `examples/tyk2/ejm_44.sdf`. Users can also specify its name with `-n` option in this case:
 
    ```bash
-   easybfe add_ligand -p tyk2 -i example/ejm_44.sdf -f gaff2 -c bcc -n ejm_44_custom_name
+   easybfe add_ligand -p tyk2 -i examples/tyk2/ejm_44.sdf -f gaff2 -c bcc -n ejm_44_custom_name
    ```
 
    + One sdf file contains multiple ligands. In this case, the name of each ligand specified in the sdf file (the first line of each mol block) will be used as the name in the project.
 
    ```bash
-   easybfe add_ligand -p tyk2 -i example/tyk2_ligands.sdf -f gaff2 -c bcc -m 10
+   easybfe add_ligand -p tyk2 -i examples/tyk2/tyk2_ligands.sdf -f gaff2 -c bcc -m 10
    ```
 
    The `-m` option specifies how many CPU cores to run the jobs in parallel.
 
-   + Multiple sdf files with pattern matching but each file must contain one ligand. If not, only the first ligand will be added. In this case, the basename of each sdf file will be used as the ligand's name.
+   + Multiple sdf files with pattern matching but each file must contain one ligand. If not, only the first ligand will be added. In this case, the basename of each sdf file will be used as the ligand's name. For example,
 
    ```bash
-   easybfe add_ligand -p tyk2 -i example/*.sdf -f gaff2 -c bcc -m 10
+   easybfe add_ligand -p tyk2 -i *.sdf -f gaff2 -c bcc -m 10
    ```
 
 2. If there has already been a ligand with the same name, easybfe will raise an error. Users can toogle `--overwrite` option to overwrite the existing ligand.
@@ -95,23 +108,53 @@ Use `easybfe add_ligand -h` for more information.
 3. When `-i` option takes only one sdf file with one ligand, users can also pass in a customized forcefield (topology) for this ligand through `-f` option. This customized forcefield file has to be in Amber .prmtop format or Gromacs .top format. However, the customized force field should not contain terms other than harmonic bond/angles, peroidic torsions, Lennard-Jones, charge-charge interactions. Torsion-torsion coupling (CMAP) term, virtual sites are not supported.
 
 ```bash
-easybfe add_ligand -p tyk2 -i examples/ejm_44.sdf -f examples/ejm_44.prmtop
+easybfe add_ligand -p tyk2 -i examples/tyk2/ejm_44.sdf -f examples/tyk2/ejm_44.prmtop
 ```
 4. You can add experimental values with property name `dG.expt` (in kcal/mol) or `affinity.expt` (in uM) in the sdf file and `easybfe report` will use report them together with the FEP values. 
 5. Gasteiger charges is ONLY suitable for debugging. It is strongly not recommended in pratical use. 
 
 ## Step 4: Add perturbations
-This following command will add a perturbation between `ejm_44` and `ejm_42`:
+First, let's add another ligand (`ejm_42`) if you add only `ejm_44` in the project.
+
+```bash
+easybfe add_ligand -p tyk2 -i examples/tyk2/ejm_42.sdf -f gaff2 -c bcc
+```
+
+Then, use the following command to add a perturbation between `ejm_44` and `ejm_42`:
+
 ```bash
 easybfe add_perturbation -p tyk2 --ligandA ejm_44 --ligandB ejm_42 -n "ejm_44~ejm_42" --config examples/config_5ns.json
 ```
+
 Breakdown of the options:
 + `-p`: specify the name of the protein structure that the ligands belongs to.
-+ `--ligandA`, `--ligandB`: name of the two ligands that form this relative pair. The binding free energy of `{ligandA}` minus the binding free energy of `{ligandB}` will be calculated
++ `--ligandA`, `--ligandB`: name of the two ligands that form this relative pair.
 + `-n`: name of this perturbation. If not specified, the default name of `{ligandA}~{ligandB}` will be used. 
 + `--config`: Path to the configuration file.
 
-This command will prepare all simulation files (including atom mapping, building dual topology, setting up simulation box, adding solvents/ions) and write a submission file to `perturbations/*/{solvent,complex}/run.slurm`, where `*` is the name of the perturbation. One should submit them manually after checking that the atom mapping is good. 
+This command will prepare all simulation files (including atom mapping, building dual topology, setting up simulation box, adding solvents/ions) and write a submission file:
+
+```
+-- /path/to/project/
+   |-- rbfe/
+       |-- tyk2/
+           |-- ejm_44~ejm_42/
+               |-- atom_mapping.png  # Atom mapping
+               |-- solvent/
+                   |-- ...
+                   |-- run.slurm     # slurm submission file for solvent-phase simulation
+               |-- complex/
+                   |-- ...
+                   |-- run.slurm     # slurm submission file for complex-phase simulation
+               |-- ...
+```
+
+One should submit the two SLURM files under the `solvent/` and `complex/` manually after checking that the atom mapping is good. EasyBFE will also generate inputs for gas phase simulation under the `gas/` folder, but that is only useful when one try to analyze the (de)solvation contribution in the total $\Delta\Delta G$. For simple $\Delta\Delta G$ calculation, one can safely ignore them.
+
+An example of good atom mapping between ejm_44~ejm_42:
+
+![mapping](../examples/tyk2/ejm_44~ejm_42.png)
+
 
 **Note**:
 
@@ -147,6 +190,56 @@ Here `-m` specify the number of processors to run in parallel. The analysis will
 + Phase-space overlap analysis
 + Calculate RMSD for end-states
 + Torsion distribution for end-states 
+
+You will see the following files generated:
+```
+-- /path/to/project/
+   |-- rbfe/
+       |-- tyk2/
+           |-- ejm_44~ejm_42/
+               |-- result.json
+               |-- total_convergence.csv
+               |-- total_convergence.png
+               |-- solvent/
+                   |-- convergence.csv
+                   |-- convergence.png
+                   |-- overlap.png
+                   |-- rmsd.png
+                   |-- lambda0/prod/torsion_*-*-*-*.png
+                   |-- lambda15/prod/torsion_*-*-*-*.png
+                   |-- ...
+               |-- complex/
+                   |-- convergence.csv
+                   |-- convergence.png
+                   |-- overlap.png
+                   |-- rmsd.png
+                   |-- lambda0/prod/torsion_*-*-*-*.png
+                   |-- lambda15/prod/torsion_*-*-*-*.png
+                   |-- ...
+               |-- ...
+```
+
+The `result.json` contains all the free energy results:
+
+```
+{
+    "dG": {
+        "solvent": -14.013058224093358,  # G(B, solvent) - G(A, solvent)
+        "complex": -16.258651728930776   # G(B, complex) - G(A, complex)
+    },
+    "dG_std": {
+        "solvent": 0.025954616452471727, # standard deviations estimated by MBAR
+        "complex": 0.03499030344808139
+    },
+    "ddG": {
+        "total": -2.2455935048374176  # The final ddG, i.e. dG(B) - dG(A)
+    },
+    "ddG_std": {
+        "total": 0.04356562234817417  # std of ddG
+    }
+}
+```
+The experimental $\Delta\Delta G$ for this pair is -2.36 kcal/mol, which is quite close to our calcualted results -2.24 kcal/mol.
 
 ## Step 6: Report
 The following command will report the result of the whole project and dump to directory `./report/`.
