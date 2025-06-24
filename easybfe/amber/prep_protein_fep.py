@@ -53,10 +53,7 @@ def merge_topology(
     mut_residues = []
 
     for i in range(topA.getNumChains()):
-        if i >= topB.getNumChains():
-            continue
         chainA = topA._chains[i]
-        chainB = topB._chains[i]
         new_chain = new_top.addChain(chainA.id)
         for r in range(len(chainA)):
             resA = chainA._residues[r]
@@ -65,6 +62,7 @@ def merge_topology(
                 new_top.addAtom(atomA.name, atomA.element, new_res)
                 new_pos.append(posA[atomA.index])
             if resA.index in mutated_residue_indices:
+                chainB = topB._chains[i]
                 resB = chainB._residues[r]
                 mut = new_top.addResidue(resB.name, new_chain, resB.id, 'M')
                 for atomB in resB.atoms():
