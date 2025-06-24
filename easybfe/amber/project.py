@@ -6,6 +6,10 @@ from functools import partial
 import multiprocessing as mp
 from collections import defaultdict
 from enum import Enum
+
+import numpy as np
+import pandas as pd
+
 from ..cmd import run_command, set_directory, init_logger
 
 
@@ -61,7 +65,6 @@ class AmberRbfeProject:
                 continue
             results[dirname.parent.name].append(dirname.name)
         return results
-
     
     @property
     def perturbations(self) -> Dict[str, List[str]]:
@@ -76,7 +79,6 @@ class AmberRbfeProject:
         """
         Gather Ligands info
         """
-        import pandas as pd
         infos = []
         for protein_name in self.ligands:
             for ligand_name in self.ligands[protein_name]:
@@ -108,7 +110,6 @@ class AmberRbfeProject:
         """
         Add ligand
         """
-        import numpy as np
         from rdkit import Chem
         from rdkit.Chem import AllChem, Draw, Descriptors, Crippen, Lipinski
 
@@ -357,9 +358,7 @@ class AmberRbfeProject:
         patch_func: Callable
             Function to modify the regular behavior of this function, used for modifying force field parameters
         """
-        import numpy as np
         from rdkit import Chem
-        import openmm.unit as unit
         from ..mapping import LazyMCSMapper, OpenFEAtomMapper
         from .prep import prep_ligand_rbfe_systems
         from .op import fep_workflow
@@ -575,8 +574,6 @@ class AmberRbfeProject:
     
     def gather_perturbations_info(self):
         '''Gather data of all perturbations'''
-        import numpy as np
-        import pandas as pd
 
         infos = []
         for protein_name, pert_names in self.perturbations.items():
@@ -623,7 +620,6 @@ class AmberRbfeProject:
     
     def report(self, save_dir: os.PathLike, protein_name: str = '', verbose: bool = False):
         """Report data"""
-        import numpy as np
         from ..analysis import maximum_likelihood_estimator, plot_correlation
 
         save_dir = Path(save_dir)
@@ -704,15 +700,8 @@ class AmberRbfeProject:
         skip_gas: bool
             Whether to skip gas-phase simulation analysis. Default is True.
         """
-        import numpy as np
-        import pandas as pd
-        from tqdm import tqdm
-        import alchemlyb
-        from alchemlyb.estimators import MBAR
-        from alchemlyb.parsing.amber import extract_u_nk
-        from alchemlyb.convergence import forward_backward_convergence
         from alchemlyb.visualisation.convergence import plot_convergence
-        from alchemlyb.visualisation.mbar_matrix import plot_mbar_overlap_matrix
+        from ..analysis.mbar import run_mbar
 
         dG = {}
         dG_std = {}
@@ -730,38 +719,10 @@ class AmberRbfeProject:
             leg_dir = pert_dir / leg
             with open(leg_dir / 'config.json') as f:
                 T = json.load(f).get('temperature', 298.15)
-                kBT = 8.314 * T / 1000 / 4.184
 
             self.logger.info(f"Performing MBAR for {leg}")
             self.logger.info("Extracting data from output...")
-            u_nks = []
-            num_lambda = len(list(leg_dir.glob('lambda*')))
-            for i in tqdm(range(num_lambda), leave=True):
-                out = str(leg_dir / f"lambda{i}/prod/prod.out")
-                u_nks.append(extract_u_nk(out, T=T))
-            
-            # evaluate free energy with MBAR
-            self.logger.info("Running MBAR estimator...")
-            mbarEstimator = MBAR()
-            mbarEstimator.fit(alchemlyb.concat(u_nks))
-            dG[leg] = mbarEstimator.delta_f_.iloc[0, -1] * kBT
-            dG_std[leg] = mbarEstimator.d_delta_f_.iloc[0, -1] * kBT
-            
-            # convergence analysis
-            self.logger.info("Running convergence analysis...")
-            conv_df = forward_backward_convergence(u_nks, "mbar")
-            for key in ['Forward', 'Forward_Error', 'Backward', 'Backward_Error']:
-                conv_df[key] *= kBT
-                conv_df.to_csv(leg_dir /"convergence.csv", index=None)
-                conv_ax = plot_convergence(conv_df)
-                conv_ax.set_ylabel("$\Delta G$ (kcal/mol)")
-                conv_ax.set_title(f"Convergence Analysis - {leg.capitalize()}")
-                conv_ax.figure.savefig(str(leg_dir /"convergence.png"), dpi=300)
-
-            # overlap matrix
-            self.logger.info("Plotting overlap matrix...")
-            overlap_ax = plot_mbar_overlap_matrix(mbarEstimator.overlap_matrix)
-            overlap_ax.figure.savefig(str(leg_dir /"overlap.png"), dpi=300)
+            run_mbar(leg_dir, T, self.logger)
 
         convergence = {leg: pd.read_csv(str(pert_dir / leg / 'convergence.csv')) for leg in legs}
 
@@ -796,7 +757,6 @@ class AmberRbfeProject:
         """
         Processing trajectory of RBFE simulation endpoints: remove unphysical atoms, remove PBC, alignment 
         """
-        import numpy as np
         import matplotlib.pyplot as plt
         from tqdm import tqdm
         from rdkit import Chem
