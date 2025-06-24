@@ -17,7 +17,8 @@ from ..cmd import init_logger
 def run_mbar(
     dirname: os.PathLike,
     temperature: float = 298.15,
-    logger: Optional[logging.Logger] = None
+    logger: Optional[logging.Logger] = None,
+    prefix: str = 'prod'
 ):
     """
     Run MBAR (Multistate Bennett Acceptance Ratio) analysis to compute free energy differences 
@@ -33,6 +34,9 @@ def run_mbar(
         Temperature in Kelvin at which the simulations were performed. Default is 298.15 K.
     logger : Optional[logging.Logger], optional
         Logger instance for logging messages. If None, a default logger will be initialized.
+    prefix : str, optional
+        Name of the production run subdirectory and output file prefix. For each lambda window,
+        the function expects output files at `lambdaX/{prod_name}/{prod_name}.out`. Default is 'prod'.
     
     Returns
     -------
@@ -66,7 +70,7 @@ def run_mbar(
     u_nks = []
     num_lambda = len(list(dirname.glob('lambda*')))
     for i in tqdm(range(num_lambda), leave=True):
-        out = str(dirname / f"lambda{i}/prod/prod.out")
+        out = str(dirname / f"lambda{i}/{prefix}/{prefix}.out")
         u_nks.append(extract_u_nk(out, T=temperature))
     
     # evaluate free energy with MBAR
