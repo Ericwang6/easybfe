@@ -174,3 +174,5 @@ _test*
 benchmark/
 
 dump.rdb
+
+webgui/
