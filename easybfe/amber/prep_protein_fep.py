@@ -70,6 +70,8 @@ def merge_topology(
                     new_pos.append(posB[atomB.index])
                 mut_residues.append((new_res, mut))
     
+    # NOTE (Eric): This is a problem here. If topology A or B has non-standard residues, the merged topology
+    # will miss some bonds. This shall be resolved by calling `Topology.loadBondDefinitions` prior to this function
     new_top.createStandardBonds()
     
     # OpenMM will falsely add a bond between the two mutated residues
@@ -256,7 +258,8 @@ def setup_protein_fep_workflow(
         ligand_struct.residues[0].name = 'MOL'
         ligand_struct.residues[0].resname = 'MOL'
         ligand_struct.coordinates = ligand_mol.GetConformer().GetPositions()
-        convert_to_xml(ligand_struct, str(wdir / 'ligand.xml'))
+        convert_to_xml(ligand_struct, str(wdir / 'ligand.xml'), str(wdir / 'ligand_top.xml'))
+        app.Topology.loadBondDefinitions(str(wdir / 'ligand_top.xml'))
         xmls.append(str(wdir / 'ligand.xml'))
         modeller.add(ligand_struct.topology, ligand_struct.positions)
 

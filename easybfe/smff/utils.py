@@ -42,10 +42,13 @@ def safe_join_dihedrals(struct: parmed.Structure):
         del struct.dihedrals[i]
 
 
-def convert_to_xml(struct, ff_xml):
+def convert_to_xml(struct, ff_xml, top_xml=None):
     if not isinstance(struct, parmed.Structure):
         struct = parmed.load_file(struct)
-    OpenmmXML.from_parmed(struct).write_ffxml(ff_xml)
+    obj = OpenmmXML.from_parmed(struct)
+    obj.write_ffxml(ff_xml)
+    if top_xml:
+        obj.write_topxml(top_xml)
 
 
 class OpenmmXML:
