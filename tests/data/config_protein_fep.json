@@ -1,0 +1,60 @@
+{
+    "header": [
+        "#SBATCH -J FEP_AMBER",
+        "#SBATCH -N 1",
+        "#SBATCH -p savio3_gpu",
+        "#SBATCH -A co_armada2",
+        "#SBATCH --ntasks-per-node 16",
+        "#SBATCH --qos=armada2_gpu3_normal",
+        "#SBATCH --gres=gpu:A40:2",
+        "#SBATCH --mem=16G",
+        "#SBATCH --time=48:0:0",
+        "",
+        "source /global/home/users/ericwangyz/env/amber22.env",
+        "echo \"Allocated GPU IDs: $CUDA_VISIBLE_DEVICES on $(hostname)\""
+    ],
+    "ionic_strength": 0.15,
+    "buffer": 15.0,
+    "do_hmr": true,
+    "hydrogen_mass": 3.024,
+    "lambdas": [
+        0.0,
+        0.17418112419756926,
+        0.22617652497780882,
+        0.26503149157260136,
+        0.32964616165280397,
+        0.3832311736717339,
+        0.4315957069593988,
+        0.47745092595317695,
+        0.5225490740468232,
+        0.5684042930406012,
+        0.616768826328266,
+        0.6703538383471961,
+        0.7349685084273984,
+        0.7738234750221917,
+        0.8258188758024317,
+        1.0
+    ],
+    "workflow": [
+        {
+            "name": "01.em", "type": "em",
+            "cntrl": {"num_steps": 2000, "step_size": 0.01, "ofreq": 500}
+        },
+        {
+            "name": "02.heat", "type": "heat",
+            "cntrl": {"num_steps": 10000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0}
+        },
+        {
+            "name": "03.pres", "type": "pres",
+            "cntrl": {"num_steps": 10000, "dt": 0.004, "ofreq": 500, "restraint_wt": 5.0}
+        },
+        {
+            "name": "04.pre_prod", "type": "prod",
+            "cntrl": {"num_steps": 10000, "dt": 0.004, "ofreq": 500}
+        },
+        {
+            "name": "05.prod", "type": "prod",
+            "cntrl": {"num_steps": 10000, "dt": 0.004, "ofreq": 500}
+        }
+    ]
+}

@@ -21,10 +21,8 @@ class Step:
         self.wdir = Path(wdir).resolve()
         self.input = ""
         self.set_input(mdin)
-        if prmtop is not None:
-            self.set_prmtop(prmtop)
-        if inpcrd is not None:
-            self.set_inpcrd(inpcrd)
+        self.set_prmtop(prmtop)
+        self.set_inpcrd(inpcrd)
     
     def setup_check(self):
         assert self.wdir is not None
@@ -44,10 +42,10 @@ class Step:
         }
 
     def set_prmtop(self, prmtop: os.PathLike):
-        self.prmtop = Path(prmtop).resolve()
+        self.prmtop = Path(prmtop).resolve() if prmtop else None
     
     def set_inpcrd(self, inpcrd: os.PathLike):
-        self.inpcrd = Path(inpcrd).resolve()
+        self.inpcrd = Path(inpcrd).resolve() if inpcrd else None
     
     def set_input(self, mdin: os.PathLike | str | AmberMdin):
         if isinstance(mdin, AmberMdin):

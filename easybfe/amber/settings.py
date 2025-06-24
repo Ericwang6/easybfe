@@ -88,7 +88,7 @@ class AmberCntrlSettings(AmberNamelist):
     temp0: float = 298.15  # temperature to be kept
     tempi: float = 0.0  # initial temperature 
     barostat: int = 2  # 1 - Berenden; 2 - MC
-    pres0: float = 1.0 # pressure to be kept in bar
+    pres0: float = 1.01325 # pressure to be kept in bar
     taup: float = 5.0  # pressure relaxation time
 
     # Free Energy
