@@ -415,6 +415,7 @@ def setup_protein_fep_workflow(
     script = script.replace('@NUM_LAMBDA', str(len(lambdas)))
     script = script.replace('@STAGES', '({})'.format(' '.join(f'"{stage}"' for stage in step_names)))
     script = script.replace('@MD_EXEC', 'pmemd.cuda.MPI')
+    script = script.replace('@EM_NAME', steps_total[0][0].name)
 
     with open(wdir / 'run.sh', 'w') as f:
         f.write(script)

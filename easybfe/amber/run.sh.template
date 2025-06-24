@@ -1,5 +1,6 @@
 num_lambda=@NUM_LAMBDA
 stages=@STAGES
+em_name=@EM_NAME
 
 MD_EXEC=@MD_EXEC
 
@@ -10,9 +11,9 @@ touch running.tag
 # em
 for n in `seq 0 $((num_lambda - 1))`
 do
-  cd lambda${n}/em
+  cd lambda${n}/${em_name}
   echo "Running em for lambda ${n}"
-  source em.sh > em.stdout 2>&1
+  source ${em_name}.sh > ${em_name}.stdout 2>&1
   if [ $? -ne 0 ]; then
     mv ../../running.tag  ../../error.tag && echo "Error occurs!"
     exit 1
