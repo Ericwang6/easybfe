@@ -112,7 +112,9 @@ def shiftToBoxCenter(positions: unit.Quantity, boxVectors: Tuple[mm.Vec3], retur
         return newPositions
 
 
-def shiftPositions(positions: unit.Quantity, shiftVec: np.ndarray):
+def shiftPositions(positions: unit.Quantity | List, shiftVec: np.ndarray):
+    if isinstance(positions, unit.Quantity):
+        positions = positions.value_in_unit(unit.nanometers)
     newPositions = unit.Quantity(value=[pos + shiftVec for pos in positions], unit=unit.nanometers)
     return newPositions
 

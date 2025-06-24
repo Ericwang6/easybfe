@@ -151,7 +151,7 @@ class AmberCntrlSettings(AmberNamelist):
     
     @model_validator(mode='after')
     def validate_mbar(self) -> Self:
-        self.bar_intervall = self.efreq if self.bar_intervall is None else self.bar_intervall
+        self.bar_intervall = min(self.efreq, self.nstlim) if self.bar_intervall is None else self.bar_intervall
         self.mbar_states = len(self.lambdas)
         self.mbar_lambda = self.lambdas
         self.gremd_acyc = len(self.lambdas) % 2 if self.gremd_acyc is None else self.gremd_acyc
