@@ -153,6 +153,36 @@ def hydrogen_mass_repartition(struct: parmed.Structure, hydrogen_mass: float = 3
                 atom.mass -= subtract_mass
 
 
+def sanitize_water(struct: parmed.Structure):
+    """
+    Make the water topology correct for Amber simulation
+
+    In Amber, TIP3P water will have 3 bonds, 0 angles. If not, pmemd will raise an error:
+    `Error: Fast 3-point water residue, name and bond data incorrect!`. Also, water molecules has to be 
+    named "WAT" to let Amber use SETTLE for waters. These are essential if one wants to use larger
+    time step.
+    """
+    for residx, residue in enumerate(struct.residues):
+        # Amber uses WAT to identify SETTLE for waters
+        if residue.name == 'HOH':
+            residue.name = 'WAT'
+        if residue.name != 'HOH' and residue.name != 'WAT':
+            continue
+        atom_dict = {atom.name: atom for atom in residue.atoms}
+        hhtype = parmed.BondType(k=553.000, req=1.514, list=struct.bond_types)
+        struct.bond_types.append(hhtype)
+        hh_bond = parmed.Bond(atom_dict['H1'], atom_dict['H2'], hhtype)
+        struct.bonds.append(hh_bond)
+    
+    to_del = []
+    for i, angle in enumerate(struct.angles):
+        resname = angle.atom1.residue.name
+        if resname == 'HOH' or resname == 'WAT':
+            to_del.append(i)
+    for item in reversed(to_del):
+        struct.angles.pop(item)
+
+
 def do_co_alchemical_water(modeller: app.Modeller, d_charge: int, scIndices: List[int], positiveIon: str = 'Na+', negativeIon: str = 'Cl-'):
     top, pos = modeller.topology, modeller.positions
     posNumpy = np.array([[p.x, p.y, p.z] for p in pos])
