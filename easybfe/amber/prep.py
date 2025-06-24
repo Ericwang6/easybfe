@@ -98,13 +98,21 @@ def computeBoxVectorsWithPadding(positions: unit.Quantity, buffer: unit.Quantity
     )
 
 
-def shiftToBoxCenter(positions: unit.Quantity, boxVectors: Tuple[mm.Vec3]):
+def shiftToBoxCenter(positions: unit.Quantity, boxVectors: Tuple[mm.Vec3], returnShiftVec: bool = False):
     positions = positions.value_in_unit(unit.nanometers)
     boxCenter = (boxVectors[0] + boxVectors[1] + boxVectors[2]) / 2
     minVec = mm.Vec3(*(min((pos[i] for pos in positions)) for i in range(3)))
     maxVec = mm.Vec3(*(max((pos[i] for pos in positions)) for i in range(3)))
     posCenter = (minVec + maxVec) * 0.5
     shiftVec = boxCenter - posCenter
+    newPositions = shiftPositions(positions, shiftVec)
+    if returnShiftVec:
+        return newPositions, shiftVec
+    else:
+        return newPositions
+
+
+def shiftPositions(positions: unit.Quantity, shiftVec: np.ndarray):
     newPositions = unit.Quantity(value=[pos + shiftVec for pos in positions], unit=unit.nanometers)
     return newPositions
 

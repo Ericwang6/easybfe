@@ -12,7 +12,7 @@ import parmed
 from rdkit import Chem
 
 from .prep import (
-    computeBoxVectorsWithPadding, shiftToBoxCenter, 
+    computeBoxVectorsWithPadding, shiftToBoxCenter, shiftPositions,
     hydrogen_mass_repartition, sanitize_water,
     PROTEIN_FF_XMLS, WATER_FF_XMLS
 )
@@ -246,8 +246,8 @@ def setup_protein_fep_workflow(
     # Add solvents & ions
     buffer = config.get("buffer", 15.0) /  10 * unit.nanometers
     boxVectors = computeBoxVectorsWithPadding(pdbA.positions, buffer)
-    posA = shiftToBoxCenter(posA, boxVectors)
-    posB = shiftToBoxCenter(posB, boxVectors)
+    posA, shiftVec = shiftToBoxCenter(posA, boxVectors, returnShiftVec=True)
+    posB = shiftPositions(posB, shiftVec)
 
     modeller = app.Modeller(topA, posA)
 
@@ -260,8 +260,9 @@ def setup_protein_fep_workflow(
         ligand_struct.coordinates = ligand_mol.GetConformer().GetPositions()
         convert_to_xml(ligand_struct, str(wdir / 'ligand.xml'), str(wdir / 'ligand_top.xml'))
         app.Topology.loadBondDefinitions(str(wdir / 'ligand_top.xml'))
+        ligand_pos = shiftPositions(ligand_struct.positions, shiftVec)
         xmls.append(str(wdir / 'ligand.xml'))
-        modeller.add(ligand_struct.topology, ligand_struct.positions)
+        modeller.add(ligand_struct.topology, ligand_pos)
 
     ff = app.ForceField(*xmls)
     modeller.topology.setPeriodicBoxVectors(boxVectors)
