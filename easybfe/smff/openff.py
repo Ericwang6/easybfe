@@ -42,7 +42,7 @@ class OpenFF(SmallMoleculeForceField):
         system = ff.createSystem(top, constraints=None, rigidWater=False)
         struct = parmed.openmm.load_topology(top, system, xyz=mol.GetConformer().GetPositions())
         struct.residues[0].name = 'MOL'
-        struct.save(str(wdir / f'{ligand_file.stem}.top'), overwrite=True)
+        struct.save(str(wdir / f'{ligand_file.stem}.top'), overwrite=True, combine='all')
         struct.save(str(wdir / f'{ligand_file.stem}.prmtop'), overwrite=True)
         struct.save(str(wdir / f'{ligand_file.stem}.inpcrd'), overwrite=True)
         self.top = top
