@@ -56,6 +56,7 @@ class AmberCntrlSettings(AmberNamelist):
     imin: int = 0  # 0 - no minimization; 1 - minimization
     ntmin: int = 2 # 0 - CG; 1 - `ncyc` steps SD then CG; 2 - SD
     ncyc: int = 10
+    maxcyc: int = 2000
     dx0: float = Field(default=0.05, validation_alias='step_size')
     # Simulation settings
     ntx: int = 1   # 1 - start from scratch, 5 - start from a restart file
