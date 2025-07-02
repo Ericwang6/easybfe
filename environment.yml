@@ -92,7 +92,6 @@ dependencies:
   - greenlet=3.1.1
   - griddataformats=1.0.2
   - gsd=3.4.1
-  - gufe=1.1.0
   - h11=0.14.0
   - h2=4.1.0
   - h5py=3.12.1
@@ -136,6 +135,7 @@ dependencies:
   - kernel-headers_linux-64=3.10.0
   - keyutils=1.6.1
   - kiwisolver=1.4.7
+  - konnektor~=0.2.0
   - krb5=1.21.3
   - lcms2=2.16
   - ld_impl_linux-64=2.43
@@ -426,4 +426,5 @@ dependencies:
       - pytest==8.3.3
       - pytraj==2.0.6
       - sander==22.0
+      - git+https://github.com/OpenFreeEnergy/gufe@main
       - git+https://github.com/OpenFreeEnergy/openfe@main
