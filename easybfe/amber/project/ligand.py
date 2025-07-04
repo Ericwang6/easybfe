@@ -345,7 +345,7 @@ class AmberLigandRbfeProject(BaseAmberRbfeProject):
         ligands_with_expt = ligands_info.dropna(subset=['dG.expt'])['name'].tolist()
         dg_mle = maximum_likelihood_estimator(perts_info.dropna(subset=['ddG.total'])).set_index('ligand')
         avg_dg_expt = ligands_info.query('name in @ligands_with_expt')['dG.expt'].mean()
-        avg_dg_calc = dg_mle.loc[ligands_with_expt, 'dG'].mean()
+        avg_dg_calc = dg_mle[dg_mle.index.isin(ligands_with_expt)]['dG'].mean()
         dg_mle['dG'] += avg_dg_expt - avg_dg_calc
         for index, row in ligands_info.iterrows():
             if row['name'] in dg_mle.index:
@@ -430,7 +430,9 @@ class AmberLigandRbfeProject(BaseAmberRbfeProject):
 
             self.logger.info(f"Performing MBAR for {leg}")
             self.logger.info("Extracting data from output...")
-            run_mbar(leg_dir, T, self.logger)
+            dg, dg_std = run_mbar(leg_dir, T, self.logger)
+            dG[leg] = dg
+            dG_std[leg] = dg_std
 
         convergence = {leg: pd.read_csv(str(pert_dir / leg / 'convergence.csv')) for leg in legs}
 
