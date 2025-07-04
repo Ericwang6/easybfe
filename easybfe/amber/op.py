@@ -591,6 +591,7 @@ def fep_workflow(config, wdir, gas_phase: bool = False, use_prev_lambda_as_start
     script = script.replace('@NUM_LAMBDA', str(len(lambdas)))
     script = script.replace('@STAGES', '({})'.format(' '.join(f'"{stage}"' for stage in stages)))
     script = script.replace('@MD_EXEC', pmemd_exec(True, True))
+    script = script.replace("@EM_NAME", stages[0])
 
     with open(wdir / 'run.sh', 'w') as f:
         f.write(script)
