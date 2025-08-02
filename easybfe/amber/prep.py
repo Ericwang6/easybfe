@@ -57,17 +57,26 @@ def renumber_rdkit_mol(old_mol: Chem.Mol, mapping_dict: Dict[int, int]):
     return new_mol
 
 
+# def mk_renumber_mapping_from_cc(cc_list: List[int], natoms: int):
+#     sc_offset = len(cc_list)
+#     cc_offset = 0
+#     mapping = {}
+#     for i in range(natoms):
+#         if i in cc_list:
+#             mapping[i] = cc_offset
+#             cc_offset += 1
+#         else:
+#             mapping[i] = sc_offset
+#             sc_offset += 1
+#     return mapping
+
 def mk_renumber_mapping_from_cc(cc_list: List[int], natoms: int):
-    sc_offset = len(cc_list)
-    cc_offset = 0
     mapping = {}
+    for i, cc in enumerate(cc_list):
+        mapping[cc] = i
     for i in range(natoms):
-        if i in cc_list:
-            mapping[i] = cc_offset
-            cc_offset += 1
-        else:
-            mapping[i] = sc_offset
-            sc_offset += 1
+        if i not in cc_list:
+            mapping[i] = len(mapping)
     return mapping
 
 
@@ -414,6 +423,23 @@ def prep_ligand_rbfe_systems(
         ionicStrength=solvent_config.get('ionic_strength', 0.0) * unit.molar,
         residueTemplates={res: res.name for res in modeller.topology.residues() if res.name in ['MOLA', 'MOLB']}
     )
+    # OpenMM modeller neutralize the whole system, which means the charges from both state A and B 
+    # are taken in to account. But, we only state A or B to be neutralized. That means if state B has a net charge
+    # the state A or B will have an access charge 
+    def _find_ion(top, ion='NA'):
+        _find_residue = None
+        for residue in reversed(list(top.residues())):
+            if residue.name == ion:
+                _find_residue = residue
+                break
+        else:
+            raise RuntimeError(f"Not find ion {ion}")
+        return [_find_residue]                
+
+    if ligandB_charge > 0:
+        modeller.delete(_find_ion(modeller.topology, 'CL'))
+    elif ligandB_charge < 0:
+        modeller.delete(_find_ion(modeller.topology, 'NA'))
 
     if use_charge_change:
         alchem_water_info = do_co_alchemical_water(modeller, d_charge, scIndices)
@@ -484,6 +510,12 @@ def prep_ligand_rbfe_systems(
             neutralize=True,
             residueTemplates={res: res.name for res in modeller.topology.residues() if res.name in ['MOLA', 'MOLB']}
         )
+
+        if ligandB_charge > 0:
+            modeller.delete(_find_ion(modeller.topology, 'CL'))
+        elif ligandB_charge < 0:
+            modeller.delete(_find_ion(modeller.topology, 'NA'))
+
         if use_charge_change:
             alchem_water_info = do_co_alchemical_water(modeller, d_charge, scIndices)
         else:
