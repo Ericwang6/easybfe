@@ -78,6 +78,8 @@ class GAFF(SmallMoleculeForceField):
         assert ligand_file.suffix == '.sdf'
         wdir = Path(wdir).resolve()
         with set_directory(wdir):
+            if os.path.isdir('MOL.acpype'):
+                shutil.rmtree('MOL.acpype')
             run_acpype(
                 ligand_file,
                 basename='MOL',
