@@ -153,6 +153,9 @@ class AmberCntrlSettings(AmberNamelist):
     @model_validator(mode='after')
     def validate_mbar(self) -> Self:
         self.bar_intervall = min(self.efreq, self.nstlim) if self.bar_intervall is None else self.bar_intervall
+        # We have to ensure that the BAR result is output every time after it is calculated
+        self.ntpr = self.bar_intervall
+        self.ntwe = self.bar_intervall
         self.mbar_states = len(self.lambdas)
         self.mbar_lambda = self.lambdas
         self.gremd_acyc = len(self.lambdas) % 2 if self.gremd_acyc is None else self.gremd_acyc
@@ -186,6 +189,12 @@ class AmberMdin(BaseModel):
     cntrl: AmberCntrlSettings
     wt: list[AmberWtSettings] = Field(default_factory=list)
     rst: list[AmberRstSettings] = Field(default_factory=list)
+
+    @model_validator(mode='after')
+    def validate_nmropt(self) -> Self:
+        if len(self.rst) > 0:
+            self.cntrl.nmropt = 1
+        return self
 
     def model_dump_mdin(self):
         lines = [self.cntrl.model_dump_mdin()]
