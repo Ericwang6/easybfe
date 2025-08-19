@@ -85,11 +85,11 @@ def run_mbar(
     conv_df = forward_backward_convergence(u_nks, "mbar")
     for key in ['Forward', 'Forward_Error', 'Backward', 'Backward_Error']:
         conv_df[key] *= kBT
-        conv_df.to_csv(dirname / "convergence.csv", index=None)
-        conv_ax = plot_convergence(conv_df)
-        conv_ax.set_ylabel("$\Delta G$ (kcal/mol)")
-        conv_ax.set_title(f"Convergence Analysis - {dirname.name.capitalize()}")
-        conv_ax.figure.savefig(str(dirname /"convergence.png"), dpi=300)
+    conv_df.to_csv(dirname / "convergence.csv", index=None)
+    conv_ax = plot_convergence(conv_df)
+    conv_ax.set_ylabel("$\Delta G$ (kcal/mol)")
+    conv_ax.set_title(f"Convergence Analysis - {dirname.name.capitalize()}")
+    conv_ax.figure.savefig(str(dirname /"convergence.png"), dpi=300)
 
     # overlap matrix
     logger.info("Plotting overlap matrix...")
