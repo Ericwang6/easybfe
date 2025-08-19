@@ -318,6 +318,7 @@ class BaseAmberRbfeProject:
         config: os.PathLike = "",
         ligand_only: bool = False,
         submit: bool = False,
+        overwrite: bool = False,
     ):
         """
         Setup a plain MD job
@@ -326,7 +327,13 @@ class BaseAmberRbfeProject:
 
         assert task_name, "Must provide a task_name"
         wdir = self.md_dir / task_name
-        wdir.mkdir()
+    
+        if (not overwrite) and wdir.is_dir():
+            msg = f'Working directory already exists: {wdir}'
+            self.logger.error(msg)
+            raise RuntimeError(msg)
+
+        wdir.mkdir(exist_ok=True)
 
         if ligand_only:
             protein_pdb = ""
