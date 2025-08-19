@@ -202,7 +202,7 @@ def sanitize_water(struct: parmed.Structure):
         struct.angles.pop(item)
 
 
-def do_co_alchemical_water(modeller: app.Modeller, d_charge: int, scIndices: List[int], positiveIon: str = 'Na+', negativeIon: str = 'Cl-'):
+def do_co_alchemical_water(modeller: app.Modeller, d_charge: int, scIndices: List[int], proteinIndices: List[int] = list(), positiveIon: str = 'Na+', negativeIon: str = 'Cl-'):
     top, pos = modeller.topology, modeller.positions
     posNumpy = np.array([[p.x, p.y, p.z] for p in pos])
     posIonElements = {
@@ -230,10 +230,16 @@ def do_co_alchemical_water(modeller: app.Modeller, d_charge: int, scIndices: Lis
 
     selectedIndices = []
     min_dist = np.min(cdist(waterPositions, scPositions), axis=1)
-    waterIndicesWithDist = [(index, dist) for index, dist in zip(waterIndices, min_dist)]
+
+    if len(proteinIndices) > 0:
+        min_dist_to_protein = np.min(cdist(waterPositions, posNumpy[proteinIndices]), axis=1)
+    else:
+        min_dist_to_protein = np.full(len(waterIndices), np.inf)
+
+    waterIndicesWithDist = [(index, dist, dist_to_protein) for index, dist, dist_to_protein in zip(waterIndices, min_dist, min_dist_to_protein)]
     waterIndicesWithDist.sort(key=lambda x: x[1])
-    for index, dist in waterIndicesWithDist:
-        if dist < 2.0:
+    for index, dist, dist_to_protein in waterIndicesWithDist:
+        if dist < 2.0 or dist_to_protein < 2.0:
             continue
         if selectedIndices and np.linalg.norm(posNumpy[selectedIndices] - posNumpy[index], axis=1).min() > 0.5:
             selectedIndices.append(index)

@@ -1,5 +1,6 @@
 import os
 from typing import List, Dict, Any, Union, Tuple, Iterable, Optional
+from collections import defaultdict
 from pathlib import Path
 import logging
 import warnings
@@ -14,10 +15,11 @@ from rdkit import Chem
 from .prep import (
     computeBoxVectorsWithPadding, shiftToBoxCenter, shiftPositions,
     hydrogen_mass_repartition, sanitize_water,
-    PROTEIN_FF_XMLS, WATER_FF_XMLS
+    PROTEIN_FF_XMLS, WATER_FF_XMLS,
+    do_co_alchemical_water
 )
 from .workflow import Step, create_groupfile_from_steps
-from .settings import create_default_setting, AmberMdin, AmberWtSettings
+from .settings import create_default_setting, AmberMdin, AmberWtSettings, AmberRstSettings
 from ..smff.utils import convert_to_xml
 from ..cmd import init_logger
 
@@ -187,7 +189,7 @@ def mk_merged_system(
     return struct
 
 
-def find_mutations(topA: app.Topology, topB: app.Topology):
+def find_mutations(topA: app.Topology, topB: app.Topology, logger: Optional[logging.Logger] = None) -> List[int]:
     """
     Find the indices (0-indexed) of mutated residues
     """
@@ -196,7 +198,33 @@ def find_mutations(topA: app.Topology, topB: app.Topology):
         for residueA, residueB in zip(chainA.residues(), chainB.residues(), strict=True):
             if residueA.name != residueB.name:
                 mutations.append(residueA.index)
+                if logger:
+                    logger.info(f"Find mutation in chain {chainA.id}: {residueA.name}{residueA.id} -> {residueB.name}")
     return mutations
+
+
+def compute_net_charge_from_openmm_system(system: mm.System):
+    """
+    Compute the net charge of an OpenMM System.
+    
+    Parameters
+    ----------
+    system : openmm.System
+        The OpenMM System to compute the net charge for.
+    
+    Returns
+    -------
+    float
+        The net charge of the system.
+    """
+    net_charge = 0.0
+    for force in system.getForces():
+        if isinstance(force, mm.NonbondedForce):
+            for i in range(force.getNumParticles()):
+                charge = force.getParticleParameters(i)[0]
+                net_charge += charge.value_in_unit(unit.elementary_charge)
+            break
+    return round(net_charge)
 
 
 def setup_protein_fep_workflow(
@@ -241,7 +269,7 @@ def setup_protein_fep_workflow(
     posB = pdbB.positions
 
     # Find mutations
-    mutated_residue_indices = find_mutations(topA, topB)
+    mutated_residue_indices = find_mutations(topA, topB, logger)
     
     # Add solvents & ions
     buffer = config.get("buffer", 15.0) /  10 * unit.nanometers
@@ -275,18 +303,10 @@ def setup_protein_fep_workflow(
     merged_top, merged_pos, mutations = merge_topology(
         modeller.topology, topB, modeller.positions, posB, mutated_residue_indices
     )
-    
-    ff = app.ForceField(*xmls)
-    struct = mk_merged_system(ff, merged_top, merged_pos, mutations)
-    sanitize_water(struct)
-    if config.get("do_hmr", False):
-        hydrogen_mass_repartition(struct, config.get('hydrogen_mass', 3.024))
+    modeller.topology = merged_top
+    modeller.positions = merged_pos
 
-    struct.save(str(wdir / f"{basename}.prmtop"), overwrite=overwrite)
-    struct.save(str(wdir / f"{basename}.inpcrd"), overwrite=overwrite)
-    app.PDBFile.writeFile(merged_top, struct.positions, str(wdir / f'{basename}.pdb'), keepIds=True)
-
-    # Return soft-core atom indices, starting from 0
+    # Determine soft-core atom indices, starting from 0
     scA, scB = [], []
     residues = list(merged_top.residues())
     for r1, r2 in mutations:
@@ -295,10 +315,56 @@ def setup_protein_fep_workflow(
         for at in residues[r2].atoms():
             scB.append(at.index)
 
+    # Charge Change
+    rst_settings = []
+    alchem_water_info = defaultdict(list)
+    if use_charge_change:
+        charge_A = compute_net_charge_from_openmm_system(ff.createSystem(topA))
+        charge_B = compute_net_charge_from_openmm_system(ff.createSystem(topB))
+        d_charge = int(charge_B - charge_A)
+        if d_charge != 0:
+            logger.info(f"Perturbation invoves charge change {int(charge_A)} -> {int(charge_B)}")
+            alchem_water_info = do_co_alchemical_water(modeller, d_charge, scA+scB, list(range(topA.getNumAtoms())))
+
+            boxVectors = modeller.topology.getPeriodicBoxVectors()
+            maxLen = min([
+                np.linalg.norm([boxVectors[0].x, boxVectors[0].y, boxVectors[0].z]),
+                np.linalg.norm([boxVectors[1].x, boxVectors[1].y, boxVectors[1].z]),
+                np.linalg.norm([boxVectors[2].x, boxVectors[2].y, boxVectors[2].z])
+            ]) / 2 * 10
+            r1, r2 = 10.0, 15.0
+            k = 1000.0
+            assert maxLen > 2 * r2, f"The box is too small for charge change FEP ({maxLen:.2f} Ang but at least {2*r2:.2f} recommended )"
+            for oxy_idx, ion_idx in zip(alchem_water_info['alchemical_water_oxygen'], alchem_water_info['alchemical_ions']):
+                rst_settings.append(AmberRstSettings(iat=[scA[0]+1, oxy_idx+1], r1=r1, r2=r2, r3=maxLen, r4=maxLen+5, rk2=k, rk3=k))
+                rst_settings.append(AmberRstSettings(iat=[scB[0]+1, ion_idx+1], r1=r1, r2=r2, r3=maxLen, r4=maxLen+5, rk2=k, rk3=k))
+
+                atoms = list(modeller.topology.atoms())
+                logger.info(f"CO-ALCHEMICAL WATER created: oxygen #{oxy_idx} -> {atoms[ion_idx].name}")
+
+                anchor1_pos = np.array([modeller.positions[scA[0]][0], modeller.positions[scA[0]][1], modeller.positions[scA[0]][2]])
+                anchor2_pos = np.array([modeller.positions[scB[0]][0], modeller.positions[scB[0]][1], modeller.positions[scB[0]][2]])
+                oxy_pos = np.array([modeller.positions[oxy_idx][0], modeller.positions[oxy_idx][1], modeller.positions[oxy_idx][2]])
+                ion_pos = np.array([modeller.positions[ion_idx][0], modeller.positions[ion_idx][1], modeller.positions[ion_idx][2]])
+                logger.info(f'Co-alchemical water oxygen ({oxy_idx}) to soft-core atom ({scA[0]}) distance: {np.linalg.norm(oxy_pos - anchor1_pos)._value*10:.2f} Angstrom')
+                logger.info(f'Co-alchemical water oxygen ({oxy_idx}) to soft-core atom ({scB[0]}) distance: {np.linalg.norm(oxy_pos - anchor2_pos)._value*10:.2f} Angstrom')
+                logger.info(f'Distance restraints will be applied to confine the co-alchemical water oxygen within ({r2:.2f}~{maxLen:.2f}) Angstrom from the soft-core atoms')
+
+    ff = app.ForceField(*xmls)
+    struct = mk_merged_system(ff, modeller.topology, modeller.positions, mutations)
+    sanitize_water(struct)
+    if config.get("do_hmr", False):
+        hydrogen_mass_repartition(struct, config.get('hydrogen_mass', 3.024))
+
+    struct.save(str(wdir / f"{basename}.prmtop"), overwrite=overwrite)
+    struct.save(str(wdir / f"{basename}.inpcrd"), overwrite=overwrite)
+    app.PDBFile.writeFile(modeller.topology, struct.positions, str(wdir / f'{basename}.pdb'), keepIds=True)
+
+    # Generate Mask
     mask = {
-        "timask1": "@" + ",".join(str(x+1) for x in scA),
-        "timask2": "@" + ",".join(str(x+1) for x in scB),
-        "scmask1": "@" + ",".join(str(x+1) for x in scA),
+        "timask1": "@" + ",".join(str(x+1) for x in scA+alchem_water_info['alchemical_water_oxygen']+alchem_water_info['alchemical_water_hydrogen']),
+        "timask2": "@" + ",".join(str(x+1) for x in scB+alchem_water_info['alchemical_ions']),
+        "scmask1": "@" + ",".join(str(x+1) for x in scA+alchem_water_info['alchemical_water_hydrogen']),
         "scmask2": "@" + ",".join(str(x+1) for x in scB),
     }
     
@@ -358,6 +424,7 @@ def setup_protein_fep_workflow(
                 warnings.warn("Unrecognized pre-defined setting types. NPT production pre-defined settings are used with user-specified &cntrl options")
 
         predef_settings['cntrl'].update(setting['cntrl'])
+        predef_settings['rst'] += rst_settings
         
         # create step for each lambda
         steps = []
