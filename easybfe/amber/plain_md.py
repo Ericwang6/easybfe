@@ -26,6 +26,7 @@ def create_system(
     output_dir: os.PathLike = ".",
     protein_ff: str = 'ff14SB',
     water_ff: str = 'tip3p',
+    box_shape: str = 'cube',
     buffer: float = 20.0,
     ionic_strength: float = 0.15,
     do_hmr: bool = True,
@@ -38,23 +39,24 @@ def create_system(
     
     ffs = []
     modeller = app.Modeller(app.Topology(), [])
+    if has_protein:
+        pdb = app.PDBFile(str(protein_pdb))
+        modeller.add(pdb.topology, pdb.positions)
+        ffs.append(PROTEIN_FF_XMLS[protein_ff])
     if has_ligand:
         ligand_xml = os.path.join(output_dir, 'ligand.xml')
         ligand_struct = parmed.load_file(str(ligand_prmtop), xyz=str(ligand_inpcrd))
         convert_to_xml(ligand_struct, ligand_xml)
         modeller.add(ligand_struct.topology, ligand_struct.positions)
         ffs.append(ligand_xml)
-    if has_protein:
-        pdb = app.PDBFile(str(protein_pdb))
-        modeller.add(pdb.topology, pdb.positions)
-        ffs.append(PROTEIN_FF_XMLS[protein_ff])
     
     ffs.append(WATER_FF_XMLS[water_ff])
     ff = app.ForceField(*ffs)
     
     boxVectors = computeBoxVectorsWithPadding(
         modeller.positions, 
-        buffer / 10.0 * unit.nanometers
+        buffer / 10.0 * unit.nanometers,
+        box_shape
     )
     modeller.positions = shiftToBoxCenter(modeller.positions, boxVectors)
     modeller.topology.setPeriodicBoxVectors(boxVectors)
