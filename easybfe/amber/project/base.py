@@ -1,7 +1,7 @@
 import os, glob, shutil
 from pathlib import Path
 import json
-from typing import Optional
+from typing import Optional, Dict, Union, Any
 from functools import partial
 import multiprocessing as mp
 from collections import defaultdict
@@ -371,6 +371,7 @@ class BaseAmberRbfeProject:
             wdir,
             protein_ff=config.get('protein_ff', 'ff14SB'),
             water_ff=config.get('water_ff', 'tip3p'),
+            box_shape=config.get('box_shape', 'cube'),
             buffer=config.get('buffer', 20.0),
             ionic_strength=config.get('ionic_strength', 0.15),
             do_hmr=config.get('do_hmr', True),
@@ -392,3 +393,101 @@ class BaseAmberRbfeProject:
         if submit:
             wf.submit(platform=config.get('submit_platform', 'slurm'))
             self.logger.info("Job submitted")
+    
+    def analyze_md(
+        self, 
+        task_name: str = '', 
+        task_dir: os.PathLike = '', 
+        config: Union[str, Dict[str, Any]] = dict()
+    ):
+        from ...analysis.trajectory import post_process_trajectory, compute_rmsd, plot_rmsd
+        from ...analysis.interaction import analyze_interactions_for_trajectory, plot_interactions
+
+        # set up task-dir and task-name
+        if not task_dir:
+            if task_name:
+                task_dir = self.md_dir / task_name
+            else:
+                raise RuntimeError("Either task_name or task_dir must be provided")
+        else:
+            task_dir = Path(task_dir)
+            if task_name:
+                self.logger.warning('Both task_name and task_dir is provided. task_dir will be used')
+            else:
+                task_name = task_dir.name
+        
+        with open(task_dir / 'config.json') as f:
+            md_config = json.load(f)
+        
+        prod_stage = md_config['workflow'][-1]['name']
+        task_type = md_config['task_type']
+        
+        # analysis configuration
+        analysis_config = md_config.get('analysis', dict())
+        if isinstance(config, dict) and config:
+            analysis_config.update(config)
+        elif os.path.isfile(config):
+            with open(config) as f:
+                analysis_config.update(json.load(f))
+        
+        remove_tmp = analysis_config.pop('remove_tmp', True)
+
+        # process PBC and do alignment
+        post_process_trajectory(
+            in_top=str(task_dir / 'system.pdb'),
+            in_trj=str(task_dir / prod_stage / f'{prod_stage}.mdcrd'),
+            out_pdb=str(task_dir / prod_stage / 'prod_processed.pdb'),
+            out_trj=str(task_dir / prod_stage / 'prod_processed.xtc'),
+            ref=None, 
+            process_pbc=analysis_config.pop('process_pbc', False), 
+            do_alignment=analysis_config.pop('do_alignment', True),
+            in_top_format=None, in_trj_format='NCDF', ref_format=None,
+            center_selection=analysis_config.pop('center_selection', 'protein'),
+            output_selection=analysis_config.pop('output_selection', 'protein or resname MOL'),
+            align_selection=analysis_config.pop('align_selection', 'backbone'),
+            remove_tmp=remove_tmp
+        )
+
+        # compute & plot RMSD
+        if task_type == 'protein':
+            rmsd_selection = 'backbone'
+        else:
+            rmsd_selection = 'resname MOL'
+        rmsd_selection = analysis_config.pop('rmsd_selection', rmsd_selection)
+        
+        rmsd_data = compute_rmsd(
+            top=str(task_dir / prod_stage / 'prod_processed.pdb'),
+            trj=str(task_dir / prod_stage / 'prod_processed.xtc'),
+            ref='',
+            selection=rmsd_selection,
+            use_symmetry_correction=analysis_config.pop('use_symmetry_correction', True),
+            heavy_atoms_only=analysis_config.pop('heavy_atoms_only', True),
+            save_path=str(task_dir / prod_stage / 'prod_rmsd.txt')
+        )
+
+        name = analysis_config.pop('name', task_name)
+        plot_rmsd(
+            data=rmsd_data, name=name, 
+            save_path=str(task_dir / prod_stage / 'prod_rmsd.png'), dpi=450
+        )
+
+        # interactions
+        interact_df = analyze_interactions_for_trajectory(
+            top=str(task_dir / prod_stage / 'prod_processed.pdb'),
+            trj=str(task_dir / prod_stage / 'prod_processed.xtc'),
+            out_csv=str(task_dir / prod_stage / 'interaction.csv'),
+            use_mpi=analysis_config.pop('use_mpi', True),
+            remove_tmp=remove_tmp,
+            use_strict_hbond=analysis_config.pop('use_strict_hbond', False),
+            resnr_renum=analysis_config.pop('resnr_renum', dict())
+        )
+
+        plot_interactions(
+            interact_df, title=name, 
+            save_path=str(task_dir / prod_stage / 'interaction.png'), dpi=450
+        )
+
+        if len(analysis_config) > 0:
+            self.logger.warning(
+               f'The following analysis configurations are not used: {",".join(analysis_config.keys())}'
+            )

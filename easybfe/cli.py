@@ -234,6 +234,22 @@ def parse_args(args: Sequence[str] | None = None):
         help='Report verbose information for rbfe'
     )
 
+    # Plain MD parser
+    md_parser = subparsers.add_parser('md', help='Run plain MD')
+    md_parser.add_argument('-p', '--protein', dest='protein', type=str, required=True, help='Name of the protein')
+    md_parser.add_argument('-l', '--ligand', dest='ligand', type=str, default='', help='Name of the ligand')
+    md_parser.add_argument('-t', '--task_name', dest='task_name', type=str, required=True, help='Name of the task')
+    md_parser.add_argument('-c', '--config', dest='config', type=str, required=True, help='Configuration file')
+    md_parser.add_argument('--ligand-only', dest='ligand_only', action='store_true', help='Only simulate ligand')
+    md_parser.add_argument('--submit', dest='submit', action='store_true', help='Submit the job')
+    md_parser.add_argument('--overwrite', dest='overwrite', action='store_true', help='Overwrite existing files')
+
+    # Plain MD analyze
+    md_ana_parser = subparsers.add_parser('analyze_md', help='Analyze results for plain MD')
+    md_ana_parser.add_argument('-t', '--task_name', dest='task_name', default='', type=str, help='Name of the plain MD task')
+    md_ana_parser.add_argument('--task_dir', dest='task_dir', default='', help='Path to the plain MD task directory')
+    md_ana_parser.add_argument('-c', '--config', dest='config', default='', help='Path to the configuration file for analysis')
+
     # constrain docking
     dock_parser = subparsers.add_parser("cdock", help='Run constrained docking workflow')
     dock_parser.add_argument('-i', '--input', required=True, dest='input', help='Input ligand: smiles string or sdf file')
@@ -306,6 +322,13 @@ def main():
             )
     elif args.command == 'report':
         project.report(save_dir=args.save_dir, verbose=args.verbose, protein_name=args.protein)
+    elif args.command == 'md':
+        project.run_plain_md(
+            args.protein, args.ligand, args.task_name, args.config,
+            args.ligand_only, args.submit, args.overwrite
+        )
+    elif args.command == 'analyze_md':
+        project.analyze_md(args.task_name, args.task_dir, args.config)
         
 
 if __name__ == '__main__':

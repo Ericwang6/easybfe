@@ -473,7 +473,7 @@ class AmberLigandRbfeProject(BaseAmberRbfeProject):
         import MDAnalysis as mda
         from MDAnalysis.analysis import align
         from MDAnalysis.transformations import wrap, unwrap, center_in_box
-        from ...analysis.trajectory import compute_rmsd, plot_dihe_with_mol
+        from ...analysis.trajectory import compute_rmsd_naive, plot_dihe_with_mol
         
         perturb_dir = self.rbfe_dir / protein_name / pert_name
         
@@ -535,7 +535,7 @@ class AmberLigandRbfeProject(BaseAmberRbfeProject):
                     os.remove(tmp_trj)
 
                 # rmsd
-                rmsd_data = compute_rmsd(u_out, ligand_str, os.path.join(perturb_dir, f'{leg}/lambda{lmd}/prod/rmsd.txt'))
+                rmsd_data = compute_rmsd_naive(u_out, ligand_str, os.path.join(perturb_dir, f'{leg}/lambda{lmd}/prod/rmsd.txt'))
                 rmsd_ax.plot(rmsd_data[:, 0], rmsd_data[:, 1], label=f'Lambda {lmd}')
                 # dihedral
                 char = 'A' if resid == 1 else 'B'
