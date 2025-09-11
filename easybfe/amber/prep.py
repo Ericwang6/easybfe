@@ -2,6 +2,7 @@ import os
 import json
 from pathlib import Path
 from typing import Union, Dict, List, Tuple, Any
+import math
 
 import numpy as np
 import openmm as mm
@@ -91,20 +92,23 @@ def renumber_parmed_structure(struct: parmed.Structure, mapping: Dict[int, int])
     return struct
 
 
-def computeBoxVectorsWithPadding(positions: unit.Quantity, buffer: unit.Quantity, boxShape: str = 'cubic'):
-    min_x, min_y, min_z = min(pos.x for pos in positions), min(pos.y for pos in positions), min(pos.z for pos in positions)
-    max_x, max_y, max_z = max(pos.x for pos in positions), max(pos.y for pos in positions), max(pos.z for pos in positions)
+def computeBoxVectorsWithPadding(positions: unit.Quantity, buffer: unit.Quantity, boxShape: str = 'cube'):
+    positions = positions.value_in_unit(unit.nanometer)
     buffer = buffer.value_in_unit(unit.nanometer)
-    box_x = (max_x - min_x) + buffer * 2
-    box_y = (max_y - min_y) + buffer * 2
-    box_z = (max_z - min_z) + buffer * 2
-    if boxShape == 'cubic':
-        box_x = box_y = box_z = max(box_x, box_y, box_z)
-    return (
-        mm.Vec3(box_x, 0.0, 0.0),
-        mm.Vec3(0.0, box_y, 0.0),
-        mm.Vec3(0.0, 0.0, box_z)
-    )
+    minVec = mm.Vec3(*(min((pos[i] for pos in positions)) for i in range(3)))
+    maxVec = mm.Vec3(*(max((pos[i] for pos in positions)) for i in range(3)))
+    center = (minVec + maxVec) * 0.5
+    radius = max(unit.norm(center-pos) for pos in positions)
+    width = max(2*buffer, 2*radius+buffer)
+
+    if boxShape == 'cube':
+        return (mm.Vec3(width, 0, 0), mm.Vec3(0, width, 0), mm.Vec3(0, 0, width))
+    elif boxShape == 'dodecahedron':
+        return (mm.Vec3(width, 0, 0), mm.Vec3(0, width, 0), mm.Vec3(0.5, 0.5, 0.5*math.sqrt(2))*width)
+    elif boxShape == 'octahedron':
+        return (mm.Vec3(width, 0, 0), mm.Vec3(1/3, 2*math.sqrt(2)/3, 0)*width, mm.Vec3(-1/3, math.sqrt(2)/3, math.sqrt(6)/3)*width)
+    else:
+        raise ValueError(f'Illegal box shape: {boxShape}')
 
 
 def shiftToBoxCenter(positions: unit.Quantity, boxVectors: Tuple[mm.Vec3], returnShiftVec: bool = False):
