@@ -127,6 +127,11 @@ class VinaDocking:
         run_command([self.vina_binary, '--ligand', in_pdbqt, '--out', out_pdbqt, '--config', self.config_file], logger=self.logger)
         convert_pdbqt_to_sdf(out_pdbqt, out_sdf)
         self.logger.info(f"Results are written to: {out_sdf}")
+        
+        mols = [m for m in Chem.SDMolSupplier(str(out_sdf), removeHs=False)]
+        for i, m in enumerate(mols):
+            with Chem.SDWriter(str(out_sdf.with_stem(f'{stem}_out_conf{i}'))) as w:
+                w.write(m)
         return out_sdf
     
     def rescore(self, inp: os.PathLike | Chem.Mol):
