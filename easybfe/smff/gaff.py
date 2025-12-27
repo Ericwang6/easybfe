@@ -67,11 +67,12 @@ def run_acpype(input: Optional[os.PathLike] = None,
 
 
 class GAFF(SmallMoleculeForceField):
-    def __init__(self, atype: str = 'gaff2', charge_method: str = 'bcc'):
+    def __init__(self, atype: str = 'gaff2', charge_method: str = 'bcc', reuse_cache: bool = False):
         self.atype = atype
         self.charge_method = charge_method
         assert self.atype in ['gaff', 'gaff2'], f'Unsupported atom type: {atype}'
         assert self.charge_method in ['bcc', 'gas'], f'Unsupported charge method: {atype}'
+        self.reuse_cache = reuse_cache
     
     def parametrize(self, ligand_file: os.PathLike, wdir: os.PathLike | None = None):
         ligand_file = Path(ligand_file).resolve()
@@ -79,7 +80,10 @@ class GAFF(SmallMoleculeForceField):
         wdir = Path(wdir).resolve()
         with set_directory(wdir):
             if os.path.isdir('MOL.acpype'):
-                shutil.rmtree('MOL.acpype')
+                if not self.reuse_cache:
+                    shutil.rmtree('MOL.acpype')
+                else:
+                    warnings.warn(f'Found existing MOL.acpype directory, acpype will reuse it.')
             run_acpype(
                 ligand_file,
                 basename='MOL',
