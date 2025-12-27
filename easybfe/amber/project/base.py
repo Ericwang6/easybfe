@@ -375,7 +375,8 @@ class BaseAmberRbfeProject:
             buffer=config.get('buffer', 20.0),
             ionic_strength=config.get('ionic_strength', 0.15),
             do_hmr=config.get('do_hmr', True),
-            do_hmr_water=config.get('do_hmr_water', False)
+            do_hmr_water=config.get('do_hmr_water', False),
+            overwrite=overwrite
         )
 
         prmtop = wdir / 'system.prmtop'

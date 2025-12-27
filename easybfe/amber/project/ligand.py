@@ -342,11 +342,12 @@ class AmberLigandRbfeProject(BaseAmberRbfeProject):
         ligands_info = ligands_info.query(f'`protein` == "{protein_name}"')
         perts_info = perts_info.query(f'`protein_name` == "{protein_name}"')
         
-        ligands_with_expt = ligands_info.dropna(subset=['dG.expt'])['name'].tolist()
         dg_mle = maximum_likelihood_estimator(perts_info.dropna(subset=['ddG.total'])).set_index('ligand')
-        avg_dg_expt = ligands_info.query('name in @ligands_with_expt')['dG.expt'].mean()
-        avg_dg_calc = dg_mle[dg_mle.index.isin(ligands_with_expt)]['dG'].mean()
-        dg_mle['dG'] += avg_dg_expt - avg_dg_calc
+        ligands_with_expt = ligands_info.dropna(subset=['dG.expt'])['name'].tolist()
+        if len(ligands_with_expt) > 0:
+            avg_dg_expt = ligands_info.query('name in @ligands_with_expt')['dG.expt'].mean()
+            avg_dg_calc = dg_mle[dg_mle.index.isin(ligands_with_expt)]['dG'].mean()
+            dg_mle['dG'] += avg_dg_expt - avg_dg_calc
         for index, row in ligands_info.iterrows():
             if row['name'] in dg_mle.index:
                 dG = dg_mle.loc[row['name'], 'dG']
@@ -368,31 +369,33 @@ class AmberLigandRbfeProject(BaseAmberRbfeProject):
         
         ligands_info_with_expt = ligands_info.dropna(subset=['dG.expt', 'dG.calc'])
         self.logger.info(f"Plotting - Found {ligands_info_with_expt.shape[0]} ligands with both experimental values and calculated values")
-        _, ligands_stats = plot_correlation(
-            xdata=ligands_info_with_expt['dG.expt'],
-            ydata=ligands_info_with_expt['dG.calc'],
-            xerr=None,
-            yerr=ligands_info_with_expt['dG_std.calc'],
-            xlabel=r'$\Delta G_\mathrm{expt}$ (kcal/mol)',
-            ylabel=r'$\Delta G_\mathrm{FEP}$ (kcal/mol)',
-            savefig=os.path.join(save_dir, 'ligands.png')
-        )
-        with open(os.path.join(save_dir, 'ligands_stat.json'), 'w') as f:
-            json.dump(ligands_stats, f, indent=4)
+        if not ligands_info_with_expt.empty:
+            _, ligands_stats = plot_correlation(
+                xdata=ligands_info_with_expt['dG.expt'],
+                ydata=ligands_info_with_expt['dG.calc'],
+                xerr=None,
+                yerr=ligands_info_with_expt['dG_std.calc'],
+                xlabel=r'$\Delta G_\mathrm{expt}$ (kcal/mol)',
+                ylabel=r'$\Delta G_\mathrm{FEP}$ (kcal/mol)',
+                savefig=os.path.join(save_dir, 'ligands.png')
+            )
+            with open(os.path.join(save_dir, 'ligands_stat.json'), 'w') as f:
+                json.dump(ligands_stats, f, indent=4)
 
         perts_info_with_expt = perts_info.dropna(subset=['ddG.expt', 'ddG.total'])
         self.logger.info(f"Plotting - Found {perts_info_with_expt.shape[0]} perturbations with both experimental values and calculated values")
-        _, perts_stats = plot_correlation(
-            xdata=perts_info_with_expt['ddG.expt'],
-            ydata=perts_info_with_expt['ddG.total'],
-            xerr=None,
-            yerr=perts_info_with_expt['ddG_std.total'],
-            xlabel=r'$\Delta\Delta G_\mathrm{expt}$ (kcal/mol)',
-            ylabel=r'$\Delta\Delta G_\mathrm{FEP}$ (kcal/mol)',
-            savefig=os.path.join(save_dir, 'perturbations.png')
-        )
-        with open(os.path.join(save_dir, 'perturbations_stat.json'), 'w') as f:
-            json.dump(perts_stats, f, indent=4)
+        if not perts_info_with_expt.empty:
+            _, perts_stats = plot_correlation(
+                xdata=perts_info_with_expt['ddG.expt'],
+                ydata=perts_info_with_expt['ddG.total'],
+                xerr=None,
+                yerr=perts_info_with_expt['ddG_std.total'],
+                xlabel=r'$\Delta\Delta G_\mathrm{expt}$ (kcal/mol)',
+                ylabel=r'$\Delta\Delta G_\mathrm{FEP}$ (kcal/mol)',
+                savefig=os.path.join(save_dir, 'perturbations.png')
+            )
+            with open(os.path.join(save_dir, 'perturbations_stat.json'), 'w') as f:
+                json.dump(perts_stats, f, indent=4)
 
     def evaluate_free_energy(self, protein_name: str, pert_name: str):
         """
