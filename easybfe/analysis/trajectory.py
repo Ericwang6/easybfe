@@ -277,7 +277,8 @@ def compute_rmsd(
     
     # calculate rmsd
     if use_symmetry_correction:
-        bonds = atoms.bonds.indices.T
+        atom_indices_map = {atoms.indices[i]: i for i in range(atoms.n_atoms)}
+        bonds = np.array([[atom_indices_map[b[0]], atom_indices_map[b[1]]] for b in atoms.bonds.indices]).T
         adj = np.zeros((atoms.n_atoms, atoms.n_atoms), dtype=np.int32)
         adj[bonds[0], bonds[1]] = 1
         adj[bonds[1], bonds[0]] = 1
