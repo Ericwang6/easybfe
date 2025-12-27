@@ -105,6 +105,7 @@ def run_command(
     raise_error: bool = True,
     input: Optional[str] = None,
     timeout: Optional[int] = None,
+    cwd: str = '.',
     **kwargs,
 ) -> Tuple[int, str, str]:
     """
@@ -120,6 +121,8 @@ def run_command(
         Input string for the command
     timeout: int, optional
         Timeout for the command
+    cwd: str
+        Directory to run the command. Default is '.'
     **kwargs:
         Arguments in subprocess.Popen
     
@@ -144,13 +147,14 @@ def run_command(
 
     logger = kwargs.pop('logger', None)
     if logger:
-        logger.info(f'The following command is running at: {os.getcwd()}:\n{" ".join(cmd)}')
+        logger.info(f'The following command is running at: {Path(cwd).resolve()}:\n{" ".join(cmd)}')
 
     sub = subprocess.Popen(
         args=cmd,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        cwd=cwd,
         **kwargs
     )
     if input is not None:
