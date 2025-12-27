@@ -30,7 +30,8 @@ def create_system(
     buffer: float = 20.0,
     ionic_strength: float = 0.15,
     do_hmr: bool = True,
-    do_hmr_water: bool = False
+    do_hmr_water: bool = False,
+    overwrite: bool = False
 ):
     has_protein = protein_pdb != ''
     has_ligand = ligand_inpcrd != '' and ligand_inpcrd != ''
@@ -76,7 +77,7 @@ def create_system(
     if do_hmr:
         hydrogen_mass_repartition(system_struct, dowater=do_hmr_water)
 
-    system_struct.save(os.path.join(output_dir, 'system.pdb'))
+    system_struct.save(os.path.join(output_dir, 'system.pdb'), overwrite=overwrite)
 
     for residx, residue in enumerate(system_struct.residues):
         # Amber uses WAT to identify SETTLE for waters
@@ -98,8 +99,8 @@ def create_system(
     for item in reversed(to_del):
         system_struct.angles.pop(item)
 
-    system_struct.save(os.path.join(output_dir, 'system.prmtop'))
-    system_struct.save(os.path.join(output_dir, 'system.inpcrd'))
+    system_struct.save(os.path.join(output_dir, 'system.prmtop'), overwrite=overwrite)
+    system_struct.save(os.path.join(output_dir, 'system.inpcrd'), overwrite=overwrite)
 
 
 def create_workflow(
