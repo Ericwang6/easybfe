@@ -473,20 +473,21 @@ class BaseAmberRbfeProject:
         )
 
         # interactions
-        interact_df = analyze_interactions_for_trajectory(
-            top=str(task_dir / prod_stage / 'prod_processed.pdb'),
-            trj=str(task_dir / prod_stage / 'prod_processed.xtc'),
-            out_csv=str(task_dir / prod_stage / 'interaction.csv'),
-            use_mpi=analysis_config.pop('use_mpi', True),
-            remove_tmp=remove_tmp,
-            use_strict_hbond=analysis_config.pop('use_strict_hbond', False),
-            resnr_renum=analysis_config.pop('resnr_renum', dict())
-        )
+        if analysis_config.pop("interaction_analysis", True):
+            interact_df = analyze_interactions_for_trajectory(
+                top=str(task_dir / prod_stage / 'prod_processed.pdb'),
+                trj=str(task_dir / prod_stage / 'prod_processed.xtc'),
+                out_csv=str(task_dir / prod_stage / 'interaction.csv'),
+                use_mpi=analysis_config.pop('use_mpi', True),
+                remove_tmp=remove_tmp,
+                use_strict_hbond=analysis_config.pop('use_strict_hbond', False),
+                resnr_renum=analysis_config.pop('resnr_renum', dict())
+            )
 
-        plot_interactions(
-            interact_df, title=name, 
-            save_path=str(task_dir / prod_stage / 'interaction.png'), dpi=450
-        )
+            plot_interactions(
+                interact_df, title=name, 
+                save_path=str(task_dir / prod_stage / 'interaction.png'), dpi=450
+            )
 
         if len(analysis_config) > 0:
             self.logger.warning(
