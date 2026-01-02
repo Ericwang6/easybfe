@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Union
 import warnings
 import parmed
 from .workflow import Step, Workflow
@@ -24,7 +24,7 @@ def create_system(
     ligand_prmtop: os.PathLike = "",
     ligand_inpcrd: os.PathLike = "",
     output_dir: os.PathLike = ".",
-    protein_ff: str = 'ff14SB',
+    protein_ff: Union[str, List[str]] = 'ff14SB',
     water_ff: str = 'tip3p',
     box_shape: str = 'cube',
     buffer: float = 20.0,
@@ -43,7 +43,11 @@ def create_system(
     if has_protein:
         pdb = app.PDBFile(str(protein_pdb))
         modeller.add(pdb.topology, pdb.positions)
-        ffs.append(PROTEIN_FF_XMLS[protein_ff])
+        if isinstance(protein_ff, list):
+            for ff in protein_ff:
+                ffs.append(PROTEIN_FF_XMLS.get(ff, ff))
+        else:
+            ffs.append(PROTEIN_FF_XMLS.get(protein_ff, protein_ff))
     if has_ligand:
         ligand_xml = os.path.join(output_dir, 'ligand.xml')
         ligand_struct = parmed.load_file(str(ligand_prmtop), xyz=str(ligand_inpcrd))
