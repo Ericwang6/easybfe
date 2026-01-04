@@ -1,7 +1,4 @@
 '''
-Author: Eric Wang
-Date: 10/07/2024
-
 This package contains small molecule force field parameterizer
 '''
 from .base import SmallMoleculeForceField
