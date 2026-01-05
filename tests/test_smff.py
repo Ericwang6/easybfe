@@ -1,6 +1,8 @@
 import shutil
 from pathlib import Path
 import pytest
+from rdkit import Chem
+from rdkit.Chem import AllChem
 from easybfe.smff import parametrize_ligand, load_parametrizer
 
 
@@ -116,3 +118,87 @@ def test_parametrize_ligand_overwrite_true(forcefield, charge_method, testdir, a
     stem = amide_sdf.stem
     assert (wdir / f'{stem}.prmtop').is_file()
     assert (wdir / f'{stem}.inpcrd').is_file()
+
+
+@pytest.mark.parametrize(
+    "forcefield, charge_method",
+    [
+        ('gaff2', 'gas'),
+        ('openff-2.1.0', 'gas'),
+    ]
+)
+def test_parametrize_ligand_with_rdkit_mol(forcefield, charge_method, testdir):
+    """Test parametrize_ligand with RDKit molecule input."""
+    smiles = 'c1ccncc1CCC(=O)N'
+    name = 'test_rdkit_mol'
+    wdir = testdir / f'{forcefield}_{charge_method}_rdkit_mol'
+    
+    # Create RDKit molecule from SMILES
+    mol = Chem.MolFromSmiles(smiles)
+    mol = Chem.AddHs(mol)
+    AllChem.EmbedMolecule(mol)
+    AllChem.MMFFOptimizeMolecule(mol)
+    
+    # Use parameterizer directly with RDKit molecule
+    ff = load_parametrizer(forcefield, charge_method)
+    ff.run(mol, wdir, name=name, overwrite=False)
+    
+    # Check that required files are generated
+    assert (wdir / f'{name}.prmtop').is_file()
+    assert (wdir / f'{name}.inpcrd').is_file()
+    assert (wdir / f'{name}.sdf').is_file()
+    assert (wdir / f'{name}.xml').is_file()
+    assert (wdir / f'{name}.pdb').is_file()
+    assert (wdir / f'{name}.png').is_file()
+
+
+@pytest.mark.parametrize(
+    "forcefield, charge_method",
+    [
+        ('gaff2', 'gas'),
+        ('openff-2.1.0', 'gas'),
+    ]
+)
+def test_parametrize_ligand_with_rdkit_mol_no_name_raises_error(forcefield, charge_method, testdir):
+    """Test that an error is raised when RDKit molecule is provided without name."""
+    smiles = 'c1ccncc1CCC(=O)N'
+    wdir = testdir / f'{forcefield}_{charge_method}_rdkit_mol_no_name'
+    
+    # Create RDKit molecule from SMILES
+    mol = Chem.MolFromSmiles(smiles)
+    mol = Chem.AddHs(mol)
+    AllChem.EmbedMolecule(mol)
+    AllChem.MMFFOptimizeMolecule(mol)
+    
+    # Use parameterizer without name - should raise AssertionError
+    ff = load_parametrizer(forcefield, charge_method)
+    with pytest.raises(AssertionError, match='Must provide a name when input ligand is an RDKit molecule'):
+        ff.run(mol, wdir, overwrite=False)
+
+
+@pytest.mark.parametrize(
+    "forcefield, charge_method",
+    [
+        ('gaff2', 'gas'),
+        ('openff-2.1.0', 'gas'),
+    ]
+)
+def test_parametrize_ligand_with_rdkit_mol_no_3d(forcefield, charge_method, testdir):
+    """Test parametrize_ligand with RDKit molecule that has no 3D coordinates."""
+    smiles = 'c1ccncc1CCC(=O)N'
+    name = 'test_rdkit_mol_no_3d'
+    wdir = testdir / f'{forcefield}_{charge_method}_rdkit_mol_no_3d'
+    
+    # Create RDKit molecule from SMILES without 3D coordinates
+    mol = Chem.MolFromSmiles(smiles)
+    mol = Chem.AddHs(mol)
+    # Don't embed 3D coordinates - let _setup handle it
+    
+    # Use parameterizer directly with RDKit molecule
+    ff = load_parametrizer(forcefield, charge_method)
+    ff.run(mol, wdir, name=name, overwrite=False)
+    
+    # Check that required files are generated
+    assert (wdir / f'{name}.prmtop').is_file()
+    assert (wdir / f'{name}.inpcrd').is_file()
+    assert (wdir / f'{name}.sdf').is_file()

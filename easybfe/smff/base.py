@@ -10,6 +10,7 @@ from typing import Optional, Union
 from pathlib import Path
 import shutil
 import logging
+from copy import deepcopy
 
 import openmm as mm
 import openmm.unit as unit
@@ -57,18 +58,18 @@ class SmallMoleculeForceField(abc.ABC):
         self.forcefield = forcefield
         self.charge_method = charge_method
 
-    def _setup(self, ligand: Union[str, Path], wdir: os.PathLike, name: Optional[str] = None, overwrite: bool = False):
+    def _setup(self, ligand: Union[str, Path, Chem.Mol], wdir: os.PathLike, name: Optional[str] = None, overwrite: bool = False):
         """
         Set up the working directory and prepare the ligand molecule.
         
         Parameters
         ----------
-        ligand : str or Path
-            Path to ligand file or SMILES string.
+        ligand : str, Path, or Chem.Mol
+            Path to ligand file, SMILES string, or RDKit molecule object.
         wdir : os.PathLike
             Working directory for output files.
         name : str, optional
-            Name for the ligand. Required if ligand is a SMILES string.
+            Name for the ligand. Required if ligand is a SMILES string or RDKit molecule.
         overwrite : bool, default False
             Whether to overwrite existing working directory.
         """
@@ -78,7 +79,27 @@ class SmallMoleculeForceField(abc.ABC):
             shutil.rmtree(wdir)
         wdir.mkdir()
 
-        if os.path.isfile(ligand):
+        if isinstance(ligand, Chem.Mol):
+            # Make a copy to avoid modifying the original molecule
+            mol = deepcopy(ligand)
+            # Ensure molecule has hydrogens
+            if not any(atom.GetAtomicNum() == 1 for atom in mol.GetAtoms()):
+                mol = Chem.AddHs(mol)
+            # Check if molecule has 3D coordinates
+            needs_3d = False
+            try:
+                conf = mol.GetConformer()
+                if conf is None or not conf.Is3D():
+                    needs_3d = True
+            except (ValueError, RuntimeError):
+                # No conformer exists
+                needs_3d = True
+            if needs_3d:
+                logger.info("Generating 3D coordinates for molecule")
+                AllChem.EmbedMolecule(mol)
+                AllChem.MMFFOptimizeMolecule(mol)
+            assert name, 'Must provide a name when input ligand is an RDKit molecule'
+        elif os.path.isfile(ligand):
             mol = read_molecule_from_file(ligand)
             name = Path(ligand).stem if not name else name
             logger.info(f"Loaded molecule from file: {ligand}")
@@ -148,7 +169,7 @@ class SmallMoleculeForceField(abc.ABC):
         logger.info(f"Energy validation passed.")
         logger.debug(f"Energy {energy_ref:.4f} kJ/mol with prmtop and {energy:.4f} with xml")
 
-    def run(self, ligand: Union[str, Path], wdir: os.PathLike, name: Optional[str] = None, overwrite: bool = False):
+    def run(self, ligand: Union[str, Path, Chem.Mol], wdir: os.PathLike, name: Optional[str] = None, overwrite: bool = False):
         """
         Run the complete parametrization workflow.
         
@@ -157,12 +178,12 @@ class SmallMoleculeForceField(abc.ABC):
         
         Parameters
         ----------
-        ligand : str or Path
-            Path to ligand file or SMILES string.
+        ligand : str, Path, or Chem.Mol
+            Path to ligand file, SMILES string, or RDKit molecule object.
         wdir : os.PathLike
             Working directory for output files.
         name : str, optional
-            Name for the ligand. Required if ligand is a SMILES string.
+            Name for the ligand. Required if ligand is a SMILES string or RDKit molecule.
         overwrite : bool, default False
             Whether to overwrite existing working directory.
         """
