@@ -1,18 +1,52 @@
-from functools import wraps
 import os
 from pathlib import Path
-from typing import Callable
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 import numpy as np
+import logging
 
 import parmed
 import parmed.unit as u
 from parmed.periodic_table import Element as ELEMENT
+from rdkit import Chem
 
-import openmm as mm
-import openmm.unit as unit
-import openmm.app as app
+
+logger = logging.getLogger(__name__)
+
+
+def read_molecule_from_file(input: os.PathLike):
+    """
+    Read a molecule from a file.
+    
+    Parameters
+    ----------
+    input : os.PathLike
+        Path to the molecule file. Supported formats: .mol, .sdf, .mol2.
+    
+    Returns
+    -------
+    rdkit.Chem.Mol
+        RDKit molecule object.
+    
+    Raises
+    ------
+    NotImplementedError
+        If the file format is not supported.
+    AssertionError
+        If the molecule cannot be read from the file.
+    """
+    suffix = Path(input).suffix
+    input_str = str(input)
+    if suffix == ".mol":
+        mol = Chem.MolFromMolFile(input_str, removeHs=False)
+    elif suffix == ".sdf":
+        mol = Chem.SDMolSupplier(input_str, removeHs=False)[0]
+    elif suffix == ".mol2":
+        mol = Chem.MolFromMol2File(input_str, removeHs=False)
+    else:
+        raise NotImplementedError(f"Not supported file format: {suffix}")
+    assert mol is not None, f'Fail to read molecule from {input_str}'
+    return mol
 
 
 def safe_join_dihedrals(struct: parmed.Structure):
@@ -111,13 +145,6 @@ def convert_to_xml(struct, ff_xml, top_xml=None):
     This function is a wrapper around :class:`OpenmmXML.from_parmed` and the
     write methods. It handles loading the structure if a file path is provided.
     
-    The conversion process:
-    
-    1. Loads the structure (if a file path is provided)
-    2. Converts to OpenMM XML format using :meth:`OpenmmXML.from_parmed`
-    3. Writes the force field XML file
-    4. Optionally writes the topology XML file
-    
     Examples
     --------
     >>> convert_to_xml('ligand.prmtop', 'ligand.xml')
@@ -198,6 +225,12 @@ class OpenmmXML:
         uglystr = ET.tostring(xmlele, "unicode")
         pretxml = xml.dom.minidom.parseString(uglystr)
         pretstr = pretxml.toprettyxml()
+        pret = []
+        for x in pretstr.split('\n'):
+            if x.strip() == '':
+                continue
+            pret.append(x)
+        pretstr = '\n'.join(pret)
         return pretstr
     
     @staticmethod
@@ -673,109 +706,3 @@ class OpenmmXML:
         xmlobj.ffxml = ffxml
         xmlobj.topxml = topxml
         return xmlobj
-
-
-def process_prmtop(func: Callable):
-    """
-    Decorator to validate prmtop to XML conversion by comparing energies.
-    
-    This decorator wraps parametrization methods to automatically:
-    
-    1. Convert the generated prmtop/inpcrd files to OpenMM XML format
-    2. Create OpenMM systems from both the original prmtop and the XML
-    3. Compare potential energies to validate the conversion
-    4. Raise an error if energies differ by more than 0.01 kJ/mol
-    
-    The decorator is designed to be used on methods of classes that inherit
-    from :class:`SmallMoleculeForceField`. It expects the wrapped method to
-    generate prmtop and inpcrd files in the working directory.
-    
-    Parameters
-    ----------
-    func : Callable
-        The parametrization method to wrap. Must have signature:
-        ``(self, ligand_file, wdir, *args, **kwargs)``
-    
-    Returns
-    -------
-    Callable
-        Wrapped function that performs validation after parametrization.
-    
-    Raises
-    ------
-    AssertionError
-        If the energy difference between the prmtop and XML systems exceeds
-        :math:`0.01 \, \text{kJ} \cdot \text{mol}^{-1}`, indicating an incompatible force field conversion.
-    FileNotFoundError
-        If required files (prmtop, inpcrd) are not found after the wrapped
-        function executes.
-    RuntimeError
-        If OpenMM system creation or energy calculation fails.
-    
-    Notes
-    -----
-    The decorator expects the wrapped function to generate files with names
-    based on the ligand file stem:
-    
-    * ``{stem}.prmtop``: AMBER topology file
-    * ``{stem}.inpcrd``: AMBER coordinate file
-    
-    After the wrapped function executes, the decorator:
-    
-    1. Loads the prmtop/inpcrd files using ParmEd
-    2. Sets residue name to 'MOL'
-    3. Writes a PDB file for topology
-    4. Converts to XML using :func:`convert_to_xml`
-    5. Creates OpenMM systems and contexts
-    6. Computes potential energies at the same coordinates
-    7. Validates that energies match within tolerance
-    
-    Examples
-    --------
-    The decorator is used on parametrization methods:
-    
-    >>> class MyFF(SmallMoleculeForceField):
-    ...     @process_prmtop
-    ...     def parametrize(self, ligand_file, wdir=None):
-    ...         # Generate prmtop/inpcrd files
-    ...         ...
-    
-    See Also
-    --------
-    :func:`convert_to_xml` : Function that performs the XML conversion.
-    :class:`SmallMoleculeForceField` : Base class for parameterizers.
-    """
-
-    @wraps(func)
-    def wrapper(self, ligand_file, wdir, *args, **kwargs):
-        func(self, ligand_file, wdir, *args, **kwargs)
-        # Resolve paths to ensure consistency with what the function created
-        ligand_file = Path(ligand_file).resolve()
-        wdir = Path(wdir).resolve()
-        stem = ligand_file.stem
-
-        prmtop = str(wdir / f'{stem}.prmtop')
-        inpcrd = str(wdir / f'{stem}.inpcrd')
-        pdb = str(wdir / f'{stem}.pdb')
-        ffxml = str(wdir / f'{stem}.xml')
-
-        struct = parmed.load_file(prmtop, xyz=inpcrd)
-        struct.residues[0].name = 'MOL'
-        app.PDBFile.writeFile(struct.topology, struct.positions, pdb, keepIds=True)
-        convert_to_xml(struct, ffxml)
-
-        system_ref = app.AmberPrmtopFile(prmtop).createSystem()
-        ctx_ref = mm.Context(system_ref, mm.LangevinIntegrator(300, 1.0, 0.001))
-        ctx_ref.setPositions(app.AmberInpcrdFile(inpcrd).positions)
-        energy_ref = ctx_ref.getState(getEnergy=True).getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
-
-        pdb_obj = app.PDBFile(pdb)
-        system = app.ForceField(ffxml).createSystem(pdb_obj.topology)
-        ctx = mm.Context(system, mm.LangevinIntegrator(300, 1.0, 0.001))
-        ctx.setPositions(app.AmberInpcrdFile(inpcrd).positions)
-        energy = ctx.getState(getEnergy=True).getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
-
-        assert abs(energy_ref-energy) < 0.01, \
-            f"Fail to convert prmtop to xml, the force field might not be compatitable because the energy is different {energy_ref} != {energy}"
-    
-    return wrapper
