@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import os
+import os, shutil, warnings
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import Union, Optional, TYPE_CHECKING
 from tqdm import tqdm
 
 import numpy as np
@@ -157,7 +157,7 @@ def post_process_trajectory(
     u = mda.Universe(in_top, in_trj, topology_format=in_top_format, format=in_trj_format, to_guess=('types', 'masses', 'bonds'))
     if process_pbc:
         transformations = [
-            center_in_box(u.select_atoms(center_str)),
+            center_in_box(u.select_atoms(center_selection)),
             wrap(u.atoms),
             unwrap(u.atoms)
         ]
