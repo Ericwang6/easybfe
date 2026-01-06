@@ -5,7 +5,9 @@ Date: 10/07/2024
 This file contains a lazy implementation to generate atom mapping between two molecules with rdkit MCS search
 """
 import os
-from typing import Dict
+import logging
+from pathlib import Path
+from typing import Dict, Union
 import numpy as np
 from scipy.spatial.distance import cdist
 from rdkit import Chem
@@ -15,6 +17,9 @@ except:
     from rdkit.Chem.MCS import FindMCS
 
 from .base import LigandRbfeAtomMapper
+
+
+logger = logging.getLogger(__name__)
 
 
 def find_mcs(molA, molB):
@@ -78,10 +83,34 @@ class LazyMCSMapper(LigandRbfeAtomMapper):
     A lazy implementation of MCS search with RDKit plus geomtry-based mapping for hydrogens.
     Not fully tested and cannot handle all cases
     """
-    def __init__(self, mcs: Chem.Mol, use_positions: bool = True, map_hydrogens: bool = True):
-        self.mcs = mcs
+    def __init__(self, mcs: Union[str, Chem.Mol, Path, None], use_positions: bool = True, map_hydrogens: bool = True):
+        
         self.use_positions = use_positions
         self.map_hydrogens = map_hydrogens
+
+        if mcs is None:
+            mcs_mol = None
+            logger.info("No MCS passed in. Will use RDKit to generate one.")
+        elif isinstance(mcs, Chem.Mol):
+            mcs_mol = mcs
+        elif isinstance(mcs, Path) or (isinstance(mcs, str) and os.path.isfile(mcs)):
+            logger.info(f"Read MCS from {mcs}")
+            mcs_mol = Chem.SDMolSupplier(str(mcs), removeHs=True)[0]
+            if mcs_mol is None:
+                msg = f'Fail to parse from {mcs} as MCS'
+                logger.error(msg)
+                raise RuntimeError(msg)
+        else:
+            mcs_mol = Chem.MolFromSmiles(mcs)
+            if mcs_mol is None:
+                logger.info("MCS is not a valid SMILES. Try to parse as a SMARTS.")
+                mcs_mol = Chem.MolFromSmarts(mcs)
+            if mcs_mol is None:
+                msg = f"Unrecognized MCS: '{mcs}'. Maybe this is not a valid SMILES or SMARTS or file path"
+                logger.error(msg)
+                raise RuntimeError(msg)
+        
+        self.mcs = mcs_mol
         
     def run_mapping(self, ligandA: Chem.Mol, ligandB: Chem.Mol) -> Dict[int, int]:
         if self.mcs is None:

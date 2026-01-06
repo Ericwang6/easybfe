@@ -9,9 +9,15 @@ import abc
 import json
 from copy import deepcopy
 from typing import Dict
+import logging
+
+import numpy as np
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw
 from IPython.display import Image as IpythonImage
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_sc_atoms_and_bonds(mol, cc_list):
