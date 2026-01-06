@@ -16,6 +16,7 @@ import openmm as mm
 import openmm.unit as unit
 import openmm.app as app
 import parmed
+from parmed.unit.unit_definitions import molal
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw
 
@@ -82,22 +83,6 @@ class SmallMoleculeForceField(abc.ABC):
         if isinstance(ligand, Chem.Mol):
             # Make a copy to avoid modifying the original molecule
             mol = deepcopy(ligand)
-            # Ensure molecule has hydrogens
-            if not any(atom.GetAtomicNum() == 1 for atom in mol.GetAtoms()):
-                mol = Chem.AddHs(mol)
-            # Check if molecule has 3D coordinates
-            needs_3d = False
-            try:
-                conf = mol.GetConformer()
-                if conf is None or not conf.Is3D():
-                    needs_3d = True
-            except (ValueError, RuntimeError):
-                # No conformer exists
-                needs_3d = True
-            if needs_3d:
-                logger.info("Generating 3D coordinates for molecule")
-                AllChem.EmbedMolecule(mol)
-                AllChem.MMFFOptimizeMolecule(mol)
             assert name, 'Must provide a name when input ligand is an RDKit molecule'
         elif os.path.isfile(ligand):
             mol = read_molecule_from_file(ligand)
@@ -105,11 +90,32 @@ class SmallMoleculeForceField(abc.ABC):
             logger.info(f"Loaded molecule from file: {ligand}")
         else:
             logger.info(f"Generating 3D structure from SMILES: {ligand}")
-            mol = Chem.AddHs(Chem.MolFromSmiles(ligand))
+            mol = Chem.MolFromSmiles(ligand)
+            assert mol is not None, f'Invalide SMILES: {ligand}'
+            mol = Chem.AddHs(mol)
             AllChem.EmbedMolecule(mol)
             AllChem.MMFFOptimizeMolecule(mol)
             assert name, 'Must provide a name when input ligand is a SMILES string'
 
+        # Ensure molecule has hydrogens
+        if not any(atom.GetAtomicNum() == 1 for atom in mol.GetAtoms()):
+            mol = Chem.AddHs(mol, addCoords=True)
+        # Check if molecule has 3D coordinates
+        needs_3d = False
+        try:
+            conf = mol.GetConformer()
+            if conf is None or not conf.Is3D():
+                needs_3d = True
+        except (ValueError, RuntimeError):
+            # No conformer exists
+            needs_3d = True
+        if needs_3d:
+            logger.warning("No 3D conformer found. Generating 3D coordinates for molecule")
+            AllChem.EmbedMolecule(mol)
+            AllChem.MMFFOptimizeMolecule(mol)
+        
+        # Check the validity of name
+        assert name.strip(), 'Empty string as a name'
         mol.SetProp('_Name', name)
         with Chem.SDWriter(wdir / f'{name}.sdf') as w:
             w.write(mol)
