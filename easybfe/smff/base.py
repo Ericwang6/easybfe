@@ -1,26 +1,26 @@
-'''
-Author: Eric Wang
-Date: 10/07/2024
+"""
+Abstract base classes for small molecule force field parameterization.
 
-This file contains abstract class for a small molecule force field parameterizer
-'''
+This module defines the core interfaces for force field parameterizers and
+parametrization jobs. All concrete implementations must inherit from
+:class:`SmallMoleculeForceField` and implement the :meth:`_parametrize` method.
+"""
 import abc
 import os
+import traceback
 from typing import Optional, Union
 from pathlib import Path
 import shutil
 import logging
-from copy import deepcopy
+import tempfile, shutil
 
 import openmm as mm
 import openmm.unit as unit
 import openmm.app as app
 import parmed
-from parmed.unit.unit_definitions import molal
-from rdkit import Chem
-from rdkit.Chem import AllChem, Draw
 
-from .utils import convert_to_xml, read_molecule_from_file
+from .utils import convert_to_xml
+from ..core.ligand import Ligand
 
 
 logger = logging.getLogger(__name__)
@@ -30,129 +30,117 @@ class SmallMoleculeForceField(abc.ABC):
     """
     Abstract base class for small molecule force field parameterizers.
     
-    This class defines the interface that all force field parameterization
-    implementations must follow. Subclasses should implement :meth:`_parametrize`
-    to generate force field parameters for small molecules.
+    This class defines the interface for all force field parameterization
+    implementations. Subclasses must implement :meth:`_parametrize` to generate
+    force field parameters. The base class provides validation and parallel
+    execution capabilities.
+    
+    Parameters
+    ----------
+    forcefield : str, optional
+        Force field identifier or path (interpretation depends on subclass).
+    charge_method : str, optional
+        Partial charge assignment method (e.g., 'bcc', 'gas', 'am1bcc').
+    *args
+        Additional positional arguments for subclasses.
+    **kwargs
+        Additional keyword arguments for subclasses.
+    
+    Attributes
+    ----------
+    forcefield : str
+        Force field identifier.
+    charge_method : str
+        Charge assignment method.
+    
+    Notes
+    -----
+    Subclasses should implement :meth:`_parametrize` to generate at minimum:
+    
+    * ``{name}.prmtop``: AMBER topology file
+    * ``{name}.inpcrd``: AMBER coordinate file
+    
+    The base class automatically validates the generated parameters by converting
+    to OpenMM XML and comparing energies.
     
     Examples
     --------
-    Subclasses include :class:`easybfe.smff.gaff.GAFF`, 
-    :class:`easybfe.smff.openff.OpenFF`, and 
-    :class:`easybfe.smff.custom.CustomForceField`.
+    >>> from easybfe.smff import GAFF, OpenFF
+    >>> # Use GAFF2 with AM1-BCC charges
+    >>> gaff = GAFF('gaff2', 'bcc')
+    >>> # Use OpenFF 2.1.0 with Gasteiger charges
+    >>> openff = OpenFF('openff-2.1.0', 'gas')
+    
+    See Also
+    --------
+    :class:`easybfe.smff.gaff.GAFF` : GAFF/GAFF2 implementation.
+    :class:`easybfe.smff.openff.OpenFF` : OpenFF implementation.
+    :class:`easybfe.smff.custom.CustomForceField` : Custom force field implementation.
     """
     
     def __init__(self, forcefield: str = '', charge_method: str = '', *args, **kwargs):
-        """
-        Initialize the force field parameterizer.
-        
-        Parameters
-        ----------
-        forcefield : str, optional
-            Force field name or identifier.
-        charge_method : str, optional
-            Method for assigning partial charges.
-        *args
-            Variable length argument list.
-        **kwargs
-            Arbitrary keyword arguments.
-        """
+        """Initialize the force field parameterizer."""
         self.forcefield = forcefield
         self.charge_method = charge_method
+    
+    def _setup(self, ligand: Ligand):
+        return ligand.embed(return_new=True)
 
-    def _setup(self, ligand: Union[str, Path, Chem.Mol], wdir: os.PathLike, name: Optional[str] = None, overwrite: bool = False):
+    def _validate(self, ligand: Ligand, wdir: str):
         """
-        Set up the working directory and prepare the ligand molecule.
+        Validate parametrization by comparing prmtop and XML energies.
+        
+        This method ensures the generated force field parameters are consistent
+        by converting prmtop/inpcrd to OpenMM XML and comparing potential
+        energies. It also generates a PDB file with standardized residue naming.
         
         Parameters
         ----------
-        ligand : str, Path, or Chem.Mol
-            Path to ligand file, SMILES string, or RDKit molecule object.
-        wdir : os.PathLike
-            Working directory for output files.
-        name : str, optional
-            Name for the ligand. Required if ligand is a SMILES string or RDKit molecule.
-        overwrite : bool, default False
-            Whether to overwrite existing working directory.
-        """
-        wdir = Path(wdir).resolve()
-        if wdir.is_dir() and overwrite:
-            logger.info(f"Removing existing directory: {wdir}")
-            shutil.rmtree(wdir)
-        wdir.mkdir()
-
-        if isinstance(ligand, Chem.Mol):
-            # Make a copy to avoid modifying the original molecule
-            mol = deepcopy(ligand)
-            assert name, 'Must provide a name when input ligand is an RDKit molecule'
-        elif os.path.isfile(ligand):
-            mol = read_molecule_from_file(ligand)
-            name = Path(ligand).stem if not name else name
-            logger.info(f"Loaded molecule from file: {ligand}")
-        else:
-            logger.info(f"Generating 3D structure from SMILES: {ligand}")
-            mol = Chem.MolFromSmiles(ligand)
-            assert mol is not None, f'Invalide SMILES: {ligand}'
-            mol = Chem.AddHs(mol)
-            AllChem.EmbedMolecule(mol)
-            AllChem.MMFFOptimizeMolecule(mol)
-            assert name, 'Must provide a name when input ligand is a SMILES string'
-
-        # Ensure molecule has hydrogens
-        if not any(atom.GetAtomicNum() == 1 for atom in mol.GetAtoms()):
-            mol = Chem.AddHs(mol, addCoords=True)
-        # Check if molecule has 3D coordinates
-        needs_3d = False
-        try:
-            conf = mol.GetConformer()
-            if conf is None or not conf.Is3D():
-                needs_3d = True
-        except (ValueError, RuntimeError):
-            # No conformer exists
-            needs_3d = True
-        if needs_3d:
-            logger.warning("No 3D conformer found. Generating 3D coordinates for molecule")
-            AllChem.EmbedMolecule(mol)
-            AllChem.MMFFOptimizeMolecule(mol)
+        ligand : Ligand
+            Ligand object with prmtop and inpcrd files stored as auxiliary files.
+        wdir : str
+            Working directory path where files will be written for validation.
         
-        # Check the validity of name
-        assert name.strip(), 'Empty string as a name'
-        mol.SetProp('_Name', name)
-        with Chem.SDWriter(wdir / f'{name}.sdf') as w:
-            w.write(mol)
-        
-        mol_noh = Chem.RemoveHs(mol)
-        AllChem.Compute2DCoords(mol_noh)
-        Draw.MolToFile(mol_noh, wdir / f'{name}.png', legend=name, size=(500, 500))
-
-        self.file = wdir / f'{name}.sdf'
-        self.rdmol = mol
-        self.wdir = wdir
-        self.name = name
-
-    def _validate(self):
-        """
-        Validate parametrization by converting to XML and comparing energies.
-        
-        This method loads the generated prmtop/inpcrd files, converts them to
-        OpenMM XML format, and validates the conversion by comparing potential
-        energies from both representations.
+        Returns
+        -------
+        Ligand
+            Ligand object with validated parameters and added pdb/xml auxiliary files.
         
         Raises
         ------
         AssertionError
-            If the energy difference between prmtop and XML systems exceeds
-            0.01 kJ/mol, indicating an incompatible force field conversion.
+            If energy difference between prmtop and XML exceeds 0.01 kJ/mol,
+            indicating an incompatible force field conversion.
+        
+        Notes
+        -----
+        This validation catches issues such as:
+        
+        * Incorrect unit conversions
+        * Unsupported force field terms
+        * Corrupted parameter files
+        
+        The method writes prmtop/inpcrd files to `wdir`, generates pdb/xml files,
+        compares energies, and stores pdb/xml as auxiliary files in the ligand object.
+        
+        See Also
+        --------
+        :func:`easybfe.smff.utils.convert_to_xml` : XML conversion function.
         """
-        prmtop = str(self.wdir / f'{self.name}.prmtop')
-        inpcrd = str(self.wdir / f'{self.name}.inpcrd')
-        pdb = str(self.wdir / f'{self.name}.pdb')
-        ffxml = str(self.wdir / f'{self.name}.xml')
+        logger.info(f"Validating parametrization for {ligand.name}")
+        ligand.check_aux_file('prmtop')
+        ligand.check_aux_file('inpcrd')
+        ligand.dump(wdir)
 
-        logger.info(f"Validating parametrization for {self.name}")
+        prmtop = os.path.join(wdir, f'{ligand.name}.prmtop')
+        inpcrd = os.path.join(wdir, f'{ligand.name}.inpcrd')
+        pdb = os.path.join(wdir, f'{ligand.name}.pdb')
+        xml = os.path.join(wdir, f'{ligand.name}.xml')
+
         struct = parmed.load_file(prmtop, xyz=inpcrd)
         struct.residues[0].name = 'MOL'
         app.PDBFile.writeFile(struct.topology, struct.positions, pdb, keepIds=True)
-        convert_to_xml(struct, ffxml)
+        convert_to_xml(struct, xml)
 
         system_ref = app.AmberPrmtopFile(prmtop).createSystem()
         ctx_ref = mm.Context(system_ref, mm.LangevinIntegrator(300, 1.0, 0.001))
@@ -160,7 +148,7 @@ class SmallMoleculeForceField(abc.ABC):
         energy_ref = ctx_ref.getState(getEnergy=True).getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
 
         pdb_obj = app.PDBFile(pdb)
-        system = app.ForceField(ffxml).createSystem(pdb_obj.topology)
+        system = app.ForceField(xml).createSystem(pdb_obj.topology)
         ctx = mm.Context(system, mm.LangevinIntegrator(300, 1.0, 0.001))
         ctx.setPositions(app.AmberInpcrdFile(inpcrd).positions)
         energy = ctx.getState(getEnergy=True).getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
@@ -175,48 +163,169 @@ class SmallMoleculeForceField(abc.ABC):
         logger.info(f"Energy validation passed.")
         logger.debug(f"Energy {energy_ref:.4f} kJ/mol with prmtop and {energy:.4f} with xml")
 
-    def run(self, ligand: Union[str, Path, Chem.Mol], wdir: os.PathLike, name: Optional[str] = None, overwrite: bool = False):
+        ligand.add_aux_file("pdb", Path(pdb).read_text())
+        ligand.add_aux_file("xml", Path(xml).read_text())
+        ligand.source = f'<{self.__class__.__name__}>'
+        return ligand
+
+
+    def _run(self, ligand: Ligand):
         """
-        Run the complete parametrization workflow.
+        Execute the complete parametrization workflow for a single ligand.
         
-        This method orchestrates the parametrization process by calling
-        :meth:`_setup`, :meth:`_parametrize`, and :meth:`_validate` in sequence.
+        This method orchestrates the full parametrization process by calling
+        :meth:`_setup`, :meth:`_parametrize` (subclass-specific), and :meth:`_validate`
+        (base class validation) in sequence within a temporary directory.
         
         Parameters
         ----------
-        ligand : str, Path, or Chem.Mol
-            Path to ligand file, SMILES string, or RDKit molecule object.
-        wdir : os.PathLike
-            Working directory for output files.
-        name : str, optional
-            Name for the ligand. Required if ligand is a SMILES string or RDKit molecule.
-        overwrite : bool, default False
-            Whether to overwrite existing working directory.
+        ligand : Ligand
+            Ligand object to parametrize.
+        
+        Returns
+        -------
+        Ligand
+            Ligand object with parametrized topology files and validated parameters.
+        
+        See Also
+        --------
+        :meth:`run` : Public interface supporting parallel execution.
         """
-        self._setup(ligand, wdir, name, overwrite)
-        self._parametrize()
-        self._validate()
+        tmpd = tempfile.mkdtemp()
+        # setup
+        try:
+            ligand = self._setup(ligand)
+        except Exception as e:
+            raise Exception(f"Ligand setup failed:\n {traceback.format_exc()}")
+        # parameterize
+        try:
+            ligand = self._parametrize(ligand, tmpd)
+        except Exception as e:
+            raise Exception(f'{traceback.format_exc()}\n\n ERROR: Ligand parameterization failed due to the above reason, please check {tmpd}')
+        # validation
+        try:
+            ligand = self._validate(ligand, tmpd)
+        except Exception as e:
+            raise Exception(f'Ligand parameterization failed to be validated because of the following error: {traceback.format_exc()}')
+        shutil.rmtree(tmpd)
+        return ligand
+    
+    def run(self, ligand: list[Ligand] | Ligand, nprocs: int = -1) -> list[Ligand]:
+        """
+        Parametrize one or more ligands with optional parallel execution.
+        
+        Parameters
+        ----------
+        ligand : Ligand or list of Ligand
+            Single ligand or list of ligands to parametrize.
+        nprocs : int, default=-1
+            Number of parallel processes. If -1, uses all available CPUs.
+            If 1, runs sequentially without multiprocessing overhead.
+        
+        Returns
+        -------
+        Ligand or list of Ligand
+            Parametrized ligand(s) with topology files and validated parameters.
+        
+        Examples
+        --------
+        >>> from easybfe.smff import GAFF
+        >>> from easybfe.ligand import LigandLoader
+        >>> gaff = GAFF('gaff2', 'bcc')
+        >>> loader = LigandLoader()
+        >>> # Single ligand
+        >>> ligands = loader.load('ligand.sdf', only_first=True)
+        >>> ligand = gaff.run(ligands[0])
+        >>> # Multiple ligands in parallel
+        >>> ligands = loader.load(['lig1.sdf', 'lig2.sdf'])
+        >>> ligands = gaff.run(ligands, nprocs=4)
+        
+        See Also
+        --------
+        :func:`easybfe.parallel.run_func_parallel` : Parallel execution utility.
+        :class:`easybfe.ligand.LigandLoader` : Load ligands from files or other sources.
+        """
+        from ..parallel import run_func_parallel
+        # Normalize input to list
+        input_ligands = [ligand] if isinstance(ligand, Ligand) else ligand
+        
+        # Check for duplicate names in input
+        input_names = [lig.name for lig in input_ligands]
+        # Run parametrization in parallel (order may not be preserved)
+        output_ligands = run_func_parallel(self._run, input_ligands, nprocs)
+
+        if len(input_names) != len(set(input_names)):
+            logger.warning(
+                "Duplicate ligand names detected in input. Cannot reorder outputs by name. "
+                "Results will be returned in parallel execution order."
+            )            
+            return output_ligands
+        
+        # Create mapping from output name to output ligand
+        output_name_to_ligand = {lig.name: lig for lig in output_ligands}
+        
+        # Reorder outputs to match input order using name keys
+        output_ligands = [output_name_to_ligand[name] for name in input_names]
+        
+        # Return single ligand if input was single, otherwise return list
+        return output_ligands[0] if isinstance(ligand, Ligand) else ligand
+
 
     @abc.abstractmethod
-    def _parametrize(self):
+    def _parametrize(self, ligand: Ligand, wdir: str) -> Ligand:
         """
-        Generate force field parameters for a ligand molecule.
+        Generate force field parameters for a ligand (subclass implementation).
         
-        This method should generate force field parameter files (e.g., prmtop,
-        inpcrd) for the ligand. The method has access to the following attributes
-        set by :meth:`_setup`:
+        This abstract method must be implemented by subclasses to perform the
+        actual force field parameter generation. Implementations should write
+        prmtop and inpcrd files to the working directory and store them as
+        auxiliary files in the ligand object.
         
-        * ``self.file``: Path to the ligand SDF file
-        * ``self.rdmol``: RDKit molecule object
-        * ``self.wdir``: Working directory
-        * ``self.name``: Ligand name
+        Parameters
+        ----------
+        ligand : Ligand
+            Ligand object with 3D structure in mol_block. The ligand has already
+            been processed by :meth:`_setup` to ensure 3D coordinates are available.
+        wdir : str
+            Working directory path for writing output files. Files should be written
+            using ``os.path.join(wdir, f'{ligand.name}.prmtop')`` format.
+        
+        Returns
+        -------
+        Ligand
+            Ligand object with prmtop and inpcrd files stored as auxiliary files
+            (accessed via ``ligand.auxiliary_files['prmtop']`` and
+            ``ligand.auxiliary_files['inpcrd']``).
         
         Notes
         -----
-        The output files should be written to ``self.wdir`` with names based on
-        ``self.name``. At minimum, the following files should be generated:
+        Implementations have access to ligand attributes:
         
-        * ``{self.name}.prmtop``: AMBER topology file
-        * ``{self.name}.inpcrd``: AMBER coordinate file
+        * ``ligand.name``: Ligand identifier (str)
+        * ``ligand.mol_block``: 3D structure in SDF mol block format (str)
+        * ``ligand.get_rdmol()``: Get RDKit molecule object with 3D coordinates
+        * ``ligand.add_aux_file(filename, content)``: Store file content as string
+        
+        Required workflow:
+        
+        1. Extract molecule from ``ligand.get_rdmol()``
+        2. Generate force field parameters using the specific engine (acpype, OpenFF, etc.)
+        3. Write files to ``wdir``:
+           * ``{ligand.name}.prmtop``: AMBER topology file (required)
+           * ``{ligand.name}.inpcrd``: AMBER coordinate file (required)
+        4. Read files and store via ``ligand.add_aux_file('prmtop', content)``
+           and ``ligand.add_aux_file('inpcrd', content)``
+        5. Optionally generate and store additional files (e.g., GROMACS .top file)
+        6. Return the ligand object
+        
+        Optional output files:
+        
+        * ``{ligand.name}.top``: GROMACS topology (can be added as auxiliary file)
+        
+        Examples
+        --------
+        See :meth:`easybfe.smff.gaff.GAFF._parametrize` or
+        :meth:`easybfe.smff.openff.OpenFF._parametrize` for reference
+        implementations.
         """
         ...

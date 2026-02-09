@@ -1,9 +1,11 @@
-'''
-Author: Eric Wang
-Date: 10/07/2024
+"""
+GAFF and GAFF2 force field parameterization using acpype.
 
-This file contains GAFF-based small molecule force field parameterizer
-'''
+This module provides an interface to the acpype tool for generating AMBER and
+GROMACS topology files using the General Amber Force Field (GAFF or GAFF2).
+"""
+from __future__ import annotations
+from typing import TYPE_CHECKING
 import warnings
 import os, shutil
 from pathlib import Path
@@ -15,6 +17,8 @@ from rdkit import Chem
 from .utils import read_molecule_from_file
 from .base import SmallMoleculeForceField
 from ..cmd import find_executable, run_command, set_directory
+if TYPE_CHECKING:
+    from ..core.ligand import Ligand
 
 
 logger = logging.getLogger(__name__)
@@ -27,67 +31,76 @@ def run_acpype(input: Optional[os.PathLike] = None,
                net_charge: Union[int, str] = "auto",
                args: Union[None, List[str]] = None):
     """
-    Run acpype to generate AMBER and GROMACS force field parameters.
+    Execute acpype to generate AMBER and GROMACS topology files.
     
-    acpype is a tool that automatically generates topology files for AMBER
-    and GROMACS from small molecule structures. This function provides a
-    Python interface to run acpype with various options.
+    Provides a Python interface to the acpype command-line tool, which uses
+    Antechamber to generate force field parameters for small molecules using
+    GAFF or GAFF2 atom types.
     
     Parameters
     ----------
     input : os.PathLike, optional
-        Input file path with extension that acpype supports (e.g., .mol,
-        .sdf, .mol2). Required if `args` is None.
-    basename : str, default "MOL"
-        Basename for the acpype project. This determines the prefix for
-        output files (e.g., "MOL.acpype", "MOL_AC.prmtop").
-    charge_method : str, default "bcc"
-        Method for assigning partial charges. Options:
+        Input structure file (.mol, .sdf, .mol2, .pdb). Required unless `args`
+        is provided.
+    basename : str, default='MOL'
+        Output file basename. Acpype creates ``{basename}.acpype/`` directory
+        with files like ``{basename}_AC.prmtop``.
+    charge_method : str, default='bcc'
+        Partial charge method:
         
-        * "bcc": AM1-BCC charges (default)
-        * "gas": Gasteiger charges
-        * "user": Use charges from the input mol2 file
-    
-    atom_type : str, default "gaff2"
-        Atom typing scheme to use. Options:
+        * 'bcc': AM1-BCC charges (semi-empirical, accurate)
+        * 'gas': Gasteiger charges (fast, approximate)
+        * 'user': Read charges from input mol2 file
+    atom_type : str, default='gaff2'
+        Atom typing scheme:
         
-        * "gaff": General Amber Force Field (GAFF)
-        * "gaff2": GAFF2 (default)
-        * "amber": AMBER14SB protein force field
-        * "amber2": AMBER14SB + GAFF2
-    
-    net_charge : int or str, default "auto"
-        Net molecular charge. Options:
+        * 'gaff': General Amber Force Field v1
+        * 'gaff2': GAFF2 (improved parameters, recommended)
+        * 'amber': AMBER protein force field (for peptides)
+        * 'amber2': AMBER + GAFF2 (for protein-ligand complexes)
+    net_charge : int or str, default='auto'
+        Molecular net charge:
         
-        * "auto": Automatically compute charge from input file using RDKit
-          (only works for .mol, .sdf, .mol2 files)
-        * "guess": Let acpype guess the charge
-        * int: Explicit charge value
-    
+        * 'auto': Auto-detect from RDKit formal charges
+        * int: Explicit charge value (e.g., 0, +1, -1)
+        * Not specified: Let acpype determine charge
     args : list of str, optional
-        Custom command-line arguments to pass directly to acpype. If provided,
-        all other parameters are ignored and acpype is run with only these
-        arguments.
+        Raw acpype command-line arguments. If provided, all other parameters
+        are ignored.
     
     Raises
     ------
     AssertionError
         If `input` is None when `args` is None.
     RuntimeError
-        If acpype executable is not found or if acpype execution fails.
+        If acpype executable not found or execution fails.
     UserWarning
-        If charge cannot be automatically determined from input file.
+        If charge auto-detection fails for 'auto' mode.
     
     Notes
     -----
-    When `net_charge` is "auto", the function attempts to parse the input
-    file using RDKit to extract formal charges. If parsing fails, a warning
-    is issued and acpype will determine the charge automatically.
+    Acpype generates files in ``{basename}.acpype/`` directory:
+    
+    * ``{basename}_AC.prmtop``, ``{basename}_AC.inpcrd``: AMBER format
+    * ``{basename}_GMX.top``, ``{basename}_GMX.itp``: GROMACS format
+    * ``{basename}_bcc.mol2``: Mol2 with assigned charges
+    
+    When `net_charge='auto'`, RDKit is used to sum formal charges from the
+    input molecule. If RDKit cannot parse the file, acpype will attempt to
+    determine the charge automatically.
     
     Examples
     --------
-    >>> run_acpype("ligand.sdf", basename="LIG", atom_type="gaff2")
-    >>> run_acpype("ligand.mol2", charge_method="gas", net_charge=0)
+    >>> # Basic usage with auto-detected charge
+    >>> run_acpype('ligand.sdf', basename='LIG')
+    >>> # Specify charge explicitly
+    >>> run_acpype('ligand.mol2', basename='LIG', net_charge=-1)
+    >>> # Use Gasteiger charges (faster)
+    >>> run_acpype('ligand.sdf', charge_method='gas', atom_type='gaff2')
+    
+    See Also
+    --------
+    :class:`GAFF` : High-level GAFF parameterizer class.
     """
     acpype = find_executable("acpype")
     if args is not None:
@@ -112,75 +125,128 @@ def run_acpype(input: Optional[os.PathLike] = None,
 
 class GAFF(SmallMoleculeForceField):
     """
-    GAFF-based small molecule force field parameterizer.
+    GAFF/GAFF2 parameterizer using acpype wrapper.
     
-    This class uses ``acpype`` to generate AMBER (prmtop/inpcrd) and GROMACS
-    (top) force field parameter files using the General Amber Force Field
-    (GAFF or GAFF2) for small molecules.
+    Generates AMBER (prmtop/inpcrd) and GROMACS (top) topology files for small
+    molecules using the General Amber Force Field (GAFF or GAFF2) via the
+    acpype tool. Supports AM1-BCC or Gasteiger charge assignment.
     
     Parameters
     ----------
-    forcefield : {'gaff2', 'gaff'}, default 'gaff2'
-        Atom typing scheme.
-    charge_method : {'bcc', 'gas'}, default 'bcc'
-        Method for partial charge assignment. 'bcc' uses AM1-BCC charges,
-        'gas' uses Gasteiger charges.
-    reuse_cache : bool, default False
-        If True, reuse existing acpype output directory if found. If False,
-        remove and regenerate the acpype directory.
+    forcefield : {'gaff2', 'gaff'}, default='gaff2'
+        Atom typing scheme. GAFF2 is recommended for improved parameters.
+    charge_method : {'bcc', 'gas'}, default='bcc'
+        Partial charge method:
+        
+        * 'bcc': AM1-BCC (accurate, semi-empirical, slower)
+        * 'gas': Gasteiger (fast, empirical, less accurate)
+    reuse_cache : bool, default=False
+        Whether to reuse existing ``{name}.acpype/`` directory if present.
+        If False, the directory is removed and acpype re-runs.
     
     Attributes
     ----------
     reuse_cache : bool
-        Whether to reuse cached acpype results.
+        Cache reuse setting.
     
     Raises
     ------
     AssertionError
-        If `forcefield` is not 'gaff' or 'gaff2', or if `charge_method` is not
-        'bcc' or 'gas'.
+        If `forcefield` not in ['gaff', 'gaff2'] or `charge_method` not in
+        ['bcc', 'gas'].
+    RuntimeError
+        If acpype execution fails.
+    
+    Notes
+    -----
+    This class requires the acpype command-line tool to be installed and
+    available in PATH. Acpype internally uses Antechamber and other AmberTools
+    programs.
+    
+    Generated files:
+    
+    * ``{name}.prmtop``: AMBER topology (copied from acpype output)
+    * ``{name}.inpcrd``: AMBER coordinates (coordinates from input SDF)
+    * ``{name}.top``: GROMACS topology (merged from .itp and .top)
+    * ``{name}.acpype/``: Acpype working directory (unless `reuse_cache=True`)
     
     Examples
     --------
+    >>> from easybfe.ligand import LigandLoader
+    >>> # GAFF2 with AM1-BCC charges
     >>> gaff = GAFF(forcefield='gaff2', charge_method='bcc')
-    >>> gaff.run('ligand.sdf', wdir='./output')
+    >>> loader = LigandLoader()
+    >>> ligands = loader.load('ligand.sdf', only_first=True)
+    >>> ligand = gaff.run(ligands[0])
+    >>> # GAFF with Gasteiger charges (faster)
+    >>> gaff_fast = GAFF(forcefield='gaff', charge_method='gas')
+    >>> ligand = gaff_fast.run(ligands[0])
     
     See Also
     --------
-    :func:`run_acpype` : Function that executes acpype.
+    :func:`run_acpype` : Low-level acpype execution function.
+    :class:`easybfe.smff.openff.OpenFF` : OpenFF alternative.
     """
     
-    def __init__(self, forcefield: Literal['gaff2', 'gaff'] = 'gaff2', charge_method: Literal['bcc', 'gas'] = 'bcc', reuse_cache: bool = False):
+    def __init__(self, forcefield: Literal['gaff2', 'gaff'] = 'gaff2', charge_method: Literal['bcc', 'gas'] = 'bcc'):
         super().__init__(forcefield, charge_method)
 
         assert self.forcefield in ['gaff', 'gaff2'], f'Unsupported atom type: {forcefield}'
         assert self.charge_method in ['bcc', 'gas'], f'Unsupported charge method: {charge_method}'
-        self.reuse_cache = reuse_cache
         logger.info(f"Initialized GAFF with forcefield={forcefield}, charge_method={charge_method}")
+
+        self.reuse_cache = False
     
-    def _parametrize(self):
+    def _parametrize(self, ligand: Ligand, wdir: str):
         """
-        Generate GAFF force field parameters for a ligand.
+        Generate GAFF parameters via acpype.
         
-        This method runs acpype to generate AMBER and GROMACS topology files
-        for the input ligand. The output files are written to the working
-        directory with names based on the ligand name.
+        Executes acpype to assign atom types, generate bonded parameters, and
+        compute partial charges using the specified method. Produces AMBER and
+        GROMACS topology files.
+        
+        Parameters
+        ----------
+        ligand : Ligand
+            Ligand object with 3D structure in mol_block.
+        wdir : str
+            Working directory path for writing output files.
+        
+        Returns
+        -------
+        Ligand
+            Ligand object with prmtop, inpcrd, and top files stored as auxiliary files.
         
         Raises
         ------
         RuntimeError
-            If acpype execution fails or if required files are not generated.
+            If acpype execution fails.
         UserWarning
-            If existing acpype directory is found and `reuse_cache` is True.
+            If ``{name}.acpype/`` directory exists and `reuse_cache=True`.
         
         Notes
         -----
-        The method uses acpype with basename ``{self.name}``, so intermediate files
-        are created in a ``{self.name}.acpype`` subdirectory within the working directory.
+        Workflow:
+        
+        1. Write ligand mol_block to ``{ligand.name}.mol`` in wdir
+        2. Check for existing ``{ligand.name}.acpype/`` directory (remove or reuse)
+        3. Run acpype with auto-detected net charge from RDKit
+        4. Copy ``{ligand.name}_AC.prmtop`` to ``{ligand.name}.prmtop``
+        5. Generate ``{ligand.name}.inpcrd`` with coordinates from mol_block
+        6. Merge GROMACS ``.itp`` and ``.top`` files into ``{ligand.name}.top``
+        7. Store prmtop, inpcrd, and top files as auxiliary files in ligand object
+        
+        The GROMACS topology file has the .itp file contents inlined and
+        comment lines removed for easier distribution as a single file.
+        
+        See Also
+        --------
+        :func:`run_acpype` : Underlying acpype execution function.
         """
-        ligand_file = self.file
-        wdir = self.wdir
-        stem = self.name
+        ligand_file = os.path.join(wdir, f'{ligand.name}.mol')
+        with open(ligand_file, 'w') as f:
+            f.write(ligand.mol_block)
+        stem = ligand.name
 
         logger.info(f"Generating GAFF parameters for {stem}")
         with set_directory(wdir):
@@ -220,4 +286,12 @@ class GAFF(SmallMoleculeForceField):
                             continue
                         else:
                             fp.write(line)
+
+            with open(prmtop_dst) as f:
+                ligand.add_aux_file('prmtop', f.read())
+            with open(f'{stem}.inpcrd') as f:
+                ligand.add_aux_file('inpcrd', f.read())
+            with open(top_file) as f:
+                ligand.add_aux_file('top', f.read())
         logger.info(f"Completed GAFF parametrization for {stem}")
+        return ligand

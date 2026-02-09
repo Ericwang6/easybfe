@@ -16,24 +16,34 @@ logger = logging.getLogger(__name__)
 
 def read_molecule_from_file(input: os.PathLike):
     """
-    Read a molecule from a file.
+    Load a molecule from file using RDKit.
     
     Parameters
     ----------
     input : os.PathLike
-        Path to the molecule file. Supported formats: .mol, .sdf, .mol2.
+        Path to molecule file. Supported formats:
+        
+        * .mol: MDL Molfile
+        * .sdf: Structure Data File
+        * .mol2: Tripos Mol2
     
     Returns
     -------
-    rdkit.Chem.Mol
-        RDKit molecule object.
+    Chem.Mol
+        RDKit molecule object with explicit hydrogens preserved.
     
     Raises
     ------
     NotImplementedError
-        If the file format is not supported.
+        If file extension is not .mol, .sdf, or .mol2.
     AssertionError
-        If the molecule cannot be read from the file.
+        If RDKit fails to parse the file (returns None).
+    
+    Examples
+    --------
+    >>> mol = read_molecule_from_file('ligand.sdf')
+    >>> print(mol.GetNumAtoms())
+    32
     """
     suffix = Path(input).suffix
     input_str = str(input)
@@ -51,40 +61,49 @@ def read_molecule_from_file(input: os.PathLike):
 
 def safe_join_dihedrals(struct: parmed.Structure):
     """
-    Join multiple dihedral types for the same dihedral angle into a list.
+    Merge multi-term dihedral types into lists for OpenMM XML compatibility.
     
-    ParmEd cannot add two :class:`parmed.DihedralType` instances with the same
-    periodicity to the same :class:`parmed.DihedralTypeList`. This function
-    handles this limitation by grouping multiple dihedral types for the same
-    dihedral angle into a list, which is the format expected by OpenMM XML.
+    ParmEd stores multi-periodicity torsions as separate Dihedral objects with
+    the same atom indices. OpenMM XML expects these as a single Dihedral with
+    a list of DihedralTypes. This function performs the conversion by grouping
+    dihedral types by atom indices.
     
     Parameters
     ----------
     struct : parmed.Structure
-        ParmEd structure object containing dihedrals to process. The structure
-        is modified in-place.
+        ParmEd structure to modify in-place. Dihedrals with identical atom
+        indices (forward or reverse order) will have their types merged.
     
     Notes
     -----
-    This function:
+    The function:
     
-    1. Identifies duplicate dihedrals (same atom indices, forward or reverse)
-    2. Groups their dihedral types into a list
-    3. Removes duplicate dihedral entries
-    4. Updates the structure's dihedral_types list
+    1. Identifies dihedrals with identical atom indices (allowing reversal)
+    2. Combines their DihedralType instances into a list
+    3. Assigns the list to the first dihedral's type attribute
+    4. Deletes duplicate dihedral entries
+    5. Updates ``struct.dihedral_types`` to contain only lists
     
-    The function returns early if:
+    Early exit conditions:
     
-    * No dihedral types exist
-    * Dihedrals are already joined (types are lists)
-    * Dihedrals are not fully parametrized (some types are None)
+    * No dihedral types: Nothing to process
+    * Already joined: Types are already lists
+    * Unparametrized: Some dihedral types are None
     
-    This is a helper function used by :meth:`OpenmmXML.from_parmed` to prepare
-    dihedrals for OpenMM XML conversion.
+    Examples
+    --------
+    >>> struct = parmed.load_file('ligand.prmtop')
+    >>> # Before: Multiple Dihedral objects with same atoms
+    >>> print(len(struct.dihedrals))
+    48
+    >>> safe_join_dihedrals(struct)
+    >>> # After: Duplicate dihedrals merged
+    >>> print(len(struct.dihedrals))
+    32
     
     See Also
     --------
-    :meth:`OpenmmXML.from_parmed` : Main function that uses this helper.
+    :meth:`OpenmmXML.from_parmed` : Uses this function for XML conversion.
     """
     # parmed can't add two DihedralType instances with the same periodicity 
     # to the same DihedralTypeList
@@ -121,39 +140,42 @@ def safe_join_dihedrals(struct: parmed.Structure):
 
 def convert_to_xml(struct, ff_xml, top_xml=None):
     """
-    Convert a ParmEd structure to OpenMM XML force field files.
+    Convert ParmEd structure to OpenMM XML format.
     
-    This is a convenience function that converts a ParmEd structure (or a file
-    that can be loaded by ParmEd) into OpenMM XML format. It generates a force
-    field XML file and optionally a topology XML file.
+    Convenience wrapper that converts AMBER/GROMACS topology files to OpenMM
+    XML force field format. Handles loading from file and writing both force
+    field and topology XML files.
     
     Parameters
     ----------
     struct : parmed.Structure or os.PathLike
-        ParmEd structure object, or path to a file that ParmEd can load
-        (e.g., .prmtop, .top, .gro).
+        ParmEd structure object, or path to file that ParmEd can load:
+        
+        * .prmtop: AMBER topology
+        * .top: GROMACS topology
+        * .gro: GROMACS coordinate file
+        * .psf: CHARMM structure file
     ff_xml : os.PathLike
-        Output path for the force field XML file. This file contains all
-        force field parameters (bonds, angles, dihedrals, nonbonded).
+        Output path for force field XML file containing parameters (atom types,
+        bonds, angles, dihedrals, nonbonded terms).
     top_xml : os.PathLike, optional
-        Output path for the topology XML file. This file contains residue
-        definitions with atom names, types, and bonds. If None, only the
-        force field XML is written.
-    
-    Notes
-    -----
-    This function is a wrapper around :class:`OpenmmXML.from_parmed` and the
-    write methods. It handles loading the structure if a file path is provided.
+        Output path for topology XML file containing residue templates (atom
+        names, types, connectivity). If None, only force field XML is written.
     
     Examples
     --------
-    >>> convert_to_xml('ligand.prmtop', 'ligand.xml')
-    >>> convert_to_xml(struct, 'ligand.xml', 'ligand_top.xml')
+    >>> # Convert AMBER topology to XML
+    >>> convert_to_xml('ligand.prmtop', 'ligand_ff.xml')
+    >>> # Convert with separate topology file
+    >>> convert_to_xml('ligand.prmtop', 'ligand_ff.xml', 'ligand_top.xml')
+    >>> # Convert from ParmEd structure object
+    >>> struct = parmed.load_file('ligand.prmtop', xyz='ligand.inpcrd')
+    >>> convert_to_xml(struct, 'ligand_ff.xml')
     
     See Also
     --------
-    :class:`OpenmmXML` : Class that performs the actual conversion.
-    :meth:`OpenmmXML.from_parmed` : Method that creates XML from ParmEd structure.
+    :class:`OpenmmXML` : Underlying conversion class.
+    :meth:`OpenmmXML.from_parmed` : Performs the actual conversion.
     """
     if not isinstance(struct, parmed.Structure):
         struct = parmed.load_file(struct)
@@ -165,62 +187,62 @@ def convert_to_xml(struct, ff_xml, top_xml=None):
 
 class OpenmmXML:
     """
-    Converter from ParmEd structures to OpenMM XML force field format.
+    ParmEd to OpenMM XML converter for force field parameters.
     
-    This class converts ParmEd :class:`parmed.Structure` objects into OpenMM
-    XML force field files. It handles conversion of all force field terms:
-    bonds, angles, dihedrals (proper and improper), and nonbonded interactions.
+    Converts ParmEd Structure objects (from AMBER/GROMACS topologies) into
+    OpenMM XML force field format. Handles unit conversions, dihedral ordering,
+    and generates both force field parameters and residue templates.
     
-    The class generates two types of XML files:
+    Generates two XML file types:
     
-    * Force field XML: Contains all force field parameters (atom types, bonds,
-      angles, dihedrals, nonbonded terms)
-    * Topology XML: Contains residue definitions with atom names, types, and
-      connectivity
+    * **Force field XML**: Atom types, HarmonicBondForce, HarmonicAngleForce,
+      PeriodicTorsionForce, NonbondedForce with 1-4 scaling
+    * **Topology XML**: Residue templates with atom names/types and bonds
     
     Attributes
     ----------
     ffxml : xml.etree.ElementTree.Element or None
-        XML element tree for the force field XML file.
+        Force field XML root element (set by :meth:`from_parmed`).
     topxml : xml.etree.ElementTree.Element or None
-        XML element tree for the topology XML file.
+        Topology XML root element (set by :meth:`from_parmed`).
     
     Examples
     --------
+    >>> # Convert AMBER topology to OpenMM XML
     >>> struct = parmed.load_file('ligand.prmtop', xyz='ligand.inpcrd')
     >>> xml_obj = OpenmmXML.from_parmed(struct)
-    >>> xml_obj.write_ffxml('ligand.xml')
-    >>> xml_obj.write_topxml('ligand_top.xml')
+    >>> xml_obj.write_ffxml('ligand_ff.xml')
+    >>> xml_obj.write_topxml('ligand_residues.xml')
+    >>> # Load in OpenMM
+    >>> ff = openmm.app.ForceField('ligand_ff.xml')
+    >>> pdb = openmm.app.PDBFile('ligand.pdb')
+    >>> system = ff.createSystem(pdb.topology)
     
     See Also
     --------
-    :func:`convert_to_xml` : Convenience function for conversion.
-    :func:`safe_join_dihedrals` : Helper function for dihedral processing.
+    :func:`convert_to_xml` : High-level conversion wrapper.
+    :func:`safe_join_dihedrals` : Dihedral merging helper.
     """
     
     def __init__(self):
-        """
-        Initialize an empty OpenmmXML object.
-        
-        The XML elements are set by :meth:`from_parmed` class method.
-        """
+        """Initialize empty OpenmmXML container."""
         self.ffxml = None
         self.topxml = None
     
     @staticmethod
     def to_pretty_xmlstr(xmlele: ET.Element):
         """
-        Convert an XML element tree to a pretty-printed string.
+        Format XML element as indented string.
         
         Parameters
         ----------
         xmlele : xml.etree.ElementTree.Element
-            XML element tree to convert.
+            XML element tree to format.
         
         Returns
         -------
         str
-            Pretty-printed XML string with proper indentation.
+            Pretty-printed XML string with indentation, empty lines removed.
         """
         uglystr = ET.tostring(xmlele, "unicode")
         pretxml = xml.dom.minidom.parseString(uglystr)
@@ -234,9 +256,9 @@ class OpenmmXML:
         return pretstr
     
     @staticmethod
-    def to_pretty_xmlfile(xmlele: ET.Element, fname: os.PathLike):
+    def to_pretty_xmlfile(xmlele: ET.Element, fname: os.PathLike | None = None):
         """
-        Write an XML element tree to a file with pretty printing.
+        Write formatted XML to file.
         
         Parameters
         ----------
@@ -246,96 +268,101 @@ class OpenmmXML:
             Output file path.
         """
         xmlstr = OpenmmXML.to_pretty_xmlstr(xmlele)
-        with open(fname, 'w') as f:
-            f.write(xmlstr)
+        if fname:
+            with open(fname, 'w') as f:
+                f.write(xmlstr)
+        return xmlstr
     
     def write_ffxml(self, fname: os.PathLike):
         """
-        Write the force field XML to a file.
+        Write force field XML to file.
         
         Parameters
         ----------
         fname : os.PathLike
-            Output file path for the force field XML.
+            Output path for force field XML file.
         
         Raises
         ------
         AttributeError
-            If `ffxml` is None (i.e., :meth:`from_parmed` has not been called).
+            If ``ffxml`` is None (call :meth:`from_parmed` first).
         """
         self.to_pretty_xmlfile(self.ffxml, fname)
     
     def write_topxml(self, fname: os.PathLike):
         """
-        Write the topology XML to a file.
+        Write topology XML to file.
         
         Parameters
         ----------
         fname : os.PathLike
-            Output file path for the topology XML.
+            Output path for topology XML file.
         
         Raises
         ------
         AttributeError
-            If `topxml` is None (i.e., :meth:`from_parmed` has not been called).
+            If ``topxml`` is None (call :meth:`from_parmed` first).
         """
         self.to_pretty_xmlfile(self.topxml, fname)
 
     @classmethod
     def from_parmed(cls, struct: parmed.Structure, useAtrributeFromResidue: bool = True, onlyCharges: bool = False):
         """
-        Create an OpenmmXML object from a ParmEd structure.
+        Convert ParmEd structure to OpenMM XML elements.
         
-        This method converts a ParmEd structure into OpenMM XML format,
-        including all force field parameters. It handles unit conversions
-        from AMBER/GROMACS units to OpenMM units, and processes dihedrals
-        (both proper and improper) with proper ordering schemes.
+        Performs comprehensive conversion of AMBER/GROMACS topologies to OpenMM
+        XML format with proper unit conversions, dihedral ordering, and 1-4
+        scaling factor extraction. Supports both full parameter conversion and
+        charge-only mode.
         
         Parameters
         ----------
         struct : parmed.Structure
-            ParmEd structure object to convert. Must be fully parameterized.
-        useAtrributeFromResidue : bool, default True
-            If True, charges are stored in the residue definition and referenced
-            via ``UseAttributeFromResidue`` in the nonbonded force. This allows
-            the same force field to be used with different charge sets. If False,
-            charges are stored directly in the nonbonded force.
-        onlyCharges : bool, default False
-            If True, only generate atom types and charges, skipping all bonded
-            terms (bonds, angles, dihedrals). Requires `useAtrributeFromResidue`
-            to be True.
+            Fully parameterized ParmEd structure to convert.
+        useAtrributeFromResidue : bool, default=True
+            If True, charges are stored in residue templates and referenced via
+            ``<UseAttributeFromResidue name="charge"/>`` in NonbondedForce. This
+            enables using the same force field with different charge sets. If
+            False, charges are embedded directly in NonbondedForce atoms.
+        onlyCharges : bool, default=False
+            If True, only generate AtomTypes and NonbondedForce (charges + LJ),
+            skipping bonded terms. Useful for charge-only force fields. Requires
+            ``useAtrributeFromResidue=True``.
         
         Returns
         -------
         OpenmmXML
-            OpenmmXML object with `ffxml` and `topxml` attributes set.
+            Converter object with ``ffxml`` and ``topxml`` attributes populated.
         
         Raises
         ------
         AssertionError
-            If `onlyCharges` is True but `useAtrributeFromResidue` is False.
+            If ``onlyCharges=True`` but ``useAtrributeFromResidue=False``, or if
+            inconsistent 1-4 scaling factors are detected.
         NotImplementedError
-            If duplicate atom names are found in the structure.
+            If duplicate atom names exist (requires unique names).
         RuntimeError
-            If improper dihedrals cannot be processed (e.g., no central atom found).
+            If improper dihedral central atom cannot be identified.
         TypeError
-            If dihedral type is not recognized.
+            If unrecognized dihedral type encountered.
         
         Notes
         -----
-        The conversion process:
+        **Conversion workflow:**
         
-        1. Joins dihedral types using :func:`safe_join_dihedrals`
-        2. Creates unique atom names and types (format: ``{residue}-{atom}``)
-        3. Generates force field XML with:
-           * Atom types (element, name, class, mass)
-           * Harmonic bonds (converted from :math:`\text{kcal} \cdot \text{mol}^{-1} \cdot \text{Å}^{-2}` to :math:`\text{kJ} \cdot \text{mol}^{-1} \cdot \text{nm}^{-2}`)
-           * Harmonic angles (converted from :math:`\text{kcal} \cdot \text{mol}^{-1} \cdot \text{rad}^{-2}` to :math:`\text{kJ} \cdot \text{mol}^{-1} \cdot \text{rad}^{-2}`)
-           * Periodic torsions (proper and improper dihedrals)
-           * Nonbonded forces (LJ parameters, 1-4 scaling factors)
-        4. Generates topology XML with residue definitions
+        1. Merge multi-term dihedrals via :func:`safe_join_dihedrals`
+        2. Generate unique atom names/types (``{residue}-{atom}``)
+        3. Build force field XML:
+           
+           * AtomTypes (element, mass, class)
+           * HarmonicBondForce (bonds)
+           * HarmonicAngleForce (angles)
+           * PeriodicTorsionForce (proper/improper dihedrals)
+           * NonbondedForce (LJ + charges, 1-4 scaling)
         
-        Unit conversions:
+        4. Build topology XML (residue templates)
+        
+        **Unit conversions:**
         
         * Bond lengths: :math:`\text{Å} \to \text{nm}` (divide by 10)
         * Bond force constants: :math:`\text{kcal} \cdot \text{mol}^{-1} \cdot \text{Å}^{-2} \to \text{kJ} \cdot \text{mol}^{-1} \cdot \text{nm}^{-2}`
@@ -345,28 +372,34 @@ class OpenmmXML:
         * LJ sigma: :math:`\text{Å} \to \text{nm}` (divide by 10)
         * LJ epsilon: :math:`\text{kcal} \cdot \text{mol}^{-1} \to \text{kJ} \cdot \text{mol}^{-1}`
         
-        Dihedral ordering:
+        **Dihedral ordering:**
         
-        * Proper dihedrals use "amber" ordering by default
-        * Improper dihedrals use "amber" ordering, but switch to "smirnoff"
-          if all combinations of the three peripheral atoms exist
+        * Proper dihedrals: "amber" ordering (default)
+        * Improper dihedrals: "amber" ordering, but switches to "smirnoff" if
+          all three peripheral atom permutations exist (SMIRNOFF trefoil pattern)
         
-        1-4 scaling factors:
+        **1-4 scaling extraction:**
         
-        * Extracted from GROMACS defaults section (if available) or from
-          dihedral types in AMBER format
-        * Supports AMBER (5/6 for coulomb, 1/2 for LJ) and OPLS (1/2 for both)
+        * GROMACS: Read from ``[ defaults ]`` section (``fudgeQQ``, ``fudgeLJ``)
+        * AMBER: Extract from dihedral types (``scee``, ``scnb``)
+        * Validates consistency across all dihedrals
+        * Recognizes AMBER (5/6, 1/2) and OPLS (1/2, 1/2) conventions
         
         Examples
         --------
+        >>> # Full conversion
         >>> struct = parmed.load_file('ligand.prmtop', xyz='ligand.inpcrd')
         >>> xml_obj = OpenmmXML.from_parmed(struct)
-        >>> xml_obj.write_ffxml('ligand.xml')
+        >>> xml_obj.write_ffxml('ligand_ff.xml')
+        >>> xml_obj.write_topxml('ligand_residues.xml')
+        >>> # Charge-only mode
+        >>> xml_obj = OpenmmXML.from_parmed(struct, onlyCharges=True)
+        >>> xml_obj.write_ffxml('ligand_charges.xml')
         
         See Also
         --------
-        :func:`safe_join_dihedrals` : Helper function for dihedral processing.
-        :func:`convert_to_xml` : Convenience wrapper function.
+        :func:`safe_join_dihedrals` : Merges multi-term dihedrals.
+        :func:`convert_to_xml` : High-level wrapper function.
         """
         if onlyCharges:
             assert useAtrributeFromResidue, "useAtrributeFromResidue must be True when onlyCharges is True"

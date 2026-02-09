@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
 import os
 from pathlib import Path
 from rdkit import Chem
@@ -9,50 +11,79 @@ import openmm.app as app
 
 from .base import SmallMoleculeForceField
 
+if TYPE_CHECKING:
+    from ..core.ligand import Ligand
+
 
 logger = logging.getLogger(__name__)
 
 
 class OpenFF(SmallMoleculeForceField):
     """
-    OpenFF-based small molecule force field parameterizer.
+    OpenFF SMIRNOFF-based parameterizer.
     
-    This class generates force field parameters using the Open Force Field
-    (OpenFF) initiative's SMIRNOFF-based force fields. It uses the OpenFF
-    toolkit to assign parameters and generate AMBER and GROMACS topology files.
+    Generates force field parameters using the Open Force Field (OpenFF)
+    Initiative's SMIRNOFF format force fields. Leverages the OpenFF toolkit
+    for SMARTS-based parameter assignment, producing AMBER (prmtop/inpcrd) and
+    GROMACS (top) topology files.
     
     Parameters
     ----------
-    forcefield : str, default 'openff-2.1.0'
-        Name of the OpenFF force field to use (e.g., 'openff-2.1.0',
-        'openff-2.0.0', 'openff-1.3.0').
-    charge_method : str, default 'bcc'
-        Method for partial charge assignment. Options:
+    forcefield : str, default='openff-2.1.0'
+        OpenFF force field identifier. Examples:
         
-        * 'bcc': AM1-BCC charges (mapped to 'am1bcc' in OpenFF)
-        * 'gas': Gasteiger charges (mapped to 'gasteiger' in OpenFF)
-        * Other: Passed directly to OpenFF toolkit
+        * 'openff-2.1.0': Latest recommended OpenFF version
+        * 'openff-2.0.0': Previous stable release
+        * 'openff_unconstrained-2.1.0': Version without constraints
+        * 'openff-1.3.1': Legacy version (Parsley)
+    charge_method : str, default='bcc'
+        Partial charge method:
+        
+        * 'bcc': AM1-BCC (mapped to 'am1bcc' in OpenFF)
+        * 'gas': Gasteiger (mapped to 'gasteiger' in OpenFF)
+        * 'am1bcc', 'am1bccelf10', 'gasteiger': Direct OpenFF names
     
     Attributes
     ----------
     top : openmm.app.Topology
-        OpenMM topology object (set after parametrization).
+        OpenMM topology (available after :meth:`_parametrize`).
     system : openmm.System
-        OpenMM system object (set after parametrization).
+        OpenMM system with force objects (available after :meth:`_parametrize`).
     struct : parmed.Structure
-        ParmEd structure object (set after parametrization).
+        ParmEd structure (available after :meth:`_parametrize`).
+    
+    Raises
+    ------
+    RuntimeError
+        If OpenFF toolkit fails to assign parameters or charges.
+    
+    Notes
+    -----
+    Requires the following packages:
+    
+    * ``openff-toolkit``: OpenFF parameterization engine
+    * ``openmmforcefields``: SMIRNOFF template generator
+    * ``ambertools`` or ``openeye-toolkits``: For AM1-BCC charges
+    
+    Generated files:
+    
+    * ``{name}.prmtop``: AMBER topology
+    * ``{name}.inpcrd``: AMBER coordinates
+    * ``{name}.top``: GROMACS topology (all-in-one format)
     
     Examples
     --------
-    >>> openff = OpenFF(forcefield='openff-2.1.0', charge_method='bcc')
-    >>> openff.run('ligand.sdf', wdir='./output')
-    >>> # Access generated structure
-    >>> struct = openff.struct
+    >>> from easybfe.ligand import LigandLoader
+    >>> # Use latest OpenFF with AM1-BCC charges
+    >>> openff = OpenFF('openff-2.1.0', 'bcc')
+    >>> loader = LigandLoader()
+    >>> ligands = loader.load('ligand.sdf', only_first=True)
+    >>> ligand = openff.run(ligands[0])
     
     See Also
     --------
-    :class:`easybfe.smff.gaff.GAFF` : GAFF-based parameterizer.
-    :class:`easybfe.smff.custom.CustomForceField` : Custom force field parameterizer.
+    :class:`easybfe.smff.gaff.GAFF` : GAFF/GAFF2 alternative.
+    :class:`easybfe.smff.custom.CustomForceField` : Custom topology reuse.
     """
     
     def __init__(self, forcefield: str = 'openff-2.1.0', charge_method: str = 'bcc'):
@@ -66,37 +97,54 @@ class OpenFF(SmallMoleculeForceField):
             self.charge_method = charge_method
         logger.info(f"Initialized OpenFF with forcefield={forcefield}, charge_method={self.charge_method}")
         
-    def _parametrize(self):
+    def _parametrize(self, ligand: Ligand, wdir: str):
         """
-        Generate OpenFF force field parameters for a ligand.
+        Generate OpenFF SMIRNOFF parameters.
         
-        This method uses the OpenFF toolkit to assign SMIRNOFF-based force
-        field parameters to the ligand molecule. It generates AMBER and
-        GROMACS topology files, as well as OpenMM system objects.
+        Uses OpenFF toolkit to assign SMARTS-based parameters and compute
+        partial charges. Produces OpenMM system, ParmEd structure, and writes
+        AMBER/GROMACS topology files.
+        
+        Parameters
+        ----------
+        ligand : Ligand
+            Ligand object with input molecule.
+        wdir : str
+            Working directory path for output files.
+        
+        Returns
+        -------
+        Ligand
+            Ligand object with parametrized topology files added as auxiliary files.
         
         Raises
         ------
         RuntimeError
-            If molecule parsing fails, stereochemistry assignment fails, or
-            if parameter assignment fails.
+            If stereochemistry assignment, molecule conversion, charge
+            computation, or parameter assignment fails.
         
         Notes
         -----
-        This method:
+        Workflow:
         
-        1. Assigns stereochemistry using RDKit
-        2. Converts to OpenFF Molecule object
-        3. Assigns partial charges using the specified method
-        4. Generates SMIRNOFF parameters using the specified force field
-        5. Creates OpenMM system and ParmEd structure
-        6. Saves topology files in multiple formats
+        1. Assign stereochemistry to RDKit molecule (force=True)
+        2. Convert RDKit Mol to OpenFF Molecule
+        3. Compute partial charges using specified method
+        4. Create SMIRNOFF template generator
+        5. Register generator with OpenMM ForceField
+        6. Generate OpenMM System
+        7. Convert to ParmEd Structure
+        8. Standardize residue name to 'MOL'
+        9. Write GROMACS .top, AMBER .prmtop/.inpcrd
+        10. Store files as auxiliary files in ligand object
         
-        The method sets `self.top`, `self.system`, and `self.struct` attributes
-        after successful parametrization.
+        See Also
+        --------
+        :class:`openff.toolkit.Molecule` : OpenFF molecule representation.
+        :class:`openmmforcefields.generators.SMIRNOFFTemplateGenerator` : SMIRNOFF generator.
         """
-        mol = self.rdmol
-        wdir = self.wdir
-        stem = self.name
+        mol = ligand.get_rdmol()
+        stem = ligand.name
 
         logger.info(f"Generating OpenFF parameters for {stem}")
         Chem.AssignStereochemistry(mol, cleanIt=True, force=True)
@@ -110,11 +158,22 @@ class OpenFF(SmallMoleculeForceField):
         system = ff.createSystem(top, constraints=None, rigidWater=False)
         struct = parmed.openmm.load_topology(top, system, xyz=mol.GetConformer().GetPositions())
         struct.residues[0].name = 'MOL'
-        struct.save(str(wdir / f'{stem}.top'), overwrite=True, combine='all')
-        struct.save(str(wdir / f'{stem}.prmtop'), overwrite=True)
-        struct.save(str(wdir / f'{stem}.inpcrd'), overwrite=True)
-        self.top = top
-        self.system = system
-        self.struct = struct
+        
+        top_path = os.path.join(wdir, f'{stem}.top')
+        prmtop_path = os.path.join(wdir, f'{stem}.prmtop')
+        inpcrd_path = os.path.join(wdir, f'{stem}.inpcrd')
+        
+        struct.save(top_path, overwrite=True, combine='all')
+        struct.save(prmtop_path, overwrite=True)
+        struct.save(inpcrd_path, overwrite=True)
+        
+        with open(prmtop_path) as f:
+            ligand.add_aux_file('prmtop', f.read())
+        with open(inpcrd_path) as f:
+            ligand.add_aux_file('inpcrd', f.read())
+        with open(top_path) as f:
+            ligand.add_aux_file('top', f.read())
+        
         logger.info(f"Completed OpenFF parametrization for {stem}")
+        return ligand
         
