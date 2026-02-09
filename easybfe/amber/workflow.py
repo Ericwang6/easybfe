@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import List, Dict, Any
 from collections import OrderedDict
-from .settings import AmberMdin
+from ..config import AmberMdin
 from ..cmd import run_command, set_directory
 
 
