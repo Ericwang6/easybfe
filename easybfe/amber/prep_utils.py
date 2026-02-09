@@ -3,7 +3,7 @@ from __future__ import annotations
 __all__ = [
     'FF_XMLS', 'do_co_alchemical_water', 'sanitize_water', 'compute_net_charge_from_openmm_system',
     'hydrogen_mass_repartition', 'computeBoxVectorsWithPadding', 'shiftToBoxCenter', 'shiftPositions',
-    'fix_excess_charge', 'set_alchemical_water_restraints'
+    'fix_excess_charge', 'set_alchemical_water_restraints', 'generate_amber_mask'
 ]
 
 import math
@@ -260,3 +260,51 @@ def shiftPositions(positions: unit.Quantity | List, shiftVec: np.ndarray):
         positions = positions.value_in_unit(unit.nanometers)
     newPositions = unit.Quantity(value=[pos + shiftVec for pos in positions], unit=unit.nanometers)
     return newPositions
+
+
+def generate_amber_mask(natomsA: int, natomsB: int, mapping: dict[int, int], alchemical_water_info: dict[str, list] = dict(), mode: str = 'rbfe'):
+    if mode == 'rbfe':
+        scA = [i for i in range(natomsA) if i not in mapping.keys()]
+        scB = [i for i in range(natomsB) if i not in mapping.values()]
+        res = {
+            # "noshakemask": f"@1-{natomsA+natomsB}",
+            "timask1": f"@1-{natomsA}",
+            "timask2": f"@{natomsA+1}-{natomsA+natomsB}",
+            "scmask1": "@{}".format(','.join(str(i+1) for i in scA)),
+            "scmask2": "@{}".format(','.join(str(i+1+natomsA) for i in scB))
+        }
+    elif mode == 'abfe':
+        res = {
+            # "noshakemask": f"@1-{natomsA+natomsB}",
+            "timask1": f"@1-{natomsA}",
+            "timask2": "",
+            "scmask1": f"@1-{natomsA}",
+            "scmask2": ""
+        }
+    elif mode == 'abfe_restr':
+        res = {
+            "timask1": f"@1-{natomsA}",
+            "timask2": f"@{natomsA+1}-{2*natomsA}",
+            "scmask1": "",
+            "scmask2": ""
+        }
+    else:
+        raise ValueError(f"unrecognized mode: {mode}")
+    if alchemical_water_info:
+        alchemical_water_mask = {
+            # "noshakemask": ','.join(str(x + 1) for x in alchemical_water_info['alchemical_water_oxygen'] + alchemical_water_info['alchemical_water_hydrogen'] + alchemical_water_info['alchemical_ions']),
+            "timask1": ','.join(str(x + 1) for x in alchemical_water_info['alchemical_water_oxygen'] + alchemical_water_info['alchemical_water_hydrogen']),
+            "timask2": ','.join(str(x + 1) for x in alchemical_water_info['alchemical_ions']),
+            "scmask1": ','.join(str(x + 1) for x in alchemical_water_info['alchemical_water_hydrogen'])
+        }
+        for key in alchemical_water_mask:
+            if not res[key]:
+                res[key] = alchemical_water_mask[key]
+            else:
+                res[key] = f'{res[key]},{alchemical_water_mask[key]}'
+    # add single quote mark
+    for key in res:
+        if res[key].startswith('@,'):
+            res[key] = '@' + res[key][2:]
+        res[key] = f"'{res[key]}'"
+    return res

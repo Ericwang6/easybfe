@@ -77,6 +77,7 @@ class Ligand(BaseModel):
     num_rotatable_bonds: int = Field(default=0, description="Number of rotatable bonds (computed)")
     num_h_donors: int = Field(default=0, description="Number of hydrogen bond donors (computed)")
     num_h_acceptors: int = Field(default=0, description="Number of hydrogen bond acceptors (computed)")
+    charge: int = Field(default=0, description='Net charge of the ligand')
     dG_expt: float = Field(default=0.0, description='Experimental binding free energy to a protein, in kcal/mol')
     
     @model_validator(mode='after')
@@ -107,6 +108,7 @@ class Ligand(BaseModel):
         self.num_rotatable_bonds = Lipinski.NumRotatableBonds(m)
         self.num_h_donors = Lipinski.NumHDonors(m)
         self.num_h_acceptors = Lipinski.NumHAcceptors(m)
+        self.charge = sum([at.GetFormalCharge() for at in m.GetAtoms()])
         
         return self
     
