@@ -45,7 +45,7 @@ def run_acpype(input: Optional[os.PathLike] = None,
         cmd = [acpype] + args
     else:
         assert input is not None, "Input is None."
-        cmd = [acpype, "-i", str(input), "-b", basename, "-c", charge_method, "-a", atom_type]            
+        cmd = [acpype, "-i", str(input), "-b", basename, "-c", charge_method, "-a", atom_type, '-f']            
         if net_charge == "auto":
             suffix = Path(input).suffix
             if suffix == ".mol":
