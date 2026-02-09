@@ -41,7 +41,7 @@ def setup(scm=None):
         entry_points={
             "console_scripts": [
                 "easybfe = easybfe.cli:main",
-                "easybfe-gui = easybfe.webgui:main"
+                # "easybfe-gui = easybfe.webgui:main"
             ]
         }
     )

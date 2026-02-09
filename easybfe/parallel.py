@@ -35,7 +35,6 @@ def run_func_parallel(
             else:
                 r = func(arg)
             results.append(r)
-        return results
     else:
         with mp.Pool(nprocs) as pool:
             if unpack_args:
@@ -44,9 +43,9 @@ def run_func_parallel(
                 iterator = tqdm(pool.imap(func, args_list), desc=desc, total=len(args_list)) if progress_bar else pool.imap(func, args_list)
                 results = [r for r in iterator]
             else:
-                iterator = tqdm(pool.imap_unordered(func, args_list), desc=desc, total=len(args_list)) if progress_bar else pool.map(func, args_list)
+                iterator = tqdm(pool.imap_unordered(func, args_list), desc=desc, total=len(args_list)) if progress_bar else pool.imap_unordered(func, args_list)
                 results = [r for r in iterator]
-        return results
+    return results
 
 
             

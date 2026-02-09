@@ -7,18 +7,73 @@ This package contains useful functions to manipulate command line executions.
 
 import os
 import sys
+import io
 import subprocess
 import shutil
 from pathlib import Path
-from typing import List, Union, Optional, Tuple
+from typing import List, Union, Optional, Tuple, Any
 import contextlib
 import logging
 import uuid
 
 
+@contextlib.contextmanager
+def get_text_stream(src: Union[str, bytes, Path, io.IOBase], encoding: Optional[str] = None):
+    """
+    Convert any input to text stream
+    """
+    # Case 1: already io
+    if hasattr(src, "read"):
+        if isinstance(src, (io.BufferedIOBase, io.RawIOBase)) or "b" in getattr(src, "mode", ""):
+            wrapper = io.TextIOWrapper(src, encoding=encoding)
+            try:
+                if hasattr(src, "seek"): src.seek(0)
+                yield wrapper
+            finally:
+                wrapper.detach()
+        else:
+            yield src
+
+    # Case 2: bytes
+    elif isinstance(src, bytes):
+        yield io.TextIOWrapper(io.BytesIO(src), encoding=encoding)
+
+    # Case 3: string or pathlike
+    elif isinstance(src, str):
+        # check if it's a path or content
+        if (len(src) < 1024) and ("\n" not in src) and os.path.isfile(src):
+            with open(src, "r", encoding=encoding) as f:
+                yield f
+        else:
+            yield io.StringIO(src)
+    elif isinstance(src, Path):
+        with open(src, 'r', encoding=encoding) as fp:
+            yield fp
+    else:
+        raise TypeError(f"Unsupported source type: {type(src)}")
+
+
+
+def smart_copy(src: Any, dst: str | Path, allow_formats: Optional[list[str]] = None):
+    if isinstance(src, bytes):
+        Path(dst).write_bytes(src)
+    elif hasattr(src, "read"):
+        with open(dst, 'wb'):
+            shutil.copyfileobj(src, dst)
+    elif os.path.isfile(src):
+        fmt = Path(src).suffix[1:]
+        if allow_formats and fmt not in allow_formats:
+            raise TypeError(f"Not allowed format: {fmt} (allowed {allow_formats})")
+        shutil.copyfile(src, dst)
+    elif isinstance(src, str) or isinstance(src, Path):
+        raise FileNotFoundError(src)
+    else:
+        raise TypeError(f'Unrecognized type: {type(src)}')
+
+
 def init_logger(logname: Optional[os.PathLike] = None) -> logging.Logger:
     # logging
-    logger = logging.getLogger(str(uuid.uuid4()))
+    logger = logging.getLogger('easybfe')
     logger.propagate = False
     logger.setLevel(level = logging.INFO)
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")

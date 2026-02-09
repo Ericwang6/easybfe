@@ -178,3 +178,4 @@ benchmark/
 dump.rdb
 
 webgui/
+agent/

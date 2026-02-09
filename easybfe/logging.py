@@ -9,7 +9,7 @@ def setup_logging(log_file: os.PathLike = '', level = logging.INFO) -> logging.L
     logger.propagate = False
     logger.setLevel(level)
     formatter = logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(process)d %(name)s: %(message)s"
+        "%(asctime)s [%(levelname)s] [PID:%(process)d] [%(name)s]: %(message)s"
     )
 
     # file
