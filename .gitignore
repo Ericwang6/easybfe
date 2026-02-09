@@ -166,6 +166,8 @@ slurm*.out
 
 # test cache
 _test*
+tests/data/_*
+*_fixed.pdb
 
 # trash
 .trash/
