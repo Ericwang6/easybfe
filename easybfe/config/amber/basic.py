@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any
+from typing import Any, Optional
 from pydantic import BaseModel, Field, model_validator, field_validator, field_serializer
 
 __all__ = [
@@ -62,15 +62,15 @@ class AmberCntrlSettings(AmberNamelist):
     # Simulation settings
     ntx: int = 1   # 1 - start from scratch, 5 - start from a restart file
     irest: int = 0 # 0 - start from scratch; 1 - restart simulation
-    nstlim: int = Field(default=10, validation_alias='num_steps') # number of steps
+    nstlim: int = Field(default=10000, validation_alias='num_steps') # number of steps
     dt: float = 0.001 # time step in ps
     # Output control
     ofreq: int = Field(default=1000, exclude=True)
-    efreq: int = Field(default=None, exclude=True)
-    ntpr: int = None # freq to dump energies in mdout
-    ntwe: int = None # freq to dump energies in mden
-    ntwr: int = None # freq to write restart file
-    ntwx: int = None # freq to write trajectory file
+    efreq: Optional[int] = Field(default=None, exclude=True)
+    ntpr: Optional[int] = None # freq to dump energies in mdout
+    ntwe: Optional[int] = None # freq to dump energies in mden
+    ntwr: Optional[int] = None # freq to write restart file
+    ntwx: Optional[int] = None # freq to write trajectory file
     iwrap: int = 0   # 1 - process PBC when dump trajectories; 0 - don't process PBC
     # Restraint
     ntr: int = 0
@@ -99,8 +99,8 @@ class AmberCntrlSettings(AmberNamelist):
     tishake: int = 0
     clambda: float = 0.0
     ifmbar: int = 0
-    bar_intervall: int = None
-    mbar_states: int = None
+    bar_intervall: Optional[int] = None
+    mbar_states: Optional[int] = None
     mbar_lambda: list[float] = Field(default_factory=list)
     timask1: str = "" 
     timask2: str = ""
@@ -112,8 +112,8 @@ class AmberCntrlSettings(AmberNamelist):
     gti_output: int = 0
     gti_add_sc: int = 6
     gti_scale_beta: int = 1
-    gti_cut_sc_on: float = None
-    gti_cut_sc_off: float = None
+    gti_cut_sc_on: Optional[float] = None
+    gti_cut_sc_off: Optional[float] = None
     gti_lam_sch: int = 1
     gti_ele_sc: int = 1
     gti_vdw_sc: int = 1
@@ -121,10 +121,11 @@ class AmberCntrlSettings(AmberNamelist):
     gti_ele_exp: int = 2
     gti_vdw_exp: int = 2
     numexchg: int = 0
-    gremd_acyc: int = None
+    gremd_acyc: Optional[int] = None
 
     model_config = {
-        "populate_by_name": True  # Allow population by both alias and field name
+        "populate_by_name": True , # Allow population by both alias and field name
+        "validate_default": True
     }
 
     @field_validator('mbar_lambda', mode='before')
@@ -187,8 +188,8 @@ class AmberWtSettings(AmberNamelist):
     name: str = Field(default='wt', init=False, exclude=True)
     sep: str = Field(default=' ', init=False, exclude=True)
     type: str
-    istep1: int = None
-    istep2: int = None
+    istep1: Optional[int] = None
+    istep2: Optional[int] = None
     value1: float = None
     value2: float = None
 

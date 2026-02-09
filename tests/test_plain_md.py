@@ -65,7 +65,7 @@ def test_setup_plain_md():
     assert (wdir / f'{ligand.name}.xml').exists()
     
     # Cleanup
-    shutil.rmtree(test_dir)
+    # shutil.rmtree(test_dir)
 
 
 def test_setup_plain_md_ligand_only():

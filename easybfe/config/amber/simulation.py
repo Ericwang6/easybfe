@@ -71,8 +71,9 @@ class AmberSimulationConfig(SetupConfig):
     def set_workflow(self):
         if self.workflow is None:
             self.workflow = default_workflow()
-        for step in self.workflow[1:]:
-            step.cntrl = _set_defaults(step.cntrl, {'ntx': 5, 'irest': 1})
+        for i in range(1, len(self.workflow)):
+            if self.workflow[i-1].type != 'em':
+                self.workflow[i].cntrl = _set_defaults(self.workflow[i].cntrl, {'ntx': 5, 'irest': 1})
         return self
     
 
