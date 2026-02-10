@@ -13,6 +13,7 @@ def standarize_ff(ffstr: str) -> str:
 
 
 class SetupConfig(BaseModel):
+    num_procs: int = -1
     # setup settings
     box_shape: Literal['cube', 'dodecahedron', 'octahedron'] = 'cube'
     buffer: float = 20.0

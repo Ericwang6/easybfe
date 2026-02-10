@@ -1,26 +1,29 @@
+from __future__ import annotations
+
 import os
+import warnings
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict
 from collections import OrderedDict
-from ..config import AmberMdin
+
+from ..config import AmberMdin, AmberStepConfig
 from ..cmd import run_command, set_directory
 
 
 class Step:
     def __init__(
-        self, 
-        name: str, 
-        wdir: os.PathLike = '.', 
-        mdin: os.PathLike | str | AmberMdin = '',
-        prmtop: os.PathLike | None = None, 
+        self,
+        config: AmberStepConfig,
+        wdir: os.PathLike = '.',
+        prmtop: os.PathLike | None = None,
         inpcrd: os.PathLike | None = None,
-        exec: str = 'pmemd.cuda'
     ):
-        self.exec = exec
-        self.name = name
+        self.config = config
+        self.exec = config.exec
+        self.name = config.name
         self.wdir = Path(wdir).resolve()
         self.input = ""
-        self.set_input(mdin)
+        self.set_input()
         self.set_prmtop(prmtop)
         self.set_inpcrd(inpcrd)
     
@@ -47,14 +50,14 @@ class Step:
     def set_inpcrd(self, inpcrd: os.PathLike):
         self.inpcrd = Path(inpcrd).resolve() if inpcrd else None
     
-    def set_input(self, mdin: os.PathLike | str | AmberMdin):
-        if isinstance(mdin, AmberMdin):
-            self.input = mdin.model_dump_mdin()
-        elif os.path.isfile(mdin):
-            with open(mdin) as f:
-                self.input = f.read()
-        else:
-            self.input = mdin
+    def set_input(self):
+        """Generate the MD input text from the associated step config."""
+        mdin = AmberMdin(
+            cntrl=self.config.cntrl,
+            wt=self.config.wt,
+            rst=self.config.rst,
+        )
+        self.input = mdin.model_dump_mdin()
     
     def write_input(self):
         with open(self.wdir / f"{self.name}.in", 'w') as f:
@@ -165,3 +168,81 @@ def create_groupfile_from_steps(steps: List[Step], dirname: os.PathLike | None =
         with open(fpath, 'w') as f:
             f.write(cmd)
     return cmd
+
+
+def create_script_for_workflows(workflows: List[Workflow], wdir: os.PathLike, nprocs: int = -1):
+    for wf in workflows:
+        wf.create()
+    step_names = tuple([name for name in workflows[0].steps])
+    for wf in workflows[1:]:
+        this_wf_steps = tuple([name for name in wf.steps])
+        if this_wf_steps != step_names:
+            warnings.warn(f"Not same workflow {step_names} != {this_wf_steps}")
+    
+    wdir = Path(wdir).expanduser().resolve()
+    wdir.mkdir(exist_ok=True)
+
+    if nprocs < 0:
+        nprocs = len(workflows)
+    else:
+        nprocs = max(1, nprocs // len(workflows)) * len(workflows)
+    
+    afunc = '''
+run_step_seq() {
+  local step_dir="$1"
+  local name="$2"
+
+  cd "$step_dir" || return 1
+
+  echo "Running $name ..."
+  source "$name.sh" > "$name.stdout" 2>&1
+  local rc=$?
+
+  if [ $rc -ne 0 ]; then
+    mv "$WDIR/running.tag" "$WDIR/error.tag"
+    echo "Error occurs in $name (exit code $rc)"
+    cd "$WDIR"
+    return $rc
+  fi
+
+  cd "$WDIR"
+}
+'''
+
+    script_lines = [
+        'WDIR=$(pwd)',
+        afunc,
+        r'start=$(date +%s)',
+        '\ntouch running.tag'
+    ]
+    for name in step_names:
+        cfg = workflows[0].steps[name].config
+        pmemd_exec = cfg.exec if cfg.exec.endswith('.MPI') else f'{cfg.exec}.MPI'
+        script_lines.append(f"\nRunning {name}")
+        if cfg.use_mpi:
+            create_groupfile_from_steps([wf.steps[name] for wf in workflows], wdir, wdir / f'{name}.groupfile')
+            cmd = f"mpirun -np {nprocs} {pmemd_exec} -ng {len(workflows)} -groupfile {name}.groupfile"
+            cmd += f' -rem 3 -remlog {name}.log' if cfg.use_remd else ''
+            script_lines.append(cmd)
+            script_lines.append((
+                'if [ $? -ne 0 ]; then\n'
+                '  mv running.tag error.tag && echo "Error occurs!"\n'
+                '  exit 1\n'
+                'fi\n'
+            ))
+        else:
+            for n in range(len(workflows)):
+                script_lines.append(f'run_step_seq {os.path.relpath(workflows[n].steps[name].wdir, wdir)} {name} || exit 1')
+    
+    script_lines += [
+        '\n',
+        r"end=$(date +%s)",
+        "duration=$((end - start))\n",
+        'hours=$(( duration / 3600 ))',
+        'minutes=$(( (duration % 3600) / 60 ))',
+        'seconds=$(( duration % 60 ))\n',
+        r'echo "Execution time: ${hours} h ${minutes} min ${seconds} sec"'
+    ]
+    with open(wdir / 'run.sh', 'w') as f:
+        f.write('\n'.join(script_lines))
+        

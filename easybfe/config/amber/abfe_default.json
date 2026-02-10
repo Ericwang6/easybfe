@@ -1,0 +1,65 @@
+[
+    {
+        "type": "em",
+        "name": "01.em",
+        "use_mpi": true, 
+        "use_remd": false,
+        "cntrl": {
+            "num_steps": 2000,
+            "step_size": 0.01,
+            "ofreq": 500,
+            "gti_add_sc": 1
+        }
+    },
+    {
+        "type": "heat",
+        "name": "02.heat",
+        "use_mpi": true, 
+        "use_remd": false,
+        "cntrl": {
+            "num_steps": 12500,
+            "dt": 0.004,
+            "ofreq": 500,
+            "restraint_wt": 5.0,
+            "gti_add_sc": 1
+        }
+    },
+    {
+        "type": "pres",
+        "name": "03.pres",
+        "use_mpi": true, 
+        "use_remd": false,
+        "cntrl": {
+            "num_steps": 12500,
+            "dt": 0.004,
+            "ofreq": 500,
+            "restraint_wt": 5.0,
+            "gti_add_sc": 1
+        }
+    },
+    {
+        "type": "prod",
+        "name": "04.pre_prod",
+        "use_mpi": true, 
+        "use_remd": false,
+        "cntrl": {
+            "num_steps": 125000,
+            "dt": 0.004,
+            "ofreq": 1250,
+            "gti_add_sc": 1
+        }
+    },
+    {
+        "type": "prod",
+        "name": "05.prod",
+        "use_mpi": true, 
+        "use_remd": true,
+        "cntrl": {
+            "num_steps": 10000,
+            "numexchg": 125,
+            "dt": 0.004,
+            "ofreq": 12500,
+            "gti_add_sc": 1
+        }
+    }
+]

@@ -11,9 +11,8 @@ import parmed
 from dataclasses import dataclass
 
 from .prep_utils import *
-from ..config import AmberFepSimulationConfig, AmberMdin, AmberRstSettings, AmberWtSettings
-from .workflow import Step, create_groupfile_from_steps, Workflow
-from ..smff.utils import OpenmmXML
+from ..config import AmberFepSimulationConfig, AmberRstSettings, AmberWtSettings
+from .workflow import Step, create_groupfile_from_steps, Workflow, create_script_for_workflows
 from ..core import Ligand, Protein
 
 
@@ -337,14 +336,20 @@ def setup_ligand_abfe_leg(
     workflows = []
     for n, clambda in enumerate(config.lambdas):
         steps = []
-        for i, step_config in enumerate(config.workflow):
+        for step_template in config.workflow:
+            # Build a per-lambda AmberStepConfig with updated cntrl / wt / rst
             update = mask.copy()
             update.update({"clambda": clambda})
-            step_lambda_cntrl = step_config.cntrl.model_copy(update=update)
-            rst = step_config.rst + rst_settings
-            wt = step_config.wt + [AmberWtSettings(type="DUMPFREQ", istep1=step_lambda_cntrl.ofreq)]
-            mdin = AmberMdin(cntrl=step_lambda_cntrl, wt=wt, rst=rst)
-            step = Step(name=step_config.name, mdin=mdin, exec=step_config.exec)
+            step_lambda_cntrl = step_template.cntrl.model_copy(update=update)
+            rst = step_template.rst + rst_settings
+            wt = step_template.wt + [AmberWtSettings(type="DUMPFREQ", istep1=step_lambda_cntrl.ofreq)]
+
+            step_config = step_template.model_copy()
+            step_config.cntrl = step_lambda_cntrl
+            step_config.rst = rst
+            step_config.wt = wt
+
+            step = Step(config=step_config)
             steps.append(step)
 
         lambda_dir = wdir / f'lambda{n}'
@@ -355,24 +360,7 @@ def setup_ligand_abfe_leg(
         workflows.append(wf)
     
     # Use groupfile and MPI to run steps except energy minimization
-    for i in range(1, len(config.workflow)):
-        create_groupfile_from_steps(
-            [wf.steps[config.workflow[i].name] for wf in workflows], 
-            dirname=wdir,
-            fpath=os.path.join(wdir, f'{config.workflow[i].name}.groupfile')
-        )
-
-    # Write run.sh
-    with open(Path(__file__).parent / 'run.sh.template') as f:
-        script = f.read()
-    
-    script = script.replace('@NUM_LAMBDA', str(len(config.lambdas)))
-    script = script.replace('@STAGES', '({})'.format(' '.join(f'"{step_config.name}"' for step_config in config.workflow)))
-    script = script.replace('@MD_EXEC', 'pmemd.cuda.MPI')
-    script = script.replace('@EM_NAME', config.workflow[0].name)
-
-    with open(wdir / 'run.sh', 'w') as f:
-        f.write(script)
+    create_script_for_workflows(workflows, wdir, config.num_procs)
 
     return True
 

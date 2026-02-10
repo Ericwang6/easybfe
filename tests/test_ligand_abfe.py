@@ -5,6 +5,7 @@ from pathlib import Path
 from easybfe.core.ligand import LigandLoader
 from easybfe.core.protein import Protein
 from easybfe.config import AmberFepSimulationConfig
+from easybfe.config.amber.simulation import default_abfe_workflow
 from easybfe.amber.prep_ligand_abfe import setup_ligand_abfe, BoreschRestraint
 from easybfe.smff import load_parametrizer
 
@@ -55,11 +56,11 @@ def test_setup_ligand_abfe():
     )
     
     # Create configs for each leg
-    # Use minimal lambdas for faster testing
+    # Use minimal lambdas for faster testing and the default ABFE workflow
     leg_configs = {
-        'solvent': AmberFepSimulationConfig(num_lambdas=3),
-        'complex': AmberFepSimulationConfig(num_lambdas=3),
-        'restraint': AmberFepSimulationConfig(num_lambdas=3)
+        'solvent': AmberFepSimulationConfig(num_lambdas=3, workflow=default_abfe_workflow()),
+        'complex': AmberFepSimulationConfig(num_lambdas=3, workflow=default_abfe_workflow()),
+        'restraint': AmberFepSimulationConfig(num_lambdas=3, workflow=default_abfe_workflow()),
     }
     
     # Setup ABFE
