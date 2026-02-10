@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from .prep_utils import *
 from ..config import AmberFepSimulationConfig, AmberMdin, AmberRstSettings
-from .workflow import Step, create_groupfile_from_steps
+from .workflow import Step, create_groupfile_from_steps, Workflow
 from ..smff.utils import OpenmmXML
 from ..core import Ligand, Protein
 
@@ -289,7 +289,7 @@ def setup_ligand_abfe_leg(
     )
 
     # generate masks
-    mode = 'abfe' if restraints is None else 'abfe_restr'
+    mode = 'abfe_restr' if duplicate_ligand is None else 'abfe'
     num_ligand_atoms = len(list(ligand_pdb.topology.atoms()))
     mask = generate_amber_mask(num_ligand_atoms, -1, {}, mode=mode)
 
@@ -334,43 +334,29 @@ def setup_ligand_abfe_leg(
     parmed_struct.save(str(wdir / f'{basename}.pdb'), overwrite=True)
 
     # setup workflow
-    steps = []
-    steps_total = []
-    for i, step_config in enumerate(config.workflow):
-        prmtop = wdir / f'{basename}.prmtop' if i == 0 else None
-        inpcrd = wdir / f'{basename}.prmtop' if i == 0 else None
-        step_config.rst += rst_settings
-        step_config.cntrl = step_config.cntrl.model_copy(update=mask)
-
-        for n, clambda in enumerate(config.lambdas):
-            lambda_dir = wdir / f'lambda{n}'
-            lambda_dir.mkdir(exist_ok=True)
-            step_dir = lambda_dir / step_config.name
-            step_dir.mkdir(exist_ok=True)
-
-            step_config.cntrl.clambda = clambda
-            mdin = AmberMdin(cntrl=step_config.cntrl, wt=step_config.wt, rst=step_config.rst)
-            step = Step(name=step_config.name, wdir=step_dir, mdin=mdin, exec=step_config.exec, prmtop=prmtop, inpcrd=inpcrd)
-        
-            # Link steps
-            # Energy minimization follow the precedure that lambda i starts from lambda i-1
-            if n > 0 and i == 0:
-                step.link_prev_step(steps[-1])
-            # The rest starts from its previous step
-            if i > 0:
-                step.link_prev_step(steps_total[-1][n])
-            
-            # Generate command to run this step
-            step.create()                
-
+    workflows = []
+    for n, clambda in enumerate(config.lambdas):
+        steps = []
+        for i, step_config in enumerate(config.workflow):
+            update = mask.copy()
+            update.update({"clambda": clambda})
+            step_lambda_cntrl = step_config.cntrl.model_copy(update=update)
+            rst = step_config.rst + rst_settings
+            mdin = AmberMdin(cntrl=step_lambda_cntrl, wt=step_config.wt, rst=rst)
+            step = Step(name=step_config.name, mdin=mdin, exec=step_config.exec)
             steps.append(step)
-        
-        steps_total.append(steps)
+
+        lambda_dir = wdir / f'lambda{n}'
+        prmtop = wdir / f'{basename}.prmtop'
+        inpcrd = wdir / f'{basename}.inpcrd'
+        wf = Workflow(wdir=lambda_dir, prmtop=prmtop, inpcrd=inpcrd, steps=steps)
+        wf.create()
+        workflows.append(wf)
     
     # Use groupfile and MPI to run steps except energy minimization
     for i in range(1, len(config.workflow)):
         create_groupfile_from_steps(
-            steps_total[i], 
+            [wf.steps[config.workflow[i].name] for wf in workflows], 
             dirname=wdir,
             fpath=os.path.join(wdir, f'{config.workflow[i].name}.groupfile')
         )
@@ -382,7 +368,7 @@ def setup_ligand_abfe_leg(
     script = script.replace('@NUM_LAMBDA', str(len(config.lambdas)))
     script = script.replace('@STAGES', '({})'.format(' '.join(f'"{step_config.name}"' for step_config in config.workflow)))
     script = script.replace('@MD_EXEC', 'pmemd.cuda.MPI')
-    script = script.replace('@EM_NAME', steps_total[0][0].name)
+    script = script.replace('@EM_NAME', config.workflow[0].name)
 
     with open(wdir / 'run.sh', 'w') as f:
         f.write(script)
