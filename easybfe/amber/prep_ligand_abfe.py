@@ -11,7 +11,7 @@ import parmed
 from dataclasses import dataclass
 
 from .prep_utils import *
-from ..config import AmberFepSimulationConfig, AmberMdin, AmberRstSettings
+from ..config import AmberFepSimulationConfig, AmberMdin, AmberRstSettings, AmberWtSettings
 from .workflow import Step, create_groupfile_from_steps, Workflow
 from ..smff.utils import OpenmmXML
 from ..core import Ligand, Protein
@@ -289,7 +289,7 @@ def setup_ligand_abfe_leg(
     )
 
     # generate masks
-    mode = 'abfe_restr' if duplicate_ligand is None else 'abfe'
+    mode = 'abfe_restr' if duplicate_ligand else 'abfe'
     num_ligand_atoms = len(list(ligand_pdb.topology.atoms()))
     mask = generate_amber_mask(num_ligand_atoms, -1, {}, mode=mode)
 
@@ -342,7 +342,8 @@ def setup_ligand_abfe_leg(
             update.update({"clambda": clambda})
             step_lambda_cntrl = step_config.cntrl.model_copy(update=update)
             rst = step_config.rst + rst_settings
-            mdin = AmberMdin(cntrl=step_lambda_cntrl, wt=step_config.wt, rst=rst)
+            wt = step_config.wt + [AmberWtSettings(type="DUMPFREQ", istep1=step_lambda_cntrl.ofreq)]
+            mdin = AmberMdin(cntrl=step_lambda_cntrl, wt=wt, rst=rst)
             step = Step(name=step_config.name, mdin=mdin, exec=step_config.exec)
             steps.append(step)
 

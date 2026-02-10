@@ -232,12 +232,12 @@ class AmberMdin(BaseModel):
     def validate_nmropt(self) -> AmberMdin:
         if len(self.rst) > 0:
             self.cntrl.nmropt = 1
+        if (len(self.wt) > 0 or self.cntrl.nmropt > 0) and self.wt[-1].type != 'END':
+            self.wt.append(AmberWtSettings(type='END'))
         return self
 
     def model_dump_mdin(self):
         lines = [self.cntrl.model_dump_mdin()]
-        if len(self.wt) > 0 and self.wt[-1].type != 'END':
-            self.wt.append(AmberWtSettings(type='END'))
         for item in self.wt:
             lines.append(item.model_dump_mdin())
         for item in self.rst:
