@@ -46,9 +46,9 @@ def test_setup_ligand_abfe():
     
     # Create Boresch restraint
     # Note: indices are 0-based in Python, so subtract 1 from comment values (which are 1-based PDB indices)
-    protein_anchors = (1427 - 1, 1412 - 1, 1155 - 1)  # Convert to 0-based: [1426, 1411, 1154]
-    ligand_anchors = (14 - 1, 12 - 1, 11 - 1)  # Convert to 0-based: [13, 11, 10]
-    rst_wts = (10.0, 100.0, 100.0, 100.0, 100.0, 100.0)
+    protein_anchors = (1448, 1450, 1451)  # Convert to 0-based: [1426, 1411, 1154]
+    ligand_anchors = (14, 15, 16)  # Convert to 0-based: [13, 11, 10]
+    rst_wts = (10.0, 10.0, 10.0, 10.0, 10.0, 10.0)
     restraints = BoreschRestraint(
         protein_anchors=protein_anchors,
         ligand_anchors=ligand_anchors,
@@ -58,9 +58,9 @@ def test_setup_ligand_abfe():
     # Create configs for each leg
     # Use minimal lambdas for faster testing and the default ABFE workflow
     leg_configs = {
-        'solvent': AmberFepSimulationConfig(num_lambdas=3, workflow=default_abfe_workflow()),
-        'complex': AmberFepSimulationConfig(num_lambdas=3, workflow=default_abfe_workflow()),
-        'restraint': AmberFepSimulationConfig(num_lambdas=3, workflow=default_abfe_workflow()),
+        'solvent': AmberFepSimulationConfig(num_lambdas=16, workflow=default_abfe_workflow()),
+        'complex': AmberFepSimulationConfig(num_lambdas=16, workflow=default_abfe_workflow()),
+        'restraint': AmberFepSimulationConfig(num_lambdas=16, workflow=default_abfe_workflow()),
     }
     
     # Setup ABFE

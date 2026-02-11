@@ -2,12 +2,13 @@
     {
         "type": "em",
         "name": "01.em",
-        "use_mpi": true, 
+        "use_mpi": false, 
         "use_remd": false,
         "cntrl": {
             "num_steps": 2000,
             "step_size": 0.01,
-            "ofreq": 500,
+            "ofreq": 100,
+            "efreq": 100,
             "gti_add_sc": 1
         }
     },
@@ -18,8 +19,9 @@
         "use_remd": false,
         "cntrl": {
             "num_steps": 12500,
-            "dt": 0.004,
-            "ofreq": 500,
+            "dt": 0.002,
+            "efreq": 1250,
+            "ofreq": 1250,
             "restraint_wt": 5.0,
             "gti_add_sc": 1
         }
@@ -31,8 +33,9 @@
         "use_remd": false,
         "cntrl": {
             "num_steps": 12500,
-            "dt": 0.004,
-            "ofreq": 500,
+            "dt": 0.002,
+            "ofreq": 1250,
+            "efreq": 1250,
             "restraint_wt": 5.0,
             "gti_add_sc": 1
         }
@@ -55,8 +58,8 @@
         "use_mpi": true, 
         "use_remd": true,
         "cntrl": {
-            "num_steps": 10000,
-            "numexchg": 125,
+            "num_steps": 125,
+            "numexchg": 10000,
             "dt": 0.004,
             "ofreq": 12500,
             "gti_add_sc": 1

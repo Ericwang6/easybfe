@@ -14,8 +14,9 @@ __all__ = [
 
 
 def _set_defaults(cfg: BaseModel, override: dict[str, Any]):
-    override.update(cfg.model_dump(exclude_unset=True))
-    return cfg.__class__.model_validate(override)
+    cfg_dict = cfg.model_dump()
+    cfg_dict.update(override)
+    return cfg.__class__.model_validate(cfg_dict)
 
 
 class AmberStepConfig(BaseModel):

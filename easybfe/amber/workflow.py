@@ -194,7 +194,7 @@ run_step_seq() {
 
   cd "$step_dir" || return 1
 
-  echo "Running $name ..."
+  echo "Running $step_dir ..."
   source "$name.sh" > "$name.stdout" 2>&1
   local rc=$?
 
@@ -218,7 +218,7 @@ run_step_seq() {
     for name in step_names:
         cfg = workflows[0].steps[name].config
         pmemd_exec = cfg.exec if cfg.exec.endswith('.MPI') else f'{cfg.exec}.MPI'
-        script_lines.append(f'echo "Running {name}"')
+        script_lines.append(f'\necho "Running {name}"')
         if cfg.use_mpi:
             create_groupfile_from_steps([wf.steps[name] for wf in workflows], wdir, wdir / f'{name}.groupfile')
             cmd = f"mpirun -np {nprocs} {pmemd_exec} -ng {len(workflows)} -groupfile {name}.groupfile"
