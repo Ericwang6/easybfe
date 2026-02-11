@@ -7,6 +7,7 @@ from easybfe.core.protein import Protein
 from easybfe.config import AmberFepSimulationConfig
 from easybfe.config.amber.simulation import default_abfe_workflow
 from easybfe.amber.prep_ligand_abfe import setup_ligand_abfe, BoreschRestraint
+from easybfe.analysis.abfe import analyze_abfe
 from easybfe.smff import load_parametrizer
 
 
@@ -95,3 +96,8 @@ def test_setup_ligand_abfe():
     
     # Cleanup
     # shutil.rmtree(test_dir)
+
+
+def test_ligand_abfe_analysis():
+    test_dir = Path(__file__).parent / '_test_ligand_abfe_old/abfe_output'
+    analyze_abfe(test_dir, '05.prod')

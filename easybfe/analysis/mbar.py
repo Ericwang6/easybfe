@@ -2,7 +2,10 @@ import os
 import logging
 from typing import Optional
 from pathlib import Path
+from dataclasses import dataclass
 
+import pandas as pd
+import numpy as np
 from tqdm import tqdm
 import alchemlyb
 from alchemlyb.estimators import MBAR
@@ -11,14 +14,22 @@ from alchemlyb.convergence import forward_backward_convergence
 from alchemlyb.visualisation.convergence import plot_convergence
 from alchemlyb.visualisation.mbar_matrix import plot_mbar_overlap_matrix
 
-from ..cmd import init_logger
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class MBARResult:
+    dg: float
+    dg_std: float
+    convergence: pd.DataFrame
+    overlap: np.ndarray
 
 
 def run_mbar(
     dirname: os.PathLike,
-    temperature: float = 298.15,
-    logger: Optional[logging.Logger] = None,
-    prefix: str = 'prod'
+    prefix: str = 'prod',
+    temperature: float = 298.15
 ):
     """
     Run MBAR (Multistate Bennett Acceptance Ratio) analysis to compute free energy differences 
@@ -63,7 +74,6 @@ def run_mbar(
     """
     
     dirname = Path(dirname).resolve()
-    logger = init_logger() if logger is None else logger
     kBT = 8.314 * temperature / 1000 / 4.184
 
     logger.info("Extracting data from output...")
@@ -82,7 +92,7 @@ def run_mbar(
     
     # convergence analysis
     logger.info("Running convergence analysis...")
-    conv_df = forward_backward_convergence(u_nks, "mbar")
+    conv_df = forward_backward_convergence(u_nks, "MBAR")
     for key in ['Forward', 'Forward_Error', 'Backward', 'Backward_Error']:
         conv_df[key] *= kBT
     conv_df.to_csv(dirname / "convergence.csv", index=None)
@@ -96,6 +106,5 @@ def run_mbar(
     overlap_ax = plot_mbar_overlap_matrix(mbarEstimator.overlap_matrix)
     overlap_ax.figure.savefig(str(dirname /"overlap.png"), dpi=300)
 
-    return dg, dg_std
+    return MBARResult(dg, dg_std, conv_df, mbarEstimator.overlap_matrix)
 
-    

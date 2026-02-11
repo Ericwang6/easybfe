@@ -5,6 +5,7 @@ import logging
 
 import math
 import numpy as np
+import scipy.special as special
 import openmm.app as app
 import openmm.unit as unit
 import parmed
@@ -12,7 +13,7 @@ from dataclasses import dataclass
 
 from .prep_utils import *
 from ..config import AmberFepSimulationConfig, AmberRstSettings, AmberWtSettings
-from .workflow import Step, create_groupfile_from_steps, Workflow, create_script_for_workflows
+from .workflow import Step, Workflow, create_script_for_workflows
 from ..core import Ligand, Protein
 
 
@@ -236,6 +237,36 @@ class BoreschRestraint:
         ]
         
         return rst_list
+    
+
+def compute_boresch_energy(rst_vals, rst_wts, temperature: float = 298.15):
+    import numpy as np
+    import scipy.special as special
+    r0, alpha0, theta0, gamma0, beta0, phi0 = rst_vals
+    rk, alphak, thetak, gammak, betak, phik = rst_wts
+
+    V = 1660. # in A^3
+    kBT = temperature * 0.0019872041 # Boltzmann's constant (kcal/mol/K)
+
+    beta = 1 / kBT
+
+    def _compute_Zr(r0, rk):
+        return r0 / (2*beta*rk) * np.exp(-beta*rk*r0**2) + np.sqrt(np.pi) / (4*beta*rk*np.sqrt(beta*rk)) * (1+2*beta*r0**2*rk) * (1+special.erf(np.sqrt(beta*rk)*r0))
+    
+    def _compute_Ztheta(theta0, thetak):
+        return np.sqrt(np.pi/(beta*thetak)) * np.exp(-1/(4*beta*thetak)) * np.sin(np.radians(theta0))
+    
+    def _compute_Zphi(phi, phik):
+        return np.sqrt(np.pi/(beta*phik)) * special.erf(np.pi*np.sqrt(beta*phik))
+
+    Zalpha = _compute_Ztheta(alpha0, alphak)
+    Ztheta = _compute_Ztheta(theta0, thetak)
+    Zr = _compute_Zr(r0, rk)
+    Zgamma = _compute_Zphi(gamma0, gammak)
+    Zbeta = _compute_Zphi(beta0, betak)
+    Zphi = _compute_Zphi(phi0, phik)
+
+    return -kBT*np.log(Zr*Zalpha*Ztheta*Zgamma*Zbeta*Zphi/(8*np.pi**2*V))
 
 
 def setup_ligand_abfe_leg(
@@ -373,6 +404,7 @@ def setup_ligand_abfe(
 ):
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True)
+    
     setup_ligand_abfe_leg(ligand, None, leg_configs['solvent'], output_dir/'solvent', basename='system')
     setup_ligand_abfe_leg(ligand, protein, leg_configs['complex'], output_dir/'complex', restraints=restraints, basename='system')
     setup_ligand_abfe_leg(
@@ -380,3 +412,5 @@ def setup_ligand_abfe(
         leg_configs['restraint'], output_dir/'restraint',
         duplicate_ligand=True, restraints=restraints, basename='system'
     )
+    boresch_fe = compute_boresch_energy(restraints.rst_vals, restraints.rst_wts)
+    (output_dir / 'boresch.dat').write_text(str(boresch_fe))
