@@ -1,258 +1,98 @@
-from __future__ import annotations
-import os
-import sys
-import shutil
-from pathlib import Path
-from io import StringIO
-from typing import Dict, List, Optional, Union, TYPE_CHECKING
-import logging
-from functools import partial
-import xml.etree.ElementTree as ET
-
-from tqdm import tqdm
-
 import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-if TYPE_CHECKING:
-    from matplotlib.axes._axes import Axes
+from scipy.spatial.distance import cdist
+import openmm.app as app
+from rdkit import Chem
 
-from plip.structure.preparation import PDBComplex, logger as PLIP_LOGGER
-from plip.exchange.report import StructureReport
-from plip.basic import config as PLIP_CONFIG
-
-PLIP_LOGGER.setLevel(logging.ERROR)
-PLIP_LOGGER.propagate = False
-
-import MDAnalysis as mda
+try:
+    from .interaction_plip import *
+except:
+    pass
 
 
-def analyze_single_frame(
-    pdbpath: os.PathLike, 
-    add_hydrogen: bool = False,
-    resnr_renum: Dict[str, str] = dict(),
-    write_xml: bool = True,
-    ligand_residue_name: str = 'MOL',
-    use_strict_hbond: bool = False
-) -> Dict[str, int]:
-    """
-    Analyze a single ligand-complex structure
+class HBondFinder:
 
-    Parameters
-    ----------
-    pdbpath: os.PathLike
-        Path to the pdbfile to be analyzed
-    add_hydrogen: bool
-        Whether to add hydrogen to the pdb structure. If the PDB file already contains correct hydrogen information, set this to False. 
-        Otherwise, set it to True. Default is False.
-    
-    Return
-    ------
-    interact_count_frame: Dict[str, int]
-        A dict with interaction type as the key, and the number of interaction as value
-        The key is in the format "{name}/{restype}/{resnr}/{chain}". For example,
-        'hydrophobic_interaction/ALA/123/A'
-    """
-    
-    if add_hydrogen:
-        PLIP_CONFIG.NOHYDRO = False
-    else:
-        PLIP_CONFIG.NOHYDRO = True
-    
-    if use_strict_hbond:
-        PLIP_CONFIG.HBOND_DIST_MAX = 3.5
+    HBOND_THRESH = 3.2
+
+    def __init__(self, protein_top: app.Topology, ligand_mol: Chem.Mol):
+        self.hbond_acc_protein = []
+        self.hbond_acc_ligand = []
+        self.hbond_don_protein = []
+        self.hbond_don_ligand = []
+
+        # Protein
+        for residue in protein_top.residues():
+            for atom in residue.atoms():
+                # backbone
+                if atom.name == 'O':
+                    self.hbond_acc_protein.append(atom.index)
+                elif atom.name == 'N':
+                    self.hbond_don_protein.append(atom.index)
+                # side chains
+                elif (residue.name in ('ARG', 'LYS', 'TRP')) and atom.name.startswith('N'):
+                    self.hbond_don_protein.append(atom.index)
+                elif (residue.name in ('SER', 'THR', 'TYR')) and atom.name.startswith('O'):
+                    self.hbond_don_protein.append(atom.index)
+                    self.hbond_acc_protein.append(atom.index)
+                elif residue.name == 'ASN' or residue.name == 'GLN':
+                    if atom.name.startswith('O'):
+                        self.hbond_acc_protein.append(atom.index)
+                    elif atom.name.startswith('N'):
+                        self.hbond_don_protein.append(atom.index)
+                elif residue.name == 'GLU' or residue.name == 'ASP':
+                    if atom.name.startswith('O'):
+                        self.hbond_acc_protein.append(atom.index)
+                        bond_to_hydrogen = False
+                        for bo in residue.bonds():
+                            if bo.atom1 is atom and bo.atom2.name.startswith('H'):
+                                bond_to_hydrogen = True
+                                break
+                            elif bo.atom2 is atom and bo.atom1.name.startswith('H'):
+                                bond_to_hydrogen = True
+                                break
+                        if bond_to_hydrogen:
+                            self.hbond_don_protein.append(atom.index)
+                elif residue.name in ('HIS', 'HID', 'HIE', 'HIP'):
+                    if atom.name.startswith('N'):
+                        bond_to_hydrogen = False
+                        for bo in residue.bonds():
+                            if bo.atom1 is atom and bo.atom2.name.startswith('H'):
+                                bond_to_hydrogen = True
+                                break
+                            elif bo.atom2 is atom and bo.atom1.name.startswith('H'):
+                                bond_to_hydrogen = True
+                                break
+                        if bond_to_hydrogen:
+                            self.hbond_don_protein.append(atom.index)
+                        else:
+                            self.hbond_acc_protein.append(atom.index)
         
-    pdb = PDBComplex()
-    pdb.load_pdb(str(pdbpath))
-    pdb.analyze()
-    report = StructureReport(pdb)
-
-    tmp = sys.stdout
-    xmlstr = StringIO()
-    sys.stdout = xmlstr
-    report.write_xml(True)
-    sys.stdout = tmp
-    xmlstr.seek(0)
-    xmlstr = xmlstr.read()
-
-    xmlobj = ET.fromstring(xmlstr)
-
-    binding_sites = xmlobj.findall("./bindingsite")
-    bs = [bs for bs in binding_sites if bs.findall("identifiers/longname")[0].text == ligand_residue_name][0]
-    itypes = bs.findall("interactions/")
-    interact_count_frame = {}
-    for itype in itypes:
-        for item in itype:
-            name = item.tag
-            restype = item.find("restype").text
-            resnr = item.find("resnr").text
-            resnr = resnr_renum.get(resnr, resnr)
-            chain = item.find("reschain").text
-            sig = f"{name}/{restype}/{resnr}/{chain}"
-            cnt = interact_count_frame.get(sig, 0)
-            if cnt == 0:
-                interact_count_frame.update({sig: cnt+1})
-    if write_xml:
-        f_xml = Path(pdbpath).with_suffix('.xml')
-        with open(f_xml, 'w') as f:
-            f.write(xmlstr)
-    return interact_count_frame
-
-
-def analyze_multiple_frames(
-    pdbpaths: List[os.PathLike], 
-    f_csv: os.PathLike = '',
-    use_mpi: bool = True, 
-    chunksize: int = 1,
-    **kwargs
-) -> pd.DataFrame:
-    """
-    Analyze multiple frames and write results to a csv file
-    """
-    interacts_frames = []
-    analyze_single_frame_func = partial(
-        analyze_single_frame, 
-        **kwargs
-    )
-    if not use_mpi:
-        for pdbpath in tqdm(pdbpaths):
-            frame_data = analyze_single_frame_func(pdbpath)
-            interacts_frames.append(frame_data)
-    else:
-        import multiprocessing as mp
-        import math
-        num_cores = mp.cpu_count() - 2
-        chunksize = math.ceil(len(pdbpaths) / num_cores) if chunksize == "auto" else int(chunksize)
-        pool = mp.Pool(processes=num_cores)
-        for frame_data in tqdm(
-            pool.imap(func=analyze_single_frame_func, iterable=pdbpaths, chunksize=chunksize),
-            total=len(pdbpaths), desc='Analyzing interactions'
-        ):
-            interacts_frames.append(frame_data)
-                
-    interacts = {}
-    for frame_data in interacts_frames:
-        for sig, cnt in frame_data.items():
-            val = interacts.get(sig, 0)
-            interacts.update({sig: val+cnt})
-            
-    interact_df = []
-    for sig, val in interacts.items():
-        name, resname, resnr, chain = tuple(sig.split("/"))
-        ratio = val / len(pdbpaths)
-        interact_df.append({
-            "interaction": name,
-            "resname": resname,
-            "resnr": resnr,
-            "chain": chain,
-            "ratio": ratio
-        })
-    interact_df = pd.DataFrame(interact_df)
-    if f_csv:
-        interact_df.to_csv(str(f_csv))
-    return interact_df
-
-
-def analyze_interactions_for_trajectory(
-    top: os.PathLike,
-    trj: os.PathLike,
-    tmp_dir: os.PathLike = '',
-    out_csv: str = '',
-    top_format: Optional[str] = None,
-    trj_format: Optional[str] = None,
-    use_mpi: bool = True,
-    remove_tmp: bool = False,
-    **kwargs
-) -> pd.DataFrame:
-
-    u = mda.Universe(top, trj, topology_format=top_format, format=trj_format)
-
-    tmp_dir = tmp_dir if tmp_dir else os.path.join(os.path.dirname(trj), 'traj_pdbs')
-    if not os.path.isdir(tmp_dir):
-        os.mkdir(tmp_dir)
+        # Ligand
+        for atom in ligand_mol.GetAtoms():
+            if atom.GetSymbol() == 'O':
+                if atom.GetFormalCharge() <= 0:
+                    self.hbond_acc_ligand.append(atom.GetIdx())
+                if any([nei.GetSymbol() == 'H' for nei in atom.GetNeighbors()]):
+                    self.hbond_don_ligand.append(atom.GetIdx())
+            elif atom.GetSymbol() == 'F':
+                self.hbond_acc_ligand.append(atom.GetIdx())
+            elif atom.GetSymbol() == 'N':
+                if any([nei.GetSymbol() == 'H' for nei in atom.GetNeighbors()]):
+                    self.hbond_don_ligand.append(atom.GetIdx())
+                    # TODO: primary/secondary amine, imines with H should also be an acceptor
+                    # although they should be protonated 
+                else:
+                    self.hbond_acc_ligand.append(atom.GetIdx())
     
-    pdbs = []
-    for i in tqdm(range(len(u.trajectory)), desc='Spliting trajectory to PDBs'):
-        ts = u.trajectory[i]
-        f_pdb = os.path.join(tmp_dir, f'{i}.pdb')
-        u.atoms.write(f_pdb)
-        pdbs.append(f_pdb)
-    
-    df = analyze_multiple_frames(pdbs, out_csv, use_mpi, **kwargs)
-
-    if remove_tmp:
-        for p in pdbs:
-            os.remove(p)
-
-    return df
-    
-
-
-INTERACT_COLOR_MAP = {
-    "hydrogen_bond": "C0",
-    "hydrophobic_interaction": "C1",
-    "pi_stack": "C2",
-    "salt_bridge": "C3",
-    "pi_cation_interaction": "C4",
-    "halogen_bond": "C5"
-}
-
-
-def plot_interactions(
-    data: Union[os.PathLike, pd.DataFrame], 
-    threshold: float = 0.1, 
-    title: str = '',
-    ax: Optional[Axes] = None,
-    save_path: os.PathLike = '',
-    skip_hydrophobic: bool = False,
-    **kwargs
-):
-
-    if isinstance(data, str) or isinstance(data, Path):
-        df = pd.read_csv(str(f_csv), index_col=0)
-    else:
-        df = data
-
-    newdf = pd.DataFrame()
-    df = df.sort_values(['resnr', 'chain'])
-    df.index = list(range(df.shape[0]))
-    for i in range(df.shape[0]):
-        resname = df.loc[i, 'resname']
-        chain = df.loc[i, 'chain']
-        resnr = df.loc[i, 'resnr']
-        restag = f"{resname}{resnr}{chain}"
-        itype = df.loc[i, 'interaction']
-        newdf.loc[restag, itype] = df.loc[i, 'ratio']
-
-    newdf = newdf.fillna(0.0)
-    newdf[newdf < threshold] = 0.0
-    newdf = newdf.loc[(newdf != 0).any(axis=1), :]
-    ind = np.arange(newdf.shape[0])
-
-    bottom = np.zeros(newdf.shape[0])
-    interacts = sorted(list(newdf.columns))
-
-    if ax is None:
-        fig, ax = plt.subplots(1, 1, constrained_layout=True, figsize=(15, 5))
-    
-    for interact in interacts:
-        if skip_hydrophobic and interact == 'hydrophobic_interaction':
-            continue
-        label = interact[:-12] if interact.endswith('interaction') else interact
-        ax.bar(ind, newdf[interact], label=label, bottom=bottom, color=INTERACT_COLOR_MAP[interact])
-        bottom += newdf[interact]
-        for x, y, value in zip(ind, bottom, newdf[interact]):
-            if value > 0:
-                ax.text(x, y, f"{value:.2f}", ha='center', va='bottom')
-    
-    ax.set_xticks(ind)
-    ax.set_xticklabels(list(newdf.index), rotation=50)
-    ax.legend()
-    if title:
-        ax.set_title(title)
-    ax.set_ylim(0, max(1, np.max(bottom) * 1.1))
-    ax.set_yticks([])
-    if save_path:
-        ax.figure.savefig(save_path, **kwargs)
-    return ax
-
+    def apply(self, protein_pos: np.ndarray, ligand_pos: np.ndarray):
+        hbond_data = []
+        dist1 = cdist(protein_pos[self.hbond_acc_protein], ligand_pos[self.hbond_don_ligand])
+        for row in np.argwhere(dist1 < self.HBOND_THRESH):
+            pidx = int(self.hbond_acc_protein[row[0]])
+            lidx = int(self.hbond_don_ligand[row[1]])
+            hbond_data.append((pidx, lidx, dist1[row[0], row[1]], False))
+        dist2 = cdist(protein_pos[self.hbond_don_protein], ligand_pos[self.hbond_acc_ligand])
+        for row in np.argwhere(dist2 < self.HBOND_THRESH):
+            pidx = int(self.hbond_don_protein[row[0]])
+            lidx = int(self.hbond_acc_ligand[row[1]])
+            hbond_data.append((pidx, lidx, dist2[row[0], row[1]], True))
+        return hbond_data

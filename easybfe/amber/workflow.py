@@ -236,6 +236,8 @@ run_step_seq() {
     
     script_lines += [
         '\n',
+        'mv running.tag done.tag'
+        '\n',
         r"end=$(date +%s)",
         "duration=$((end - start))\n",
         'hours=$(( duration / 3600 ))',

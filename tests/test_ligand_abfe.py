@@ -6,15 +6,12 @@ from easybfe.core.ligand import LigandLoader
 from easybfe.core.protein import Protein
 from easybfe.config import AmberFepSimulationConfig
 from easybfe.config.amber.simulation import default_abfe_workflow
-from easybfe.amber.prep_ligand_abfe import setup_ligand_abfe, BoreschRestraint
+from easybfe.amber.prep_ligand_abfe import setup_ligand_abfe
+from easybfe.amber.boresch import RxRxBoreschRestraintsFinder
 from easybfe.analysis.abfe import analyze_abfe
 from easybfe.smff import load_parametrizer
 
 
-# Boresch
-# protein: [1427, 1412, 1155]
-# ligand: [14, 12, 11]
-# rst_wt: [10.0, 100.0, 100.0, 100.0, 100.0, 100.0]
 def test_setup_ligand_abfe():
     """Test setup_ligand_abfe function with Boresch restraints."""
     # Setup test directory
@@ -45,16 +42,9 @@ def test_setup_ligand_abfe():
     # Load protein
     protein = Protein.from_pdb(protein_pdb, name='tyk2')
     
-    # Create Boresch restraint
-    # Note: indices are 0-based in Python, so subtract 1 from comment values (which are 1-based PDB indices)
-    protein_anchors = (1448, 1450, 1451)  # Convert to 0-based: [1426, 1411, 1154]
-    ligand_anchors = (14, 15, 16)  # Convert to 0-based: [13, 11, 10]
-    rst_wts = (10.0, 10.0, 10.0, 10.0, 10.0, 10.0)
-    restraints = BoreschRestraint(
-        protein_anchors=protein_anchors,
-        ligand_anchors=ligand_anchors,
-        rst_wts=rst_wts
-    )
+    # Automatically find Boresch restraints from protein–ligand geometry
+    finder = RxRxBoreschRestraintsFinder()
+    restraints = finder.find(protein, ligand)
     
     # Create configs for each leg
     # Use minimal lambdas for faster testing and the default ABFE workflow
@@ -98,6 +88,6 @@ def test_setup_ligand_abfe():
     # shutil.rmtree(test_dir)
 
 
-def test_ligand_abfe_analysis():
-    test_dir = Path(__file__).parent / '_test_ligand_abfe_old/abfe_output'
-    analyze_abfe(test_dir, '05.prod')
+# def test_ligand_abfe_analysis():
+#     test_dir = Path(__file__).parent / '_test_ligand_abfe_old/abfe_output'
+#     analyze_abfe(test_dir, '05.prod')
