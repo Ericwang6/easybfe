@@ -1,29 +1,31 @@
+from __future__ import annotations
 import os
 from pathlib import Path
 import logging
+import json
+from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 import openmm.app as app
 import openmm.unit as unit
 import parmed
 
-from ..core.ligand import Ligand
-from ..core.protein import Protein
-
 from .prep_utils import *
-from ..config import AmberSimulationConfig, AmberMdin
 from .workflow import Step, Workflow
+
+if TYPE_CHECKING:
+    from ..core import Ligand, Protein
+    from ..config import AmberSimulationConfig
 
 
 logger = logging.getLogger(__name__)
 
 
 def setup_plain_md(
-    ligand: Ligand,
-    protein: Protein,
+    ligand: Optional[Ligand],
+    protein: Optional[Protein],
     config: AmberSimulationConfig,
-    wdir: os.PathLike,
-    basename: str = 'system'
+    wdir: os.PathLike
 ):  
     if ligand is None and protein is None:
         raise RuntimeError("Both ligand and protein are None.")
@@ -31,7 +33,7 @@ def setup_plain_md(
     # setup workding dir
     wdir = Path(wdir).expanduser().resolve()
     wdir.mkdir(exist_ok=True)
-    basename = wdir.stem if not basename else basename
+    basename = config.basename
 
     # dump ligand
     ligand.dump(wdir)
@@ -41,14 +43,14 @@ def setup_plain_md(
 
     # setup systems
     modeller = app.Modeller(app.Topology(), [])
+
+    if ligand:
+        ligand_pdb = app.PDBFile(str(wdir / f'{ligand.name}.pdb'))
+        modeller.add(ligand_pdb.topology, ligand_pdb.positions)
     
     if protein:
         protein_pdb = protein.to_openmm()
         modeller.add(protein_pdb.topology, protein_pdb.positions)
-    
-    if ligand:
-        ligand_pdb = app.PDBFile(str(wdir / f'{ligand.name}.pdb'))
-        modeller.add(ligand_pdb.topology, ligand_pdb.positions)
     
     buffer = config.buffer / 10 * unit.nanometers
     box_vectors = computeBoxVectorsWithPadding(modeller.positions, buffer)
@@ -80,9 +82,20 @@ def setup_plain_md(
     # setup workflow
     steps = []
     for i, step_config in enumerate(config.workflow):
-        mdin = AmberMdin(cntrl=step_config.cntrl, wt=step_config.wt, rst=step_config.rst)
-        step = Step(name=step_config.name, mdin=mdin, exec=step_config.exec)
+        # Step class expects AmberStepConfig object and creates mdin internally
+        step = Step(config=step_config, wdir=wdir)
         steps.append(step)
     wf = Workflow(wdir, steps=steps, inpcrd=wdir / f'{basename}.inpcrd', prmtop=wdir / f'{basename}.prmtop')
     wf.create()
-    return True
+
+    if ligand and protein:
+        task_type = 'complex'
+    elif ligand:
+        task_type = 'ligand'
+    else:
+        task_type = 'protein'
+    config.task_type = task_type
+    config.task_name = wdir.name
+    with open(wdir / 'config.json', 'w') as f:
+        json.dump(config.model_dump(), f, indent=4)
+    return wf

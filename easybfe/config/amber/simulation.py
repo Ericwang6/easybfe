@@ -56,14 +56,10 @@ class AmberStepConfig(BaseModel):
         return self
 
 
-def default_workflow():
-    return [
-        AmberStepConfig.model_validate({"type": "em", "name": "01.em"}),
-        AmberStepConfig.model_validate({"type": "heat", "name": "02.heat"}),
-        AmberStepConfig.model_validate({"type": "pres", "name": "03.pres"}),
-        AmberStepConfig.model_validate({"type": "prod", "name": "04.pre_prod"}),
-        AmberStepConfig.model_validate({"type": "prod", "name": "05.prod"})
-    ]
+def default_md_workflow():
+    with open(os.path.join(os.path.dirname(__file__), 'md_default.json')) as f:
+        jdatas = json.load(f)
+    return [AmberStepConfig.model_validate(jdatas[i]) for i in range(len(jdatas))]
 
 
 def default_abfe_workflow():
@@ -75,7 +71,7 @@ def default_abfe_workflow():
 class AmberSimulationConfig(SetupConfig):
 
     do_hmr_water: bool = False
-    workflow: list[AmberStepConfig] = Field(default_factory=default_workflow)
+    workflow: list[AmberStepConfig] = Field(default_factory=default_md_workflow)
 
     @model_validator(mode='after')
     def set_workflow(self):

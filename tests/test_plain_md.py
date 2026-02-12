@@ -45,16 +45,12 @@ def test_setup_plain_md():
     
     # Setup plain MD
     wdir = test_dir / 'system'
-    result = setup_plain_md(
+    wf = setup_plain_md(
         ligand=ligand,
         protein=protein,
         config=config,
         wdir=wdir,
-        basename='system'
     )
-    
-    # Verify function returns True
-    assert result is True
     
     # Verify output files were created
     assert (wdir / 'system.inpcrd').exists()
@@ -94,16 +90,12 @@ def test_setup_plain_md_ligand_only():
     
     # Setup plain MD with ligand only
     wdir = test_dir / 'system'
-    result = setup_plain_md(
+    wf = setup_plain_md(
         ligand=ligand,
         protein=None,
         config=config,
         wdir=wdir,
-        basename='system'
     )
-    
-    # Verify function returns True
-    assert result is True
     
     # Verify output files were created
     assert (wdir / 'system.inpcrd').exists()
@@ -144,16 +136,12 @@ def test_setup_plain_md_gas_phase():
     
     # Setup plain MD
     wdir = test_dir / 'system'
-    result = setup_plain_md(
+    wf = setup_plain_md(
         ligand=ligand,
         protein=protein,
         config=config,
         wdir=wdir,
-        basename='system'
     )
-    
-    # Verify function returns True
-    assert result is True
     
     # Verify output files were created
     assert (wdir / 'system.inpcrd').exists()

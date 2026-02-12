@@ -171,7 +171,7 @@ class Ligand(BaseModel):
         directory = Path(directory).expanduser().resolve()
         stem = Path(directory).stem
         loader = LigandLoader()
-        ligand = loader.load(directory / f'{stem}.sdf', only_first=True, use_stem_as_name=True)
+        ligand = loader.load(directory / f'{stem}.sdf', only_first=True, use_stem_as_name=True)[0]
         ligand.source = f'Init from {directory}'
         for file in directory.glob(f'{stem}.*'):
             if file.suffix in ['.sdf', '.png']:

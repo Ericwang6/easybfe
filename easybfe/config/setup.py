@@ -29,6 +29,10 @@ class SetupConfig(BaseModel):
     extra_ff: str | list[str] = Field(default_factory=list)
 
     forcefields: list[str] = Field(init=False, exclude=True, default_factory=list)
+
+    basename: str = 'system'
+    task_type: Optional[str] = Field(init=False, default=None)
+    task_name: Optional[str] = Field(init=False, default=None)
     
     @model_validator(mode='after')
     def validate_force_field(self):
