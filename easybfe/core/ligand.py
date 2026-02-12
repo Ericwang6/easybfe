@@ -167,10 +167,20 @@ class Ligand(BaseModel):
             return self
 
     @classmethod
-    def from_directory(cls, directory: os.PathLike):
+    def from_directory(cls, directory: os.PathLike, stem: Optional[str] = None):
         directory = Path(directory).expanduser().resolve()
-        stem = Path(directory).stem
+        stem = Path(directory).stem if stem is not None else stem
         loader = LigandLoader()
+        sdf = directory / f'{stem}.sdf'
+        if not sdf.is_file():
+            sdfs = list(directory.glob("*.sdf"))
+            if len(sdfs) > 1:
+                raise RuntimeError(f"Multiple sdf files found in {directory}")
+            elif len(sdfs) == 0:
+                raise FileNotFoundError(f"No sdf file found in {directory}")
+            else:
+                sdf = sdfs[0]
+                stem = sdf.stem
         ligand = loader.load(directory / f'{stem}.sdf', only_first=True, use_stem_as_name=True)[0]
         ligand.source = f'Init from {directory}'
         for file in directory.glob(f'{stem}.*'):
@@ -186,6 +196,12 @@ class Ligand(BaseModel):
         if len(ligands) > 1:
             logger.warning(f"Load {len(ligands)} molecules from {src}. Only the first will be returned.")
         return ligands[0]
+    
+    def to_openmm(self):
+        import openmm.app as app
+        _io = io.StringIO(self.auxiliary_files['pdb'])
+        _io.seek(0)
+        return app.PDBFile(_io)
           
 
 def _need_3d(mol):

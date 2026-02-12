@@ -35,22 +35,23 @@ def setup_plain_md(
     wdir.mkdir(exist_ok=True)
     basename = config.basename
 
-    # dump ligand
-    ligand.dump(wdir)
-
-    # force field initialization
-    ff = app.ForceField(*config.forcefields, str(wdir / f'{ligand.name}.xml'))
+    ffs = config.forcefields.copy()
 
     # setup systems
     modeller = app.Modeller(app.Topology(), [])
 
     if ligand:
-        ligand_pdb = app.PDBFile(str(wdir / f'{ligand.name}.pdb'))
+        ligand_pdb = ligand.to_openmm()
         modeller.add(ligand_pdb.topology, ligand_pdb.positions)
+        ligand.dump(wdir)
+        ffs.append(str(wdir / f'{ligand.name}.xml'))
     
     if protein:
         protein_pdb = protein.to_openmm()
         modeller.add(protein_pdb.topology, protein_pdb.positions)
+        Path(wdir / f'{protein.name}.pdb').write_text(protein.pdb_string)
+    
+    ff = app.ForceField(*ffs)
     
     buffer = config.buffer / 10 * unit.nanometers
     box_vectors = computeBoxVectorsWithPadding(modeller.positions, buffer)
