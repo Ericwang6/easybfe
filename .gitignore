@@ -180,3 +180,4 @@ dump.rdb
 webgui/
 agent/
 .debug/
+workspace/
