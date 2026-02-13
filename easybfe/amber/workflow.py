@@ -208,11 +208,22 @@ run_step_seq() {
   cd "$WDIR"
 }
 '''
+    cleanup_func = '''
+cleanup() {
+    echo "[`date`] Caught termination signal. Cleaning up..."
+    if [ -f $WDIR/running.tag ]; then mv $WDIR/running.tag $WDIR/killed.tag; fi
+    echo "[`date`] Cleanup done."
+    exit 2 
+}
+trap cleanup TERM INT HUP
+'''
 
     script_lines = [
         'WDIR=$(pwd)',
         afunc,
+        cleanup_func,
         r'start=$(date +%s)',
+        f'if [ -f running.tag ] || [ -f error.tag ] || [ -f done.tag ]; then exit 0; fi'
         '\ntouch running.tag'
     ]
     for name in step_names:

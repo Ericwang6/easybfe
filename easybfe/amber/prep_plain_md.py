@@ -43,13 +43,14 @@ def setup_plain_md(
     if ligand:
         ligand_pdb = ligand.to_openmm()
         modeller.add(ligand_pdb.topology, ligand_pdb.positions)
-        ligand.dump(wdir)
-        ffs.append(str(wdir / f'{ligand.name}.xml'))
+        ligand_dir = wdir / 'ligand'
+        ligand.dump(ligand_dir)
+        ffs.append(str(ligand_dir / f'{ligand.name}.xml'))
     
     if protein:
         protein_pdb = protein.to_openmm()
         modeller.add(protein_pdb.topology, protein_pdb.positions)
-        Path(wdir / f'{protein.name}.pdb').write_text(protein.pdb_string)
+        Path(wdir / f'protein.pdb').write_text(protein.pdb_string)
     
     ff = app.ForceField(*ffs)
     

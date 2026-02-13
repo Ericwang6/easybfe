@@ -96,3 +96,37 @@ class HBondFinder:
             lidx = int(self.hbond_acc_ligand[row[1]])
             hbond_data.append((pidx, lidx, dist2[row[0], row[1]], True))
         return hbond_data
+
+
+class CloseContactFinder:
+    """Find close contacts between protein and ligand heavy atoms."""
+
+    DIST_THRESH = 3.5
+
+    def __init__(self, protein_top: app.Topology, ligand_mol: Chem.Mol):
+        self.heavy_atom_protein = []
+        self.heavy_atom_ligand = []
+
+        # Protein: heavy atoms only (exclude hydrogen)
+        for residue in protein_top.residues():
+            for atom in residue.atoms():
+                if atom.element.symbol != "H":
+                    self.heavy_atom_protein.append(atom.index)
+
+        # Ligand: heavy atoms only (exclude hydrogen)
+        for atom in ligand_mol.GetAtoms():
+            if atom.GetSymbol() != "H":
+                self.heavy_atom_ligand.append(atom.GetIdx())
+
+    def find(self, protein_pos: np.ndarray, ligand_pos: np.ndarray):
+        """Return list of (protein_atom_idx, ligand_atom_idx, distance) for pairs within DIST_THRESH."""
+        dist = cdist(
+            protein_pos[self.heavy_atom_protein], ligand_pos[self.heavy_atom_ligand]
+        )
+        result = []
+        for row in np.argwhere(dist < self.DIST_THRESH):
+            pidx = int(self.heavy_atom_protein[row[0]])
+            lidx = int(self.heavy_atom_ligand[row[1]])
+            d = float(dist[row[0], row[1]])
+            result.append((pidx, lidx, d))
+        return result

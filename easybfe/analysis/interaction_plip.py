@@ -115,7 +115,7 @@ def analyze_multiple_frames(
         **kwargs
     )
     if not use_mpi:
-        for pdbpath in tqdm(pdbpaths):
+        for pdbpath in tqdm(pdbpaths, desc="Analyzing interactions"):
             frame_data = analyze_single_frame_func(pdbpath)
             interacts_frames.append(frame_data)
     else:
@@ -209,7 +209,7 @@ def plot_interactions(
 ):
 
     if isinstance(data, str) or isinstance(data, Path):
-        df = pd.read_csv(str(f_csv), index_col=0)
+        df = pd.read_csv(str(data), index_col=0)
     else:
         df = data
 

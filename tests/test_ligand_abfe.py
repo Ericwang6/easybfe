@@ -43,8 +43,8 @@ def test_setup_ligand_abfe():
     protein = Protein.from_pdb(protein_pdb, name='tyk2')
     
     # Automatically find Boresch restraints from protein–ligand geometry
-    finder = RxRxBoreschRestraintsFinder()
-    restraints = finder.find(protein, ligand)
+    finder = RxRxBoreschRestraintsFinder(protein, ligand)
+    restraints = finder.find()
     
     # Create configs for each leg
     # Use minimal lambdas for faster testing and the default ABFE workflow

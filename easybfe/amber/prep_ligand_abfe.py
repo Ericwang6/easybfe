@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import logging
+from typing import Optional
 
 import numpy as np
 import openmm.app as app
@@ -9,9 +10,11 @@ import parmed
 
 from .prep_utils import *
 from ..config import AmberFepSimulationConfig, AmberWtSettings
+from ..config.amber.abfe import AmberAbfeConfig, BoreschRestraintGeneratorConfig
 from .workflow import Step, Workflow, create_script_for_workflows
 from ..core import Ligand, Protein
-from .boresch import BoreschRestraint, compute_boresch_energy
+from .boresch import BoreschRestraint, compute_boresch_energy, get_boresch_finder
+from ..parallel import run_func_parallel
 
 
 logger = logging.getLogger(__name__)
@@ -55,7 +58,7 @@ def setup_ligand_abfe_leg(
         modeller.add(protein_openmm.topology, protein_openmm.positions)
     
     buffer = config.buffer / 10 * unit.nanometers
-    box_vectors = computeBoxVectorsWithPadding(modeller.positions, buffer)
+    box_vectors = computeBoxVectorsWithPadding(modeller.positions, buffer, config.box_shape)
     modeller.positions = shiftToBoxCenter(modeller.positions, box_vectors)
     modeller.topology.setPeriodicBoxVectors(box_vectors)
     assert not config.gas_phase, 'Gas-phase ABFE are ill-defined!'
@@ -145,11 +148,26 @@ def setup_ligand_abfe_leg(
 
 
 def setup_ligand_abfe(
-    ligand: Ligand, protein: Protein,
+    ligand: Ligand,
+    protein: Protein,
     leg_configs: dict[str, AmberFepSimulationConfig],
-    restraints: BoreschRestraint,
     output_dir: os.PathLike,
+    restraints: BoreschRestraint | BoreschRestraintGeneratorConfig | None = None,
 ):
+    if restraints is None:
+        restraints = BoreschRestraintGeneratorConfig()
+    if not isinstance(restraints, BoreschRestraint):
+        boresch_config = restraints
+        finder_cls = get_boresch_finder(boresch_config.algorithm)
+        finder_kwargs = {
+            "protein": protein,
+            "ligand": ligand,
+            "wts": tuple(boresch_config.rst_wts),
+            **boresch_config.options,
+        }
+        finder = finder_cls(**finder_kwargs)
+        restraints = finder.find()
+    
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True)
     
@@ -162,3 +180,73 @@ def setup_ligand_abfe(
     )
     boresch_fe = compute_boresch_energy(restraints.rst_vals, restraints.rst_wts)
     (output_dir / 'boresch.dat').write_text(str(boresch_fe))
+
+
+def _setup_ligand_abfe_one(
+    ligand_path: Path,
+    protein: Optional[Protein],
+    leg_configs: dict[str, AmberFepSimulationConfig],
+    boresch_config: BoreschRestraintGeneratorConfig,
+    output_dir: Path,
+) -> None:
+    """Load ligand from path and call setup_ligand_abfe (used for batch runs)."""
+    ligand = Ligand.from_directory(ligand_path)
+    setup_ligand_abfe(
+        ligand=ligand,
+        protein=protein,
+        leg_configs=leg_configs,
+        restraints=boresch_config,
+        output_dir=output_dir,
+    )
+
+
+def setup_ligand_abfe_from_config(
+    config: AmberAbfeConfig,
+    num_procs: Optional[int] = None,
+) -> None:
+    """Run setup_ligand_abfe from an :class:`AmberAbfeConfig`.
+
+    If :attr:`AmberAbfeConfig.ligand_batch` is set, runs one setup per ligand in
+    parallel; otherwise uses :attr:`AmberAbfeConfig.ligand` and writes directly
+    to :attr:`AmberAbfeConfig.output_dir`.
+    """
+    assert config.protein is not None, "AmberAbfeConfig.protein must be set"
+    assert config.output_dir is not None, "AmberAbfeConfig.output_dir must be set"
+
+    leg_configs = {
+        "complex": config.complex,
+        "solvent": config.solvent,
+        "restraint": config.restraint,
+    }
+    base_out = Path(config.output_dir)
+    protein = Protein.from_pdb(config.protein, name=config.protein.stem)
+
+    if config.ligand_batch is not None and config.ligand is not None:
+        raise ValueError(
+            "AmberAbfeConfig must set either ligand or ligand_batch, not both"
+        )
+
+    if config.ligand_batch is not None:
+        nprocs = num_procs if num_procs is not None else -1
+        args_list = [
+            (path, protein, leg_configs, config.boresch, base_out / path.stem)
+            for path in config.ligand_batch
+        ]
+        run_func_parallel(
+            _setup_ligand_abfe_one,
+            args_list,
+            nprocs=nprocs,
+            unpack_args=True,
+            desc="setup_ligand_abfe",
+        )
+    else:
+        if config.ligand is None:
+            raise ValueError("AmberAbfeConfig must set either ligand or ligand_batch")
+        ligand = Ligand.from_directory(config.ligand)
+        setup_ligand_abfe(
+            ligand=ligand,
+            protein=protein,
+            leg_configs=leg_configs,
+            restraints=config.boresch,
+            output_dir=base_out,
+        )

@@ -1,4 +1,5 @@
 from typing import Optional, Dict, Literal
+import warnings
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -83,7 +84,45 @@ class AnalysisConfig(BaseModel):
         default_factory=dict,
         description='Dictionary for residue number renumbering in interaction analysis'
     )
+
+    # GBSA analysis options
+    do_gbsa: bool = Field(
+        default=True,
+        description='Whether to perform GBSA binding free energy calculation'
+    )
+    gbsa_igb: int = Field(
+        default=2,
+        description='GBSA model identifier corresponding to AMBER igb values (1, 2, 5, 7, 8)'
+    )
+    gbsa_saltcon: float = Field(
+        default=0.15,
+        description='Salt concentration in M for GBSA calculation'
+    )
+    gbsa_epsin: float = Field(
+        default=4.0,
+        description='Solute dielectric constant for GBSA calculation'
+    )
+    gbsa_epsout: float = Field(
+        default=80.0,
+        description='Solvent dielectric constant for GBSA calculation'
+    )
+    gbsa_temperature: float = Field(
+        default=298.15,
+        description='Temperature in Kelvin for GBSA calculation'
+    )
     
+    @model_validator(mode='after')
+    def validate_gbsa(self):
+        """
+        Validate GBSA-related settings.
+        
+        Ensures that GBSA analysis is only enabled for complex systems.
+        """
+        if self.do_gbsa and self.task_type != 'complex':
+            self.do_gbsa = False
+            warnings.warn("do_gbsa can only be True when task_type is 'complex'.")
+        return self
+
     @model_validator(mode='after')
     def validate_selections(self):
         """
