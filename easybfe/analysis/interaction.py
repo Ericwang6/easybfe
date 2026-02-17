@@ -101,7 +101,7 @@ class HBondFinder:
 class CloseContactFinder:
     """Find close contacts between protein and ligand heavy atoms."""
 
-    DIST_THRESH = 3.5
+    DIST_THRESH = 4.0
 
     def __init__(self, protein_top: app.Topology, ligand_mol: Chem.Mol):
         self.heavy_atom_protein = []

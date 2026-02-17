@@ -121,7 +121,10 @@ def setup_ligand_abfe_leg(
         for step_template in config.workflow:
             # Build a per-lambda AmberStepConfig with updated cntrl / wt / rst
             update = mask.copy()
-            update.update({"clambda": clambda})
+            update.update({
+                "clambda": clambda, 
+                'ntwx': 10*step_template.cntrl.ntwx if (config.reduce_storage and n > 0 and n < (len(config.lambdas)-1)) else step_template.cntrl.ntwx
+            })
             step_lambda_cntrl = step_template.cntrl.model_copy(update=update)
             rst = step_template.rst + rst_settings
             wt = step_template.wt + [AmberWtSettings(type="DUMPFREQ", istep1=step_lambda_cntrl.ofreq)]
@@ -219,6 +222,7 @@ def setup_ligand_abfe_from_config(
         "restraint": config.restraint,
     }
     base_out = Path(config.output_dir)
+    base_out.mkdir(exist_ok=True)
     protein = Protein.from_pdb(config.protein, name=config.protein.stem)
 
     if config.ligand_batch is not None and config.ligand is not None:

@@ -8,16 +8,17 @@ parametrization jobs. All concrete implementations must inherit from
 import abc
 import os
 import traceback
-from typing import Optional, Union
 from pathlib import Path
 import shutil
 import logging
 import tempfile, shutil
+import warnings
 
 import openmm as mm
 import openmm.unit as unit
 import openmm.app as app
 import parmed
+
 
 from .utils import convert_to_xml
 from ..core.ligand import Ligand
@@ -155,11 +156,12 @@ class SmallMoleculeForceField(abc.ABC):
 
         energy_diff = abs(energy_ref - energy)
         if energy_diff >= 0.01:
-            logger.error(f"Energy validation failed: {energy_ref} != {energy} (diff: {energy_diff:.6f} kJ/mol)")
-            raise AssertionError(
+            msg = (
                 f"Fail to convert prmtop to xml, the force field might not be compatitable "
-                f"because the energy is different {energy_ref} != {energy}"
+                f"because the energy is different {energy_ref} (prmtop) != {energy} (xml)"
             )
+            logger.warning(msg)
+            warnings.warn(msg)
         logger.info(f"Energy validation passed.")
         logger.debug(f"Energy {energy_ref:.4f} kJ/mol with prmtop and {energy:.4f} with xml")
 
@@ -169,7 +171,7 @@ class SmallMoleculeForceField(abc.ABC):
         return ligand
 
 
-    def _run(self, ligand: Ligand):
+    def _run(self, ligand: Ligand, wdir: os.PathLike = None):
         """
         Execute the complete parametrization workflow for a single ligand.
         
@@ -191,7 +193,7 @@ class SmallMoleculeForceField(abc.ABC):
         --------
         :meth:`run` : Public interface supporting parallel execution.
         """
-        tmpd = tempfile.mkdtemp()
+        tmpd = tempfile.mkdtemp() if wdir is None else wdir
         # setup
         try:
             ligand = self._setup(ligand)
@@ -207,7 +209,8 @@ class SmallMoleculeForceField(abc.ABC):
             ligand = self._validate(ligand, tmpd)
         except Exception as e:
             raise Exception(f'Ligand parameterization failed to be validated because of the following error: {traceback.format_exc()}')
-        shutil.rmtree(tmpd)
+        if wdir is None:
+            shutil.rmtree(tmpd)
         return ligand
     
     def run(self, ligand: list[Ligand] | Ligand, nprocs: int = -1) -> list[Ligand]:

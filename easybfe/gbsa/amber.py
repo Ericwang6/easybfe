@@ -4,6 +4,7 @@ Date: 09/11/2025
 
 GBSA calculation in EasyBFE
 '''
+import warnings
 import os, glob
 from pathlib import Path
 from typing import Literal, List
@@ -16,6 +17,7 @@ import parmed
 import MDAnalysis as mda
 from MDAnalysis.coordinates.memory import MemoryReader
 
+from ..core import LigandLoader
 from ..cmd import run_command
 from ..smff.gaff import GAFF
 
@@ -55,14 +57,15 @@ def prep_parameters(
     wdir: os.PathLike = '.',
     protein_ff: str = 'ff14SB',
     ligand_ff: Literal['gaff', 'gaff2'] = 'gaff2',
-    charge_method: Literal['bcc', 'gas'] = 'bcc',
-    reuse_cache: bool = False
+    charge_method: Literal['bcc', 'gas'] = 'bcc'
 ):
 
     protein_pdb = Path(protein_pdb).resolve()
     wdir = Path(wdir).resolve()
     wdir.mkdir(exist_ok=True)
-    GAFF(atype=ligand_ff, charge_method=charge_method, reuse_cache=reuse_cache).parametrize(ligand_sdf, wdir=wdir)
+    ligand = LigandLoader().load(ligand_sdf)[0]
+    ligand.name = 'MOL'
+    GAFF(forcefield=ligand_ff, charge_method=charge_method)._run(ligand, wdir=wdir)
     ligand_lib = wdir /  'MOL.acpype/MOL_AC.lib'
     ligand_mol2 = wdir / f'MOL.acpype/MOL_{charge_method}_{ligand_ff}.mol2'
     ligand_frcmod = wdir / 'MOL.acpype/MOL_AC.frcmod'
@@ -285,7 +288,7 @@ def run_gbsa_for_ligand_conformers(
             complex_positions.append(positions)
     else:
         for c in ligand_positions:
-            complex_positions.append(np.vstack((protein_coords, c)))
+            complex_positions.append(np.vstack((protein_coords * 10, c)))
 
     traj_file = wdir / 'traj.xtc'
     u = mda.Universe(str(wdir / 'complex.prmtop'))

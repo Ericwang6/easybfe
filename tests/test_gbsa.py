@@ -1,4 +1,4 @@
-import os
+import os, shutil
 from pathlib import Path
 
 import numpy as np
@@ -7,14 +7,15 @@ import pytest
 from easybfe.core.protein import Protein
 from easybfe.core.ligand import Ligand, LigandLoader
 from easybfe.gbsa import GBSARunner
+from easybfe.gbsa.amber import run_gbsa_for_ligand_conformers
 from easybfe.smff import load_parametrizer
 
 
 def _load_test_protein_and_ligand():
     """Helper to load tyk2 protein and jmc_23 ligand from test data."""
     base_dir = Path(__file__).parent
-    protein_pdb = base_dir / "data" / "tyk2_pdbfixer.pdb"
-    ligand_sdf = base_dir / "_test_ligand_abfe_old" / "abfe_output" / "complex" / "jmc_23.sdf"
+    protein_pdb = base_dir / "data" / "tyk2_amber_h.pdb"
+    ligand_sdf = base_dir / "data" / "jmc_23.sdf"
 
     assert protein_pdb.exists(), f"Missing test protein file: {protein_pdb}"
     assert ligand_sdf.exists(), f"Missing test ligand file: {ligand_sdf}"
@@ -93,7 +94,7 @@ def test_gbsa_compute_single_frame():
     
     # Compute binding energy
     binding_energy = runner.compute_single_frame(protein_pos, ligand_pos)
-    print(f"Binding energy: {binding_energy} kJ/mol")
+    print(f"Binding energy: {binding_energy} kJ/mol ({binding_energy/4.184} kcal/mol)")
     
     # Check that it returns a float
     assert isinstance(binding_energy, float)
@@ -190,3 +191,15 @@ def test_gbsa_compute_multiple_frames_shape_validation():
     ligand_positions = np.tile(ligand_pos[None, :, :], (3, 1, 1))
     with pytest.raises(ValueError, match="Number of frames must match"):
         runner.compute_multiple_frames(protein_positions, ligand_positions)
+
+
+def test_gbsa_amber():
+    base_dir = Path(__file__).parent
+    protein_pdb = base_dir / "data" / "tyk2_amber.pdb"
+    ligand_sdf = base_dir / "data" / "jmc_23.sdf"
+    gbsa_dir = base_dir / '_test_gbsa_amber'
+    if gbsa_dir.is_dir():
+        shutil.rmtree(gbsa_dir)
+    run_gbsa_for_ligand_conformers(
+        protein_pdb, ligand_sdf, ligand_confs=[ligand_sdf], wdir = gbsa_dir, charge_method='gas', run_em=False
+    )

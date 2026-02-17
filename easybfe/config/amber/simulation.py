@@ -87,6 +87,7 @@ class AmberFepSimulationConfig(AmberSimulationConfig):
     use_settle_for_alchemical_water: bool = True
     lambdas: list[float] | None = None
     num_lambdas: int = 16
+    reduce_storage: bool = True
 
     @model_validator(mode='after')
     def validate_nproc(self):

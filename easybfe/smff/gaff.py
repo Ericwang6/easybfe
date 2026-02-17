@@ -108,7 +108,7 @@ def run_acpype(input: Optional[os.PathLike] = None,
         logger.info(f"Running acpype with custom arguments")
     else:
         assert input is not None, "Input is None."
-        cmd = [acpype, "-i", str(input), "-b", basename, "-c", charge_method, "-a", atom_type]            
+        cmd = [acpype, "-i", str(input), "-b", basename, "-c", charge_method, "-a", atom_type, '-f']            
         if net_charge == "auto":
             try:
                 mol = read_molecule_from_file(input)
