@@ -16,12 +16,22 @@ from rdkit import Chem
 
 from .utils import read_molecule_from_file
 from .base import SmallMoleculeForceField
-from ..cmd import find_executable, run_command, set_directory
+from .registry import PARAMETRIZER_REGISTRY
+from ..cmd import find_executable, run_command, set_directory, ExecutableNotFoundError
 if TYPE_CHECKING:
     from ..core.ligand import Ligand
 
 
 logger = logging.getLogger(__name__)
+
+# Require acpype on the command line so this module only loads when GAFF is usable.
+try:
+    find_executable("acpype")
+except ExecutableNotFoundError:
+    raise ImportError(
+        "acpype not found in PATH; install acpype (e.g. via conda) to use the GAFF parameterizer. "
+        "The easybfe.smff package will load but 'acpype' will not be available in PARAMETRIZER_REGISTRY."
+    ) from None
 
 
 def run_acpype(input: Optional[os.PathLike] = None,
@@ -123,6 +133,7 @@ def run_acpype(input: Optional[os.PathLike] = None,
     return 
 
 
+@PARAMETRIZER_REGISTRY.register("acpype")
 class GAFF(SmallMoleculeForceField):
     """
     GAFF/GAFF2 parameterizer using acpype wrapper.

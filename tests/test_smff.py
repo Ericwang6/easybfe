@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from rdkit import Chem
 from rdkit.Chem import AllChem
-from easybfe.smff import load_parametrizer
+from easybfe.smff import load_parametrizer, PARAMETRIZER_REGISTRY
 from easybfe.core.ligand import LigandLoader
 
 
@@ -36,6 +36,8 @@ def amide_sdf():
 )
 def test_parametrize_ligand_with_file(forcefield, charge_method, testdir, amide_sdf):
     """Test parametrization with file input using LigandLoader and run method."""
+    if forcefield.startswith('openff') and 'openff' not in PARAMETRIZER_REGISTRY.names():
+        pytest.skip("OpenFF not installed")
     wdir = testdir / f'{forcefield}_{charge_method}_file'
     
     # Load ligand from file using LigandLoader
@@ -75,6 +77,8 @@ def test_parametrize_ligand_with_file(forcefield, charge_method, testdir, amide_
 )
 def test_parametrize_ligand_with_smiles(forcefield, charge_method, testdir):
     """Test parametrization with SMILES input using LigandLoader and run method."""
+    if forcefield.startswith('openff') and 'openff' not in PARAMETRIZER_REGISTRY.names():
+        pytest.skip("OpenFF not installed")
     smiles = 'c1ccncc1CCC(=O)N'
     name = 'test_ligand'
     wdir = testdir / f'{forcefield}_{charge_method}_smiles'
@@ -119,6 +123,8 @@ def test_parametrize_ligand_with_smiles(forcefield, charge_method, testdir):
 )
 def test_parametrize_ligand_with_rdkit_mol(forcefield, charge_method, testdir):
     """Test parametrization with RDKit molecule input using LigandLoader and run method."""
+    if forcefield.startswith('openff') and 'openff' not in PARAMETRIZER_REGISTRY.names():
+        pytest.skip("OpenFF not installed")
     smiles = 'c1ccncc1CCC(=O)N'
     name = 'test_rdkit_mol'
     wdir = testdir / f'{forcefield}_{charge_method}_rdkit_mol'
@@ -164,6 +170,8 @@ def test_parametrize_ligand_with_rdkit_mol(forcefield, charge_method, testdir):
 )
 def test_parametrize_ligand_with_rdkit_mol_no_3d(forcefield, charge_method, testdir):
     """Test parametrization with RDKit molecule (no 3D) using LigandLoader and run method."""
+    if forcefield.startswith('openff') and 'openff' not in PARAMETRIZER_REGISTRY.names():
+        pytest.skip("OpenFF not installed")
     smiles = 'c1ccncc1CCC(=O)N'
     name = 'test_rdkit_mol_no_3d'
     wdir = testdir / f'{forcefield}_{charge_method}_rdkit_mol_no_3d'

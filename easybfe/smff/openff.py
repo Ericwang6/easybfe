@@ -10,6 +10,7 @@ from openmmforcefields.generators import SMIRNOFFTemplateGenerator
 import openmm.app as app
 
 from .base import SmallMoleculeForceField
+from .registry import PARAMETRIZER_REGISTRY
 
 if TYPE_CHECKING:
     from ..core.ligand import Ligand
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@PARAMETRIZER_REGISTRY.register("openff")
 class OpenFF(SmallMoleculeForceField):
     """
     OpenFF SMIRNOFF-based parameterizer.

@@ -10,90 +10,96 @@ import logging
 import warnings
 from typing import Any, Union
 from pathlib import Path
+
+from .registry import PARAMETRIZER_REGISTRY
 from .base import SmallMoleculeForceField
 from .custom import CustomForceField
-from .gaff import GAFF
-from .openff import OpenFF
+try:
+    from .gaff import GAFF
+except ImportError:
+    pass
+try:
+    from .openff import OpenFF
+except ImportError:
+    pass
 from ..core.ligand import Ligand, LigandLoader
 
 
 logger = logging.getLogger(__name__)
 
 
-PARAMETRIZER_REGISTRY = {
-    'gaff': GAFF,
-    'openff': OpenFF,
-    'custom': CustomForceField
-}
-
-
 def load_parametrizer(forcefield: str, charge_method: str, engine: str = '', **kwargs) -> SmallMoleculeForceField:
     """
     Load a force field parameterizer based on force field name and engine.
-    
-    This function automatically detects the appropriate parameterizer based on
-    the force field name, or uses an explicitly specified engine. The selected
-    parameterizer will be used to generate force field parameters for small
-    molecules.
-    
+
+    When ``engine`` is empty, it is auto-detected from ``forcefield``:
+
+    1. If ``forcefield`` is exactly ``'gaff'`` or ``'gaff2'``, engine is ``'acpype'``
+       (:class:`easybfe.smff.gaff.GAFF`).
+    2. Else if ``'openff'`` is in ``forcefield``, or ``forcefield`` is an existing file path,
+       or ``forcefield`` ends with ``'.xml'``, engine is ``'openff'``
+       (:class:`easybfe.smff.openff.OpenFF`).
+    3. Otherwise engine is ``'custom'`` (:class:`easybfe.smff.custom.CustomForceField`).
+
     Parameters
     ----------
     forcefield : str
-        Force field name or path. Auto-detection rules:
-        
-        * Contains 'gaff': :class:`easybfe.smff.gaff.GAFF`
-        * Contains 'openff' or ends with '.xml': :class:`easybfe.smff.openff.OpenFF`
-        * Otherwise: :class:`easybfe.smff.custom.CustomForceField`
+        Force field name or path (e.g. ``'gaff2'``, ``'openff-2.1.0'``, or path to a topology file).
     charge_method : str
-        Partial charge assignment method (e.g., 'bcc', 'gas').
+        Partial charge assignment method (e.g. ``'bcc'``, ``'gas'``).
     engine : str, optional
-        Explicit engine override ('gaff', 'openff', or 'custom'). If empty,
-        engine is auto-detected from `forcefield`.
+        Explicit engine override: ``'acpype'``, ``'openff'``, or ``'custom'``. If empty,
+        engine is auto-detected from ``forcefield`` as above.
     **kwargs
         Additional keyword arguments passed to the parameterizer constructor.
-    
+
     Returns
     -------
     SmallMoleculeForceField
         Instance of the appropriate parameterizer class.
-    
+
     Raises
     ------
     NotImplementedError
-        If the specified or auto-detected engine is not supported.
-    
+        If the requested engine is not available (e.g. not installed or not in PATH).
+        Message includes available engines and a hint for ``'openff'`` when missing.
+
     Examples
     --------
-    >>> # Auto-detect GAFF engine
+    >>> # Auto-detect acpype (GAFF) from forcefield name
     >>> ff = load_parametrizer('gaff2', 'bcc')
-    >>> # Explicitly specify OpenFF engine
+    >>> # Auto-detect openff from name or file path
+    >>> ff = load_parametrizer('openff-2.1.0', 'bcc')
+    >>> ff = load_parametrizer('/path/to/file.xml', 'gas')
+    >>> # Explicit engine
     >>> ff = load_parametrizer('openff-2.1.0', 'bcc', engine='openff')
-    >>> # Use custom force field from XML file
-    >>> ff = load_parametrizer('custom.xml', '', engine='custom')
-    
+    >>> ff = load_parametrizer('/path/to/topology.prmtop', '', engine='custom')
+
     See Also
     --------
-    :class:`easybfe.smff.gaff.GAFF` : GAFF-based parameterizer.
+    :class:`easybfe.smff.gaff.GAFF` : GAFF-based parameterizer (engine ``acpype``).
     :class:`easybfe.smff.openff.OpenFF` : OpenFF-based parameterizer.
     :class:`easybfe.smff.custom.CustomForceField` : Custom force field parameterizer.
-    :class:`easybfe.ligand.LigandLoader` : Load ligands from files or other sources.
+    :class:`easybfe.core.ligand.LigandLoader` : Load ligands from various sources.
     """
     if not engine:
-        if 'gaff' in forcefield:
-            engine = 'gaff'
-        elif 'openff' in forcefield:
-            engine = 'openff'
-        elif os.path.isfile(forcefield) and forcefield.endswith('.xml'):
+        if forcefield == 'gaff' or forcefield == 'gaff2':
+            engine = 'acpype'
+        elif ('openff' in forcefield) or os.path.isfile(forcefield) or forcefield.endswith('.xml'):
             engine = 'openff'
         else:
             engine = 'custom'
-    
-    if engine not in PARAMETRIZER_REGISTRY:
-        raise NotImplementedError(f"Not supported engine {engine}")
 
     logger.debug(f"Loading parameterizer: engine={engine}, forcefield={forcefield}, charge_method={charge_method}")
-    cls = PARAMETRIZER_REGISTRY[engine]
-    return cls(forcefield, charge_method, **kwargs)
+    try:
+        return PARAMETRIZER_REGISTRY.create(engine, forcefield, charge_method, **kwargs)
+    except KeyError:
+        available = ", ".join(PARAMETRIZER_REGISTRY.names())
+        msg = (
+            f"Engine {engine!r} is not available. Available: {available}."
+            + (" If you requested 'openff', ensure openff-toolkit and openmmforcefields are installed." if engine == "openff" else "")
+        )
+        raise NotImplementedError(msg)
 
 
 def parametrize_ligand_single(
@@ -132,13 +138,13 @@ def parametrize_ligand_single(
     forcefield : str
         Force field name or path. Auto-detection rules:
         
-        * Contains 'gaff': :class:`easybfe.smff.gaff.GAFF`
+        * Contains 'gaff': :class:`easybfe.smff.gaff.GAFF` (engine ``acpype``)
         * Contains 'openff' or ends with '.xml': :class:`easybfe.smff.openff.OpenFF`
         * Otherwise: :class:`easybfe.smff.custom.CustomForceField`
     charge_method : str
         Partial charge assignment method (e.g., 'bcc', 'gas', 'am1bcc').
     engine : str, optional
-        Explicit engine override ('gaff', 'openff', or 'custom'). If empty,
+        Explicit engine override ('acpype', 'openff', or 'custom'). If empty,
         engine is auto-detected from `forcefield`.
     **kwargs
         Additional keyword arguments passed to the parameterizer constructor
