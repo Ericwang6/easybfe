@@ -7,11 +7,10 @@ import pytest
 from easybfe.core.protein import Protein
 from easybfe.core.ligand import Ligand
 from easybfe.amber.boresch import (
+    BORESCH_FINDER_REGISTRY,
     BoreschRestraint,
     RxRxBoreschRestraintsFinder,
     UserSpecifiedBoreschRestraint,
-    get_boresch_finder,
-    list_boresch_finders,
 )
 
 
@@ -60,7 +59,7 @@ def test_rxrx_boresch_restraints_finder_runs_and_returns_restraint():
 
 def test_list_boresch_finders():
     """Registry contains expected finder names."""
-    names = list_boresch_finders()
+    names = BORESCH_FINDER_REGISTRY.names()
     assert isinstance(names, list)
     assert "rxrx" in names
     assert "user" in names
@@ -68,25 +67,24 @@ def test_list_boresch_finders():
 
 
 def test_get_boresch_finder_returns_correct_classes():
-    """get_boresch_finder returns the registered finder class for each name."""
-    assert get_boresch_finder("rxrx") is RxRxBoreschRestraintsFinder
-    assert get_boresch_finder("user") is UserSpecifiedBoreschRestraint
+    """BORESCH_FINDER_REGISTRY.get returns the registered finder class for each name."""
+    assert BORESCH_FINDER_REGISTRY.get("rxrx") is RxRxBoreschRestraintsFinder
+    assert BORESCH_FINDER_REGISTRY.get("user") is UserSpecifiedBoreschRestraint
 
 
 def test_get_boresch_finder_unknown_raises():
-    """get_boresch_finder raises KeyError with available names for unknown key."""
+    """BORESCH_FINDER_REGISTRY.get raises KeyError with available names for unknown key."""
     with pytest.raises(KeyError) as exc_info:
-        get_boresch_finder("nonexistent")
+        BORESCH_FINDER_REGISTRY.get("nonexistent")
     assert "nonexistent" in str(exc_info.value)
     assert "rxrx" in str(exc_info.value)
     assert "user" in str(exc_info.value)
 
 
 def test_finder_via_registry_works():
-    """A finder obtained via get_boresch_finder can be instantiated and used."""
+    """A finder obtained via BORESCH_FINDER_REGISTRY.create can be used."""
     protein, ligand = _load_test_protein_and_ligand()
-    FinderClass = get_boresch_finder("rxrx")
-    finder = FinderClass(protein, ligand)
+    finder = BORESCH_FINDER_REGISTRY.create("rxrx", protein, ligand)
     restr = finder.find()
     assert isinstance(restr, BoreschRestraint)
     assert len(restr.protein_anchors) == 3

@@ -3,10 +3,11 @@ import numpy as np
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, Type
+from typing import Optional
 
 from ..config import AmberRstSettings
 from ..core import Protein, Ligand
+from ..core.registry import Registry
 from ..analysis.interaction import HBondFinder, CloseContactFinder
 
 
@@ -292,42 +293,10 @@ class BoreschRestraintsFinder(ABC):
 
 
 # Registry for BoreschRestraintsFinder implementations
-_BORESCH_FINDER_REGISTRY: dict[str, Type[BoreschRestraintsFinder]] = {}
+BORESCH_FINDER_REGISTRY: Registry[BoreschRestraintsFinder] = Registry(BoreschRestraintsFinder)
 
 
-def register_boresch_finder(name: str):
-    """Register a :class:`BoreschRestraintsFinder` subclass under the given name.
-
-    Use as a class decorator::
-
-        @register_boresch_finder("RxRx")
-        class RxRxBoreschRestraintsFinder(BoreschRestraintsFinder):
-            ...
-    """
-
-    def decorator(cls: Type[BoreschRestraintsFinder]) -> Type[BoreschRestraintsFinder]:
-        if not issubclass(cls, BoreschRestraintsFinder):
-            raise TypeError(f"{cls.__name__} must be a subclass of BoreschRestraintsFinder")
-        _BORESCH_FINDER_REGISTRY[name] = cls
-        return cls
-
-    return decorator
-
-
-def get_boresch_finder(name: str) -> Type[BoreschRestraintsFinder]:
-    """Return the :class:`BoreschRestraintsFinder` subclass registered under ``name``."""
-    if name not in _BORESCH_FINDER_REGISTRY:
-        available = ", ".join(sorted(_BORESCH_FINDER_REGISTRY))
-        raise KeyError(f"Unknown Boresch finder {name!r}. Available: {available}")
-    return _BORESCH_FINDER_REGISTRY[name]
-
-
-def list_boresch_finders() -> list[str]:
-    """Return the list of registered Boresch finder names."""
-    return sorted(_BORESCH_FINDER_REGISTRY)
-
-
-@register_boresch_finder("rxrx")
+@BORESCH_FINDER_REGISTRY.register("rxrx")
 class RxRxBoreschRestraintsFinder(BoreschRestraintsFinder):
     """Boresch restraint finder that selects anchors via H-bonds and close contacts (RxRx-style)."""
 
@@ -429,7 +398,7 @@ class RxRxBoreschRestraintsFinder(BoreschRestraintsFinder):
         return restr
 
 
-@register_boresch_finder("user")
+@BORESCH_FINDER_REGISTRY.register("user")
 class UserSpecifiedBoreschRestraint(BoreschRestraintsFinder):
     """Boresch restraint finder that uses user-provided protein and ligand anchor indices."""
 

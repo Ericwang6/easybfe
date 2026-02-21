@@ -13,7 +13,7 @@ from ..config import AmberFepSimulationConfig, AmberWtSettings
 from ..config.amber.abfe import AmberAbfeConfig, BoreschRestraintGeneratorConfig
 from .workflow import Step, Workflow, create_script_for_workflows
 from ..core import Ligand, Protein
-from .boresch import BoreschRestraint, compute_boresch_energy, get_boresch_finder
+from .boresch import BORESCH_FINDER_REGISTRY, BoreschRestraint, compute_boresch_energy
 from ..parallel import run_func_parallel
 
 
@@ -161,14 +161,13 @@ def setup_ligand_abfe(
         restraints = BoreschRestraintGeneratorConfig()
     if not isinstance(restraints, BoreschRestraint):
         boresch_config = restraints
-        finder_cls = get_boresch_finder(boresch_config.algorithm)
         finder_kwargs = {
             "protein": protein,
             "ligand": ligand,
             "wts": tuple(boresch_config.rst_wts),
             **boresch_config.options,
         }
-        finder = finder_cls(**finder_kwargs)
+        finder = BORESCH_FINDER_REGISTRY.create(boresch_config.algorithm, **finder_kwargs)
         restraints = finder.find()
     
     output_dir = Path(output_dir)
