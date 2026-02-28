@@ -38,7 +38,7 @@ def setup_ligand_abfe_leg(
     ligand_pdb = app.PDBFile(str(wdir / f'{ligand.name}.pdb'))
 
     # charges
-    ligandA_charge = compute_net_charge_from_openmm_system(
+    ligand_charge = compute_net_charge_from_openmm_system(
         app.ForceField(str(wdir / f'{ligand.name}.xml')).createSystem(ligand_pdb.topology)
     )
 
@@ -75,17 +75,17 @@ def setup_ligand_abfe_leg(
     mask = generate_amber_mask(num_ligand_atoms, -1, {}, mode=mode)
 
     # alchemical water
-    d_charge = -ligandA_charge
     alchem_waters, rst_settings = [], []
-    if d_charge != 0:
-        logger.info(f"Perturbation invoves charge change {int(ligandA_charge)} -> 0")
-        if config.use_charge_change and (not config.gas_phase):
-            scIndices = mask['scmask1'].strip("'")[1:].split(',') + mask['scmask2'].strip("'")[1:].split(',')
-            scIndices = [int(x) - 1 for x in scIndices if x]
-            alchem_water_info = do_co_alchemical_water(modeller, d_charge, scIndices)
-            rst_settings = set_alchemical_water_restraints(modeller, scIndices, alchem_water_info)
-            alchem_waters = [] if config.use_settle_for_alchemical_water else alchem_water_info['alchemical_water_residues']
-            mask = generate_amber_mask(num_ligand_atoms, -1, {}, alchem_water_info, mode=mode)
+    if ligand_charge != 0:
+        logger.info(f"ABFE with for ligand {ligand.name} with net charge {int(ligand_charge)}")
+        if duplicate_ligand:
+            fix_excess_charge(modeller, ligand_charge)
+        elif config.use_charge_change and (not config.gas_phase):
+            scIndices = list[int](range(ligand_pdb.topology.getNumAtoms()))
+            coion_info = create_alchemical_ions(modeller, ligand_charge, 0, scIndices, method=config.charge_change_method)
+            rst_settings = set_alchemical_water_restraints(modeller, scIndices, coion_info)
+            alchem_waters = [] if config.use_settle_for_alchemical_water else coion_info['alchemical_water_residues']
+            mask = generate_amber_mask(num_ligand_atoms, -1, {}, coion_info, mode=mode)
         else:
             logger.warning("Charge change not enabled. Results are not trustworthy.")
     
@@ -125,7 +125,9 @@ def setup_ligand_abfe_leg(
                 "clambda": clambda, 
                 'ntwx': 10*step_template.cntrl.ntwx if (config.reduce_storage and n > 0 and n < (len(config.lambdas)-1)) else step_template.cntrl.ntwx
             })
-            step_lambda_cntrl = step_template.cntrl.model_copy(update=update)
+            base = step_template.cntrl.model_dump()
+            base.update(update)
+            step_lambda_cntrl = step_template.cntrl.__class__.model_validate(base)
             rst = step_template.rst + rst_settings
             wt = step_template.wt + [AmberWtSettings(type="DUMPFREQ", istep1=step_lambda_cntrl.ofreq)]
 
