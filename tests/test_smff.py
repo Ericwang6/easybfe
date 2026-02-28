@@ -3,7 +3,11 @@ from pathlib import Path
 import pytest
 from rdkit import Chem
 from rdkit.Chem import AllChem
-from easybfe.smff import load_parametrizer, PARAMETRIZER_REGISTRY
+from easybfe.smff import (
+    PARAMETRIZER_REGISTRY,
+    load_parametrizer,
+    parametrize_ligands,
+)
 from easybfe.core.ligand import LigandLoader
 
 
@@ -59,13 +63,13 @@ def test_parametrize_ligand_with_file(forcefield, charge_method, testdir, amide_
     # Write files to directory for checking
     ligand.dump(wdir)
     
-    # Check that required files are generated
-    stem = amide_sdf.stem
-    assert (wdir / f'{stem}.prmtop').is_file()
-    assert (wdir / f'{stem}.inpcrd').is_file()
-    assert (wdir / f'{stem}.sdf').is_file()
-    assert (wdir / f'{stem}.xml').is_file()
-    assert (wdir / f'{stem}.pdb').is_file()
+    # Check that required files are generated, using the ligand name actually used
+    name = ligand.name
+    assert (wdir / f'{name}.prmtop').is_file()
+    assert (wdir / f'{name}.inpcrd').is_file()
+    assert (wdir / f'{name}.sdf').is_file()
+    assert (wdir / f'{name}.xml').is_file()
+    assert (wdir / f'{name}.pdb').is_file()
 
 
 @pytest.mark.parametrize(
@@ -203,3 +207,174 @@ def test_parametrize_ligand_with_rdkit_mol_no_3d(forcefield, charge_method, test
     assert (wdir / f'{name}.prmtop').is_file()
     assert (wdir / f'{name}.inpcrd').is_file()
     assert (wdir / f'{name}.sdf').is_file()
+
+
+@pytest.mark.parametrize(
+    "forcefield, charge_method",
+    [
+        ("gaff2", "gas"),
+    ],
+)
+def test_parametrize_ligands_single_file(forcefield, charge_method, testdir, amide_sdf):
+    """Test parametrize_ligands with a single-ligand SDF source."""
+    if forcefield.startswith("openff") and "openff" not in PARAMETRIZER_REGISTRY.names():
+        pytest.skip("OpenFF not installed")
+
+    out_base = testdir / f"{forcefield}_{charge_method}_param_ligands_single"
+    ligands = parametrize_ligands(
+        source=amide_sdf,
+        output_base_dir=out_base,
+        forcefield=forcefield,
+        charge_method=charge_method,
+        nprocs=1,
+        only_first=True,
+        name_from_stem=True,
+    )
+
+    assert isinstance(ligands, list)
+    assert len(ligands) == 1
+    lig = ligands[0]
+    assert "prmtop" in lig.auxiliary_files
+    assert "inpcrd" in lig.auxiliary_files
+    assert "xml" in lig.auxiliary_files
+    assert "pdb" in lig.auxiliary_files
+
+    # Output directory should be base/name
+    wdir = out_base / lig.name
+    assert (wdir / f"{lig.name}.prmtop").is_file()
+    assert (wdir / f"{lig.name}.inpcrd").is_file()
+    assert (wdir / f"{lig.name}.sdf").is_file()
+    assert (wdir / f"{lig.name}.xml").is_file()
+    assert (wdir / f"{lig.name}.pdb").is_file()
+
+
+@pytest.mark.parametrize(
+    "forcefield, charge_method",
+    [
+        ("gaff2", "gas"),
+    ],
+)
+def test_parametrize_ligands_multiple_rdkit(forcefield, charge_method, testdir):
+    """Test parametrize_ligands with multiple RDKit molecules and name handling."""
+    if forcefield.startswith("openff") and "openff" not in PARAMETRIZER_REGISTRY.names():
+        pytest.skip("OpenFF not installed")
+
+    smiles_list = ["c1ccncc1CCC(=O)N", "CCO"]
+    names = ["ligand_a", "ligand_b"]
+    mols = []
+    for smi, name in zip(smiles_list, names):
+        mol = Chem.MolFromSmiles(smi)
+        mol = Chem.AddHs(mol)
+        AllChem.EmbedMolecule(mol)
+        AllChem.MMFFOptimizeMolecule(mol)
+        mol.SetProp("_Name", name)
+        mols.append(mol)
+
+    out_base = testdir / f"{forcefield}_{charge_method}_param_ligands_multi"
+    ligands = parametrize_ligands(
+        source=mols,
+        output_base_dir=out_base,
+        forcefield=forcefield,
+        charge_method=charge_method,
+        nprocs=2,
+    )
+
+    assert isinstance(ligands, list)
+    assert len(ligands) == len(mols)
+
+    # Names should be preserved and each ligand should have files
+    returned_names = {lig.name for lig in ligands}
+    assert set(names).issubset(returned_names)
+
+    for lig in ligands:
+        assert "prmtop" in lig.auxiliary_files
+        assert "inpcrd" in lig.auxiliary_files
+        assert "xml" in lig.auxiliary_files
+        assert "pdb" in lig.auxiliary_files
+
+        wdir = out_base / lig.name
+        assert (wdir / f"{lig.name}.prmtop").is_file()
+        assert (wdir / f"{lig.name}.inpcrd").is_file()
+        assert (wdir / f"{lig.name}.sdf").is_file()
+        assert (wdir / f"{lig.name}.xml").is_file()
+        assert (wdir / f"{lig.name}.pdb").is_file()
+
+
+@pytest.mark.parametrize(
+    "forcefield, charge_method",
+    [
+        ("gaff2", "gas"),
+    ],
+)
+def test_parametrize_ligands_duplicate_names(forcefield, charge_method, testdir):
+    """Test that parametrize_ligands surfaces duplicate-name errors from LigandLoader."""
+    if forcefield.startswith("openff") and "openff" not in PARAMETRIZER_REGISTRY.names():
+        pytest.skip("OpenFF not installed")
+
+    smiles = "c1ccncc1CCC(=O)N"
+    name = "dup_name"
+    mols = []
+    for _ in range(2):
+        mol = Chem.MolFromSmiles(smiles)
+        mol = Chem.AddHs(mol)
+        AllChem.EmbedMolecule(mol)
+        AllChem.MMFFOptimizeMolecule(mol)
+        mol.SetProp("_Name", name)
+        mols.append(mol)
+
+    out_base = testdir / f"{forcefield}_{charge_method}_param_ligands_dup"
+    with pytest.raises(ValueError):
+        parametrize_ligands(
+            source=mols,
+            output_base_dir=out_base,
+            forcefield=forcefield,
+            charge_method=charge_method,
+            nprocs=2,
+        )
+
+
+@pytest.mark.parametrize(
+    "forcefield, charge_method",
+    [
+        ("gaff2", "gas"),
+    ],
+)
+def test_parametrize_ligands_multiple_sdf(forcefield, charge_method, testdir, amide_sdf):
+    """Test parametrize_ligands with multiple SDF files and name_from_stem=True."""
+    if forcefield.startswith("openff") and "openff" not in PARAMETRIZER_REGISTRY.names():
+        pytest.skip("OpenFF not installed")
+
+    data_dir = Path(__file__).parent / "data"
+    benzene_sdf = data_dir / "benzene.sdf"
+
+    out_base = testdir / f"{forcefield}_{charge_method}_param_ligands_multi_sdf"
+    ligands = parametrize_ligands(
+        source=[amide_sdf, benzene_sdf],
+        output_base_dir=out_base,
+        forcefield=forcefield,
+        charge_method=charge_method,
+        nprocs=1,
+        name_from_stem=True,
+        only_first=True,
+    )
+
+    # We expect one ligand per file, named from the file stem
+    assert isinstance(ligands, list)
+    assert len(ligands) == 2
+    names = {lig.name for lig in ligands}
+    assert {"amide", "benzene"} == names
+
+    for lig in ligands:
+        # Parameters should be generated
+        assert "prmtop" in lig.auxiliary_files
+        assert "inpcrd" in lig.auxiliary_files
+        assert "xml" in lig.auxiliary_files
+        assert "pdb" in lig.auxiliary_files
+
+        # Files should be written under base_dir / ligand.name
+        wdir = out_base / lig.name
+        assert (wdir / f"{lig.name}.prmtop").is_file()
+        assert (wdir / f"{lig.name}.inpcrd").is_file()
+        assert (wdir / f"{lig.name}.sdf").is_file()
+        assert (wdir / f"{lig.name}.xml").is_file()
+        assert (wdir / f"{lig.name}.pdb").is_file()

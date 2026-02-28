@@ -21,9 +21,8 @@ def test_proteinfixer_run_1apm(test_data_dir):
     input_pdb = test_data_dir / '1APM.pdb'
     output_pdb = os.path.join(test_data_dir, '1APM_fixed.pdb')
     
-    fixer = ProteinFixer(str(input_pdb))
+    fixer = ProteinFixer(str(input_pdb), wizard=True)
     fixer.run(
-        output_protein=output_pdb,
         skip_missing_terminal_residues=False,
         max_num_consecutive_missing_residues=None,
         keep_water=True,
@@ -31,6 +30,7 @@ def test_proteinfixer_run_1apm(test_data_dir):
         pH=7.4,
         cap_gaps=True,
         force_cap_terminals=False,
+        out=output_pdb
     )
     
     # Verify output file was created

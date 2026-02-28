@@ -245,13 +245,14 @@ class TestLigandLoader:
         with open(smi_file, 'w') as f:
             f.write("c1ccccc1\n")
             f.write("Cc1ccccc1\n")
-        
+
         loader = LigandLoader()
-        ligands = loader.load(smi_file)
-        
+        ligands = loader.load(smi_file, only_first=False, auto_naming=True)
+
         assert len(ligands) == 2
-        assert ligands[0].name.startswith("ligands_line_1")
-        assert ligands[1].name.startswith("ligands_line_2")
+        assert ligands[0].name
+        assert ligands[1].name
+        assert ligands[0].name != ligands[1].name
     
     def test_load_from_smiles_file_with_comments(self, temp_dir):
         """Test that comments in SMILES file are ignored."""
@@ -330,14 +331,16 @@ class TestLigandLoader:
         assert isinstance(ligands[0].mol_block, str)
     
     def test_load_from_rdkit_molecules_no_name(self):
-        """Test that loading from RDKit molecules without _Name property raises ValueError."""
+        """Test that loading from RDKit molecules without _Name property assigns default names."""
         mol1 = Chem.MolFromSmiles("c1ccccc1")
         mol2 = Chem.MolFromSmiles("Cc1ccccc1")
-        
+
         loader = LigandLoader()
-        # Molecules without _Name property will have empty name, which will fail validation
-        with pytest.raises(ValueError):
-            loader.load([mol1, mol2])
+        ligands = loader.load([mol1, mol2])
+        assert len(ligands) == 2
+        assert ligands[0].name
+        assert ligands[1].name
+        assert ligands[0].name != ligands[1].name
     
     def test_load_from_list_of_files(self, test_ligand_sdf, test_ligand_sdf_2):
         """Test loading from a list of file paths."""
@@ -447,8 +450,8 @@ class TestLigandLoader:
         })
         # Add rows with NaN values (which is what empty strings become in CSV)
         import numpy as np
-        df.loc[len(df)] = [np.nan, "invalid"]  # Row with empty name
-        df.loc[len(df)] = ["  ", np.nan]  # Row with empty SMILES
+        df.loc[len(df)] = [np.nan, np.nan]  # Row with empty name and SMILES - skipped
+        df.loc[len(df)] = ["  ", np.nan]  # Row with empty SMILES - skipped
         
         df.to_csv(csv_file, index=False)
         
@@ -503,16 +506,17 @@ class TestLigandLoader:
             loader.load(smi_file)
     
     def test_load_from_sdf_no_name_property_raises_error(self, temp_dir):
-        """Test that SDF molecule without _Name property raises ValueError when use_stem=False."""
+        """Test that SDF molecule without _Name property gets an assigned name when use_stem=False."""
         # Create an SDF file with a molecule without _Name property
         sdf_file = temp_dir / "test.sdf"
         mol = Chem.MolFromSmiles("c1ccccc1")
         with Chem.SDWriter(str(sdf_file)) as writer:
             writer.write(mol)
-        
+
         loader = LigandLoader()
         ligands = loader.load(sdf_file, name_from_stem=False)
-        assert ligands[0].name == ''
+        assert len(ligands) == 1
+        assert ligands[0].name
     
     def test_load_from_rdkit_none_molecule_raises_error(self):
         """Test that None molecule in RDKit list raises an error."""

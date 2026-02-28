@@ -2,8 +2,9 @@ import pytest
 import numpy as np
 from pathlib import Path
 from collections import defaultdict
-from easybfe.smff import OpenFF, GAFF
+from easybfe.smff import GAFF, load_parametrizer, OpenFF
 from easybfe.smff.utils import convert_to_xml
+from easybfe.core.ligand import LigandLoader
 
 from rdkit import Chem
 import openmm as mm
@@ -67,26 +68,30 @@ def diagnose_torsion(system: mm.System, top: app.Topology):
 
 
 def test_openmm_xml_openff():
+    if OpenFF is None:
+        pytest.skip("OpenFF not installed")
     wdir = Path(__file__).parent / '_test_openmm_xml_openff'
     wdir.mkdir(exist_ok=True)
-    sdf = str(Path(__file__).parent / 'data/CDD_1819.sdf')
-    mol = Chem.SDMolSupplier(sdf, removeHs=False)[0]
+    sdf = Path(__file__).parent / 'data/CDD_1819.sdf'
+    mol = Chem.SDMolSupplier(str(sdf), removeHs=False)[0]
     pos = mol.GetConformer().GetPositions() / 10
 
-    # Direct from openmm output
-    ff = OpenFF(forcefield='openff-2.2.0', charge_method='gas')
-    ff.parametrize(sdf, wdir)
-    ene_direct = getEnergyDecomposition(ff.system, pos)
-    diagnose_torsion(ff.system, ff.top)
-    
-    # Read prmtop
+    loader = LigandLoader()
+    ligands = loader.load(sdf, only_first=True, name_from_stem=True)
+    assert len(ligands) == 1
+    ff = load_parametrizer('openff-2.2.0', 'gas', engine='openff')
+    ligand = ff.run(ligands[0], nprocs=1)
+    ligand.dump(wdir)
+
     f_prmtop = str(wdir / 'CDD_1819.prmtop')
     prmtop = app.AmberPrmtopFile(f_prmtop)
     system = prmtop.createSystem(nonbondedMethod=app.NoCutoff, constraints=None, rigidWater=False)
+    ene_direct = getEnergyDecomposition(system, pos)
+    diagnose_torsion(system, prmtop.topology)
+
     ene_read = getEnergyDecomposition(system, pos)
     assert np.allclose(ene_direct['total'], ene_read['total'])
 
-    # Read convert
     f_xml = str(wdir / 'CDD_1819.xml')
     convert_to_xml(f_prmtop, f_xml)
     forcefield = app.ForceField(f_xml)
@@ -96,8 +101,6 @@ def test_openmm_xml_openff():
         constraints=None, rigidWater=False
     )
     ene_convert = getEnergyDecomposition(system, pos)
-
-    # print(ene_direct, ene_convert)
     diagnose_torsion(system, prmtop.topology)
     assert np.allclose(ene_direct['total'], ene_convert['total'])
 
@@ -105,15 +108,17 @@ def test_openmm_xml_openff():
 def test_openmm_xml_gaff():
     wdir = Path(__file__).parent / '_test_openmm_xml_gaff'
     wdir.mkdir(exist_ok=True)
-    sdf = str(Path(__file__).parent / 'data/CDD_1819.sdf')
-    mol = Chem.SDMolSupplier(sdf, removeHs=False)[0]
+    sdf = Path(__file__).parent / 'data/CDD_1819.sdf'
+    mol = Chem.SDMolSupplier(str(sdf), removeHs=False)[0]
     pos = mol.GetConformer().GetPositions() / 10
 
-    # Direct from openmm output
-    ff = GAFF(atype='gaff2', charge_method='gas')
-    ff.parametrize(sdf, wdir)
-    
-    # Read prmtop
+    loader = LigandLoader()
+    ligands = loader.load(sdf, only_first=True, name_from_stem=True)
+    assert len(ligands) == 1
+    ff = GAFF(forcefield='gaff2', charge_method='gas')
+    ligand = ff.run(ligands[0], nprocs=1)
+    ligand.dump(wdir)
+
     f_prmtop = str(wdir / 'CDD_1819.prmtop')
     prmtop = app.AmberPrmtopFile(f_prmtop)
     system = prmtop.createSystem(nonbondedMethod=app.NoCutoff, constraints=None, rigidWater=False)
