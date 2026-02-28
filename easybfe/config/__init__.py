@@ -19,11 +19,12 @@ from .amber.simulation import (
     AmberStepConfig,
     AmberSimulationConfig,
     AmberFepSimulationConfig,
+    AmberPlainMDConfig,
     default_md_workflow,
     default_abfe_workflow,
 )
 from .protein_prep import ProteinPrepareConfig
-from .analysis import AnalysisConfig
+from .analysis import PlainMDAnalysisConfig
 
 
 def read_file(file_path, key=None):

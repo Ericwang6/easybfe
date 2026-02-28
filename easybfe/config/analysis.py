@@ -1,9 +1,9 @@
-from typing import Optional, Dict, Literal
+from typing import Optional, Dict, Literal, Any, Mapping
 import warnings
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 
-class AnalysisConfig(BaseModel):
+class PlainMDAnalysisConfig(BaseModel):
     """
     Configuration model for MD trajectory analysis workflow.
     
@@ -11,11 +11,7 @@ class AnalysisConfig(BaseModel):
     including trajectory processing, RMSD computation, and interaction analysis settings.
     """
     
-    # Task type
-    task_type: Literal['protein', 'ligand', 'complex'] = Field(
-        default='complex',
-        description='Type of MD task: protein-only, ligand-only, or protein-ligand complex'
-    )
+    model_config = ConfigDict(extra='allow')
     
     # Trajectory processing options
     remove_tmp: bool = Field(
@@ -30,23 +26,23 @@ class AnalysisConfig(BaseModel):
         default=True,
         description='Whether to align trajectory to reference structure'
     )
-    center_selection: Optional[str] = Field(
-        default=None,
-        description='Selection string for centering the trajectory. If None, will be determined based on task_type'
+    center_selection: str = Field(
+        default='',
+        description='Selection string for centering the trajectory.'
     )
-    output_selection: Optional[str] = Field(
-        default=None,
-        description='Selection string for output atoms in processed trajectory. If None, will be determined based on task_type'
+    output_selection: str = Field(
+        default='',
+        description='Selection string for output atoms in processed trajectory.'
     )
-    align_selection: Optional[str] = Field(
-        default=None,
-        description='Selection string for alignment reference. If None, will be determined based on task_type'
+    align_selection: str = Field(
+        default='',
+        description='Selection string for alignment reference.'
     )
     
     # RMSD computation options
-    rmsd_selection: Optional[str] = Field(
-        default=None,
-        description='Selection string for RMSD computation. If None, will be determined based on task_type'
+    rmsd_selection: str = Field(
+        default='',
+        description='Selection string for RMSD computation.'
     )
     use_symmetry_correction: bool = Field(
         default=True,
@@ -58,13 +54,13 @@ class AnalysisConfig(BaseModel):
     )
     
     # Plotting and naming options
-    rmsd_name: Optional[str] = Field(
-        default=None,
-        description='Name shown on rmsd plots. If None, will use task_name from directory'
+    rmsd_name: str = Field(
+        default='', 
+        description='Name shown on rmsd plots.'
     )
-    interaction_name: Optional[str] = Field(
-        default=None,
-        description='Name shown on interaction plots. If None, will use task_name from directory'
+    interaction_name: str = Field(
+        default='', 
+        description='Name shown on interaction plots.'
     )
     
     # Interaction analysis options
@@ -110,50 +106,19 @@ class AnalysisConfig(BaseModel):
         default=298.15,
         description='Temperature in Kelvin for GBSA calculation'
     )
-    
-    @model_validator(mode='after')
-    def validate_gbsa(self):
-        """
-        Validate GBSA-related settings.
-        
-        Ensures that GBSA analysis is only enabled for complex systems.
-        """
-        if self.do_gbsa and self.task_type != 'complex':
-            self.do_gbsa = False
-            warnings.warn("do_gbsa can only be True when task_type is 'complex'.")
-        return self
 
-    @model_validator(mode='after')
-    def validate_selections(self):
-        """
-        Set default selection strings based on task_type if not provided.
-        """
-        # center_selection
-        if self.center_selection is None:
-            if self.task_type == 'ligand':
-                self.center_selection = 'resname MOL'
-            else:
-                self.center_selection = 'protein'
-        
-        # output_selection
-        if self.output_selection is None:
-            if self.task_type == 'ligand':
-                self.output_selection = 'resname MOL'
-            else:
-                self.output_selection = 'protein or resname MOL'
-        
-        # align_selection
-        if self.align_selection is None:
-            if self.task_type == 'ligand':
-                self.align_selection = 'resname MOL'
-            else:
-                self.align_selection = 'backbone'
-        
-        # rmsd_selection
-        if self.rmsd_selection is None:
-            if self.task_type == 'protein':
-                self.rmsd_selection = 'backbone'
-            else:
-                self.rmsd_selection = 'resname MOL'
-        
-        return self
+
+def _infer_selection_from_task_type(task_type: str) -> dict[str, str]:
+    data = {}
+    data['center_selection'] = 'resname MOL' if task_type == 'ligand' else 'protein'
+    data['output_selection'] = 'resname MOL' if task_type == 'ligand' else 'protein or resname MOL'
+    data['align_selection'] = 'resname MOL' if task_type == 'ligand' else 'backbone'
+    data['rmsd_selection'] = 'backbone' if task_type == 'protein' else 'resname MOL'
+    return data
+
+
+def _infer_plot_names_from_task_name(task_name: str) -> dict[str, str]:
+    data = {}
+    data['rmsd_name'] = task_name
+    data['interaction_name'] = task_name
+    return data

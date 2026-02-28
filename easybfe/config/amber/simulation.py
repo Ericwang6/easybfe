@@ -1,7 +1,10 @@
 from __future__ import annotations
 import os, json
-from typing import Literal, Any
-from pydantic import BaseModel, Field, model_validator
+from pathlib import Path
+from typing import Literal, Any, Optional, Union
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from ..analysis import PlainMDAnalysisConfig, _infer_plot_names_from_task_name, _infer_selection_from_task_type
 from .basic import AmberCntrlSettings, AmberWtSettings, AmberRstSettings, create_default_setting
 from ..setup import SetupConfig
 
@@ -37,7 +40,12 @@ class AmberStepConfig(BaseModel):
             override = create_default_setting(em=False, nvt=True, restraint=True)['cntrl']
             override['nmropt'] = 1
             self.cntrl = _set_defaults(self.cntrl, override)
-            if not any([wt.type == 'TEMP0' for wt in self.wt]):
+            # AmberWtSettings validates type with add_quote (double quotes), so after
+            # round-trip wt.type is '"TEMP0"'; check normalized value for idempotency.
+            def _is_temp0(w):
+                t = w.type.strip('"\'')
+                return t == 'TEMP0'
+            if not any(_is_temp0(wt) for wt in self.wt):
                 self.wt.append(
                     AmberWtSettings(
                         type='TEMP0',
@@ -79,12 +87,59 @@ class AmberSimulationConfig(SetupConfig):
             if self.workflow[i-1].type != 'em':
                 self.workflow[i].cntrl = _set_defaults(self.workflow[i].cntrl, {'ntx': 5, 'irest': 1})
         return self
+
+
+class AmberPlainMDConfig(BaseModel):
+    protein: Union[Path, None] = None
+    ligand: Union[Path, None] = None
+    output_dir: Path
+    task_type: str = Field(init=False, default='')
+    task_name: str = ''
+    simulation: AmberSimulationConfig = Field(default_factory=AmberSimulationConfig)
+    analysis: PlainMDAnalysisConfig = Field(default_factory=PlainMDAnalysisConfig)
+
+    @field_validator('protein', 'ligand', 'output_dir', mode='before')
+    @classmethod
+    def _coerce_path(cls, v: Any) -> Any:
+        if v is None or isinstance(v, Path):
+            return v
+        if isinstance(v, str):
+            return Path(v)
+        return v
+
+    @model_validator(mode='after')
+    def validate_task_type(self):
+        assert not ((self.protein is None) and (self.ligand is None)), 'Protein and Ligand cannot be None at the same time!'
+        if self.protein is None:
+            self.task_type = 'ligand'
+        elif self.ligand is None:
+            self.task_type = 'protein'
+        else:
+            self.task_type = 'complex'
+        return self
     
+    @model_validator(mode='after')
+    def validate_task_name(self):
+        if not self.task_name:
+            self.task_name = self.output_dir.name
+        return self
+    
+    @model_validator(mode='after')
+    def validate_analysis(self):
+        ana = {}
+        ana.update(_infer_selection_from_task_type(self.task_type))
+        ana.update(_infer_plot_names_from_task_name(self.task_name))
+        ana.update(self.analysis.model_dump(exclude_unset=True))
+        ana = PlainMDAnalysisConfig.model_validate(ana)
+        self.analysis = ana
+        return self
+
 
 class AmberFepSimulationConfig(AmberSimulationConfig):
 
     use_charge_change: bool = True 
     use_settle_for_alchemical_water: bool = True
+    charge_change_method: Literal['dummy_ion', 'coalchem_water'] = 'dummy_ion'
     lambdas: list[float] | None = None
     num_lambdas: int = 16
     reduce_storage: bool = True

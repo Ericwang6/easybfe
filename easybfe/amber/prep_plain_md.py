@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import logging
 import json
-from typing import Optional, TYPE_CHECKING
+from typing import Union, Optional, TYPE_CHECKING
 
 import numpy as np
 import openmm.app as app
@@ -12,18 +12,20 @@ import parmed
 
 from .prep_utils import *
 from .workflow import Step, Workflow
+from ..core import Ligand, Protein
+from ..parallel import run_func_parallel
+
 
 if TYPE_CHECKING:
-    from ..core import Ligand, Protein
-    from ..config import AmberSimulationConfig
+    from ..config import AmberSimulationConfig, AmberPlainMDConfig
 
 
 logger = logging.getLogger(__name__)
 
 
 def setup_plain_md(
-    ligand: Optional[Ligand],
-    protein: Optional[Protein],
+    ligand: Union[Ligand | os.PathLike | None],
+    protein: Union[Protein | os.PathLike | None],
     config: AmberSimulationConfig,
     wdir: os.PathLike
 ):  
@@ -40,6 +42,7 @@ def setup_plain_md(
     # setup systems
     modeller = app.Modeller(app.Topology(), [])
 
+    ligand = ligand if isinstance(ligand, Ligand) or (ligand is None) else Ligand.from_directory(ligand)
     if ligand:
         ligand_pdb = ligand.to_openmm()
         modeller.add(ligand_pdb.topology, ligand_pdb.positions)
@@ -47,6 +50,7 @@ def setup_plain_md(
         ligand.dump(ligand_dir)
         ffs.append(str(ligand_dir / f'{ligand.name}.xml'))
     
+    protein = protein if isinstance(protein, Protein) or (protein is None) else Protein.from_pdb(protein)
     if protein:
         protein_pdb = protein.to_openmm()
         modeller.add(protein_pdb.topology, protein_pdb.positions)
@@ -89,15 +93,10 @@ def setup_plain_md(
         steps.append(step)
     wf = Workflow(wdir, steps=steps, inpcrd=wdir / f'{basename}.inpcrd', prmtop=wdir / f'{basename}.prmtop')
     wf.create()
-
-    if ligand and protein:
-        task_type = 'complex'
-    elif ligand:
-        task_type = 'ligand'
-    else:
-        task_type = 'protein'
-    config.task_type = task_type
-    config.task_name = wdir.name
-    with open(wdir / 'config.json', 'w') as f:
-        json.dump(config.model_dump(), f, indent=4)
     return wf
+
+
+def setup_plain_md_from_config(cfg: AmberPlainMDConfig):
+    setup_plain_md(cfg.ligand, cfg.protein, cfg.simulation, cfg.output_dir)
+    with open(cfg.output_dir / 'config.json', 'w') as f:
+        json.dump(cfg.model_dump(mode="json"), f, indent=4)

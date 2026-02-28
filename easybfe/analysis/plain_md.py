@@ -10,10 +10,11 @@ import MDAnalysis as mda
 warnings.filterwarnings("ignore", module="MDAnalysis.coordinates.PDB")
 warnings.filterwarnings("ignore", module="MDAnalysis.coordinates.XDR")
 import numpy as np
+from pydantic import ValidationError
 
 from .trajectory import post_process_trajectory, compute_rmsd, plot_rmsd
 from .interaction import analyze_interactions_for_trajectory, plot_interactions
-from ..config import AnalysisConfig
+from ..config import PlainMDAnalysisConfig, AmberPlainMDConfig
 from ..core.ligand import Ligand
 from ..core.protein import Protein
 from ..gbsa import GBSARunner
@@ -49,8 +50,9 @@ def _load_positions(topology: Path, trajectory: Path) -> np.ndarray:
 
 def run_plain_md_analysis_workflow(
     directory: os.PathLike,
-    config: Optional[AnalysisConfig] = None,
+    config: Optional[PlainMDAnalysisConfig] = None,
     prefix: Optional[str] = None,
+    basename: Optional[str] = None
 ):
     """
     Run MD analysis workflow on a trajectory.
@@ -70,45 +72,41 @@ def run_plain_md_analysis_workflow(
     None
     """
     directory = Path(directory)
+
+    # Defaults for GBSA-related MD settings; may be refined from MD config.json
+    protein_ffs: list[str] = ["amber14-all.xml", "amber14/tip3p.xml"]
+    saltcon: float = 0.15
+
+    if config is None:
+        # Read MD config
+        md_cfg_path = directory / 'config.json'
+        if not md_cfg_path.is_file():
+            raise RuntimeError(f"config.json not found in {directory}. Please provide a config")
     
-    # Read MD config
-    md_cfg_path = directory / 'config.json'
-    if not md_cfg_path.is_file():
-        raise RuntimeError(f"config.json not found in {directory}")
-    
-    with open(md_cfg_path) as f:
-        md_config: dict[str, Any] = json.load(f)
-    
-    # Get production stage name
-    if 'workflow' in md_config and len(md_config['workflow']) > 0:
-        prod_stage = md_config['workflow'][-1]['name']
-    elif prefix:
-        prod_stage = prefix
-        logger.warning(f"Could not determine production stage from config.json, using prefix: {prefix}")
+        with open(md_cfg_path) as f:
+            jdata: dict[str, Any] = json.load(f)
+        
+        try:
+            md_config = AmberPlainMDConfig.model_validate(jdata)
+        except ValidationError:
+            config = {
+                "task_name": jdata.pop('task_name', ''), "task_type": jdata.pop('task_type', ''), "basename": jdata.pop('basename', ''),
+                "simulation": jdata
+            }
+            md_config = AmberPlainMDConfig.model_validate(config)
+        basename = md_config.simulation.basename if not basename else basename
+        prod_stage = md_config.simulation.workflow[-1].name if not prefix else prefix
+        ana_config = md_config.analysis
+        # Use MD simulation settings for GBSA if available
+        protein_ffs = getattr(md_config.simulation, "protein_ff", protein_ffs)
+        saltcon = getattr(md_config.simulation, "ionic_strength", saltcon)
     else:
-        raise RuntimeError(f"Cannot infer the prod stage from {directory}. Please provide the `prefix` argument")
-    
-    # Assemble real analysis config
-    task_type = md_config.get("task_type", None)
-    ana_config = md_config.get("analysis", dict())
-    if config:
-        ana_config.update(config.model_dump())
-    if ana_config.get('task_type', None) is None:
-        ana_config['task_type'] = task_type
-    if ana_config.get('task_type', None) is not None and ana_config['task_type'] != task_type:
-        logger.warning(f"Analysis task_type {ana_config['task_type']} is not same to MD task_type ({task_type})")
-    
-    # set names
-    task_name = md_config.get("task_name", directory.name)
-    ana_config = AnalysisConfig.model_validate(ana_config)
-    if ana_config.rmsd_name is None:
-        ana_config.rmsd_name = task_name
-    if ana_config.interaction_name is None:
-        ana_config.interaction_name = task_name
-    
+        ana_config = config
+        prod_stage = prefix
+
     # Process PBC and do alignment
     post_process_trajectory(
-        in_top=str(directory / 'system.pdb'),
+        in_top=str(directory / f'{basename}.pdb'),
         in_trj=str(directory / prod_stage / f'{prod_stage}.mdcrd'),
         out_pdb=str(directory / prod_stage / 'prod_processed.pdb'),
         out_trj=str(directory / prod_stage / 'prod_processed.xtc'),
@@ -177,10 +175,12 @@ def run_plain_md_analysis_workflow(
             ligand = Ligand.from_directory(directory / 'ligand')
             protein = Protein.from_pdb(protein_pdb_path)
 
-            protein_ffs = md_config.get("protein_ff", ["amber14-all.xml", "amber14/tip3p.xml"])
-            saltcon = md_config.get('ionic_strength', 0.15)
             if saltcon != ana_config.gbsa_saltcon:
-                logger.warning(f"GBSA use a different salt concentration ({ana_config.gbsa_saltcon}) but MD use ({saltcon})")
+                logger.warning(
+                    "GBSA use a different salt concentration (%s) but MD use (%s)",
+                    ana_config.gbsa_saltcon,
+                    saltcon,
+                )
 
             runner = GBSARunner(
                 protein=protein,
