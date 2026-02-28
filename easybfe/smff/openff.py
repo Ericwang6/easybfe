@@ -88,8 +88,8 @@ class OpenFF(SmallMoleculeForceField):
     :class:`easybfe.smff.custom.CustomForceField` : Custom topology reuse.
     """
     
-    def __init__(self, forcefield: str = 'openff-2.1.0', charge_method: str = 'bcc'):
-        super().__init__(forcefield, charge_method)
+    def __init__(self, forcefield: str = 'openff-2.1.0', charge_method: str = 'bcc', *args, **kwargs):
+        super().__init__(forcefield, charge_method, *args, **kwargs)
         
         if charge_method == 'gas':
             self.charge_method = 'gasteiger'

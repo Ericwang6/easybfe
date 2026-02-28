@@ -9,6 +9,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Union, List, Optional, Any, Dict
 import logging
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -62,7 +63,6 @@ class Ligand(BaseModel):
     >>> print(ligand.auxiliary_files)
     {'ligand.prmtop': 'content...'}
     """
-
     name: str = Field(..., description="Ligand name/identifier")
     smiles: str = Field(..., description="SMILES string representation")
     mol_block: str = Field(default='', description="Core 3D structure in SDF mol block format")
@@ -93,13 +93,18 @@ class Ligand(BaseModel):
         if m is None:
             raise ValueError(f"Invalid SMILES: {self.smiles}")
         self.smiles = Chem.MolToSmiles(Chem.RemoveHs(m))
+        
         if not self.mol_block:
-            # Generate mol_block from the validated molecule
             self.mol_block = Chem.MolToMolBlock(m)
-        mol_block_lines = [line.strip('\n') for line in self.mol_block.split('\n')]
-        if mol_block_lines[0] != self.name:
-            logger.debug(f"Set mol_block name to {self.name}")
-            self.mol_block = f'{self.name}\n' + '\n'.join(mol_block_lines[1:])
+        else:
+            mol_from_block = Chem.MolFromMolBlock(self.mol_block)
+            smi_from_block = Chem.MolToSmiles(Chem.RemoveHs(mol_from_block))
+            assert smi_from_block == self.smiles, 'SMILES and mol block does not refer to the same molecule'
+            mol_block_lines = [line.strip('\n') for line in self.mol_block.split('\n')]
+            if mol_block_lines[0] != self.name:
+                logger.debug(f"Set mol_block name to {self.name}")
+                self.mol_block = f'{self.name}\n' + '\n'.join(mol_block_lines[1:])
+        
         
         # Compute molecular properties
         self.mol_weight = Descriptors.MolWt(m)
@@ -181,7 +186,7 @@ class Ligand(BaseModel):
             else:
                 sdf = sdfs[0]
                 stem = sdf.stem
-        ligand = loader.load(directory / f'{stem}.sdf', only_first=True, use_stem_as_name=True)[0]
+        ligand = loader.load(directory / f'{stem}.sdf', only_first=True, name_from_stem=True)[0]
         ligand.source = f'Init from {directory}'
         for file in directory.glob(f'{stem}.*'):
             if file.suffix in ['.sdf', '.png']:
@@ -251,7 +256,19 @@ class LigandLoader:
     def __init__(self):
         """Initialize the ligand loader."""
 
-    def load(self, source: Any, enforce_unique_name: bool = True, **kwargs) -> List[Ligand]:
+    def load(
+        self,
+        source: Any,
+        enforce_unique_name: bool = True,
+        name_from_stem: bool = True,
+        only_first: bool = False,
+        name_prop: str = "_Name",
+        name_col: Optional[str] = None,
+        smi_col: str = "smiles",
+        smi_col_index: int = 0,
+        auto_naming: bool = False,
+        name: Optional[str] = None
+    ) -> List[Ligand]:
         """
         Unified entry method that dispatches parsing logic based on source type.
 
@@ -265,12 +282,20 @@ class LigandLoader:
         enforce_unique_name : bool, optional
             If True (default), validate that all ligand names are unique.
             If False, skip uniqueness validation.
-        **kwargs
-            Additional keyword arguments:
-            * name_col (str): Column name for ligand names (DataFrame/CSV)
-            * smi_col (str): Column name for SMILES (DataFrame/CSV)
-            * name_from_stem (bool): Use filename stem as name (SDF)
-            * only_first (bool): Only read first molecule from SDF file
+        name_from_stem : bool, optional
+            Use filename stem as ligand name for SDF/SMI files. Default True.
+        only_first : bool, optional
+            Only read first molecule from each SDF/SMI file. Default False.
+        name_prop : str, optional
+            RDKit property used for molecule name in SDF. Default ``'_Name'``.
+        name_col : str, optional
+            Column name for ligand names (DataFrame/CSV). Required for DataFrame and CSV.
+        smi_col : str, optional
+            Column name for SMILES (DataFrame/CSV). Required for DataFrame and CSV.
+        smi_col_index : int, optional
+            Column index for SMILES in SMI files (0 or 1). Default 0.
+        auto_naming : bool, optional
+            Assign default names when name is missing. Default False.
 
         Returns
         -------
@@ -290,32 +315,54 @@ class LigandLoader:
         >>> ligands = loader.load(df, name_col="Name", smi_col="SMILES")
         >>> ligands = loader.load([mol1, mol2], enforce_unique_name=False)
         """
-        # Dispatch parsing logic based on input type
         if isinstance(source, pd.DataFrame):
-            name_col = kwargs.get("name_col")
-            smi_col = kwargs.get("smi_col")
-            if name_col is None or smi_col is None:
-                raise ValueError("name_col and smi_col must be provided for DataFrame")
-            items = self._from_dataframe(source, name_col, smi_col)
+            items = self._from_dataframe_or_csv(
+                source,
+                smi_col=smi_col,
+                name_col=name_col,
+                source="DataFrame",
+                auto_naming=auto_naming,
+            )
         elif isinstance(source, list) and len(source) > 0 and isinstance(source[0], Chem.Mol):
             items = self._from_rdkit_mol_list(source)
         elif isinstance(source, (str, Path, list)):
-            # Handle file paths or list of file paths (SDF, CSV, SMI)
-            items = self._from_files(source, **kwargs)
+            items = self._from_files(
+                source,
+                name_from_stem=name_from_stem,
+                only_first=only_first,
+                name_prop=name_prop,
+                name_col=name_col,
+                smi_col=smi_col,
+                smi_col_index=smi_col_index,
+                auto_naming=auto_naming,
+            )
         else:
             raise ValueError(f"Unsupported input type: {type(source)}")
 
-        # Convert to Ligand models and validate uniqueness
         ligands = [Ligand(**item) for item in items]
         if enforce_unique_name:
             self._validate_uniqueness(ligands)
+        
+        if name:
+            if len(ligands) == 0:
+                ligands[0].name = name
+            else:
+                warnings.warn(f"Multiple ligands loaded - name='{name}' will not be effective.")
         return ligands
 
     # --- Internal parsing logic (private methods) ---
 
     def _from_files(
-        self, paths: Union[str, Path, List[Union[str, Path]]], **kwargs
-    ) -> List[dict]:
+        self,
+        paths: Union[str, Path, list[Union[str, Path]]],
+        name_from_stem: bool = True,
+        only_first: bool = False,
+        name_prop: str = "_Name",
+        name_col: Optional[str] = None,
+        smi_col: Optional[str] = None,
+        smi_col_index: int = 0,
+        auto_naming: bool = False
+    ) -> list[dict]:
         """
         Parse ligands from file paths.
 
@@ -323,14 +370,24 @@ class LigandLoader:
         ----------
         paths : str, Path, or List[Union[str, Path]]
             Single file path or list of file paths.
-            When a single path is provided, name_from_stem defaults to False.
-            When a list of paths is provided, name_from_stem can be set via kwargs.
-        **kwargs
-            Additional arguments passed to format-specific parsers:
-            * name_from_stem (bool): Use filename stem as name (SDF, only for list of paths)
-            * only_first (bool): Only read first molecule from SDF file
-            * name_col (str): Column name for ligand names (CSV)
-            * smi_col (str): Column name for SMILES (CSV)
+        name_from_stem : bool, optional
+            If True, use the filename stem as the ligand name for SDF/SMI inputs
+            whenever there is exactly one molecule per file. For multi-molecule
+            SDF files, the ``_Name`` property is used instead and a warning is
+            emitted. Default True.
+        only_first : bool, optional
+            Only read first molecule from each SDF/SMI file. Default True.
+        name_prop : str, optional
+            RDKit property used for molecule name in SDF. Default ``'_Name'``.
+        name_col : str, optional
+            Column name for ligand names in CSV. Required for CSV files.
+        smi_col : str, optional
+            Column name for SMILES in CSV. Required for CSV files.
+        smi_col_index : int, optional
+            Column index for SMILES in SMI files (0 or 1). Default 0.
+        auto_naming : bool, optional
+            If True, assign default names (e.g. ``{filename}_mol_{i}``) when
+            name is missing. Default True.
 
         Returns
         -------
@@ -344,52 +401,60 @@ class LigandLoader:
         ValueError
             If file format is not supported.
         """
-        if isinstance(paths, (str, Path)):
-            path_list = [paths]
-            name_from_stem = kwargs.get("name_from_stem", False)
-        else:
-            path_list = paths 
-            name_from_stem = False
-            
+        single_path = isinstance(paths, (str, Path))
+        path_list = [Path(paths)] if single_path else [Path(p) for p in paths]
+        # Honor name_from_stem for both single and multiple paths; the per-file
+        # logic in parsers will fall back to molecule properties when needed.
+        use_stem = name_from_stem
         all_items = []
 
         for p in path_list:
-            p = Path(p)
-            if not p.exists():
+            if not p.is_file():
                 raise FileNotFoundError(f"File not found: {p}")
-            
-            content = p.read_bytes()  # Read bytes to support Web uploads
-            
+
             if p.suffix.lower() == ".sdf":
-                only_first = kwargs.get("only_first", False)
-                all_items.extend(self._parse_sdf(content, p.name, name_from_stem, only_first))
+                all_items.extend(
+                    self._parse_sdf(
+                        p, use_stem, only_first,
+                        name_prop=name_prop, auto_naming=auto_naming
+                    )
+                )
             elif p.suffix.lower() == ".csv":
-                name_col = kwargs.get("name_col")
-                smi_col = kwargs.get("smi_col")
                 if name_col is None or smi_col is None:
-                    raise ValueError("name_col and smi_col must be provided for CSV files")
-                df = pd.read_csv(io.BytesIO(content))
-                all_items.extend(self._from_dataframe(df, name_col, smi_col, p.name))
-            
+                    raise ValueError(
+                        "name_col and smi_col must be provided for CSV files"
+                    )
+                all_items.extend(
+                    self._from_dataframe_or_csv(
+                        p,
+                        smi_col=smi_col,
+                        name_col=name_col,
+                        source=p.name,
+                        auto_naming=auto_naming,
+                    )
+                )
             elif p.suffix.lower() in [".smi", ".smiles"]:
-                all_items.extend(self._parse_smi(content, p.name))
+                all_items.extend(
+                    self._parse_smi(
+                        p, use_stem, only_first, smi_col_index,
+                        auto_naming=auto_naming
+                    )
+                )
             else:
                 raise ValueError(f"Unsupported file format: {p.suffix}")
 
         return all_items
 
     def _parse_sdf(
-        self, content: bytes, filename: str, use_stem: bool, only_first: bool
+        self, fpath: Path, use_stem: bool, only_first: bool, name_prop: str = '_Name', auto_naming: bool = False
     ) -> List[dict]:
         """
-        Parse ligands from SDF file content with 3D geometry.
+        Parse ligands from an SDF file with 3D geometry.
 
         Parameters
         ----------
-        content : bytes
-            SDF file content as bytes.
-        filename : str
-            Original filename (used for source attribute).
+        fpath : Path
+            Path to the SDF file.
         use_stem : bool
             If True, use filename stem as ligand name; otherwise use _Name property.
         only_first : bool
@@ -412,28 +477,33 @@ class LigandLoader:
         Molecules are loaded with explicit hydrogens preserved (removeHs=False).
         Mol block is generated from the molecule with 3D coordinates.
         """
-        suppl = Chem.SDMolSupplier()
-        suppl.SetData(content, removeHs=False)
+        suppl = Chem.SDMolSupplier(str(fpath), removeHs=False)
         mols = [next(suppl)] if only_first else [m for m in suppl]
         for i, m in enumerate(mols):
             if m is None:
-                raise ValueError(f"Fail to parse molecule {i} in {filename}")
-        names = [Path(filename).stem for m in mols] if use_stem else []
-        items = self._from_rdkit_mol_list(mols, names=names)
+                raise ValueError(f"Fail to parse molecule {i} in {fpath}")
+        if len(mols) > 1:
+            if use_stem:
+                warnings.warn(f"Muliple ligands found in {fpath}. use_stem will be forcibly to be False. Molecule names will be read from {name_prop}")
+            names = []
+        else:
+            names = [fpath.stem for _ in mols] if use_stem else []
+
+        items = self._from_rdkit_mol_list(mols, name_prop=name_prop, names=names)
         for i in range(len(items)):
-            items[i]['source'] = filename
+            items[i]["source"] = fpath.name
+            if auto_naming and not items[i]['name']:
+                items[i]['name'] = f'{fpath.name}_mol_{i}'
         return items
 
-    def _parse_smi(self, content: bytes, filename: str) -> List[dict]:
+    def _parse_smi(self, fpath: Path, use_stem: bool, only_first: bool, smi_col_index: int = 0, auto_naming: bool = False) -> List[dict]:
         """
-        Parse ligands from SMILES file content.
+        Parse ligands from a SMILES file.
 
         Parameters
         ----------
-        content : bytes
-            SMILES file content as bytes.
-        filename : str
-            Original filename (used for source attribute).
+        fpath : Path
+            Path to the SMILES file.
 
         Returns
         -------
@@ -448,30 +518,44 @@ class LigandLoader:
         SMILES validation and mol_block generation (if empty) are handled automatically
         by the Ligand model validator.
         """
-        text = content.decode("utf-8")
+        text = fpath.read_text(encoding="utf-8")
         items = []
-        
+
+        sc = 0 if smi_col_index == 0 else 1
+        nc = 1 if smi_col_index == 0 else 0
+
         for line_num, line in enumerate(text.strip().split("\n"), start=1):
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            
-            parts = line.split()  
-            smiles = parts[0]
-            
-            if len(parts) > 1:
-                name = parts[1].strip()
-            else:
-                name = f"{Path(filename).stem}_line_{line_num}"
-            
-            # Let validator handle SMILES validation and mol_block generation
+
+            parts = line.split()
+            smiles = parts[sc]
+            name = parts[nc].strip() if len(parts) > 1 else ""
+
             items.append({
                 "name": name,
                 "smiles": smiles,
                 "mol_block": "",
-                "source": filename
+                "source": fpath.name
             })
-        
+
+            if only_first:
+                break
+
+        if use_stem and items:
+            if len(items) > 1:
+                warnings.warn(
+                    f"Multiple ligands found in {fpath}. "
+                    "use_stem will be forcibly set to False."
+                )
+            else:
+                items[0]["name"] = fpath.stem
+
+        if auto_naming:
+            for i in range(len(items)):
+                if not items[i]["name"]:
+                    items[i]["name"] = f"{fpath.name}_mol_{i}"
         return items
     
     def _from_rdkit_mol(self, mol: Chem.Mol, name_prop: str = '_Name', name: str | None = None):
@@ -491,7 +575,7 @@ class LigandLoader:
                 name = ''
         return {"name": name, "smiles": smiles, "mol_block": mol_block, "dG_expt": dG_expt}
 
-    def _from_rdkit_mol_list(self, mols: List[Chem.Mol], name_prop: str = '_Name', names: list[str] = list()) -> List[dict]:
+    def _from_rdkit_mol_list(self, mols: List[Chem.Mol], name_prop: str = '_Name', names: list[str] = list(), auto_naming: bool = True) -> List[dict]:
         """
         Parse ligands from a list of RDKit molecule objects.
 
@@ -521,17 +605,26 @@ class LigandLoader:
         if names:
             for i, (item, name) in enumerate(zip(items, names, strict=True)):
                 items[i]['name'] = name
+        if auto_naming:
+            for i in range(len(items)):
+                if not items[i]["name"]:
+                    items[i]["name"] = f"mol_{i}"
         return items
 
-    def _from_dataframe(
-        self, df: pd.DataFrame, name_col: str, smi_col: str, source: str = "DataFrame"
+    def _from_dataframe_or_csv(
+        self, 
+        data: Union[pd.DataFrame, str, Path], 
+        smi_col: str = 'smiles', 
+        name_col: Optional[str] = None,
+        source: str = "DataFrame",
+        auto_naming: bool = False
     ) -> List[dict]:
         """
         Parse ligands from a pandas DataFrame.
 
         Parameters
         ----------
-        df : pd.DataFrame
+        data : pd.DataFrame
             DataFrame containing ligand data.
         name_col : str
             Column name containing ligand names.
@@ -556,25 +649,35 @@ class LigandLoader:
         Empty rows are skipped. SMILES validation and mol_block generation (if empty)
         are handled automatically by the Ligand model validator.
         """
-        if name_col not in df.columns:
+        if not isinstance(data, pd.DataFrame):
+            path = Path(data)
+            df = pd.read_csv(str(path))
+            return self._from_dataframe_or_csv(
+                df,
+                smi_col=smi_col,
+                name_col=name_col,
+                source=path.name,
+                auto_naming=auto_naming,
+            )
+
+        if (name_col) and name_col not in data.columns:
             raise KeyError(f"Column '{name_col}' not found in DataFrame")
-        if smi_col not in df.columns:
+        if smi_col not in data.columns:
             raise KeyError(f"Column '{smi_col}' not found in DataFrame")
         
         items = []
-        for _, row in df.iterrows():
-            name_val = row[name_col]
+        for _, row in data.iterrows():
+            name_val = row[name_col] if name_col else ""
             smiles_val = row[smi_col]
             
             # Handle NaN values (empty strings in CSV become NaN when read)
-            if pd.isna(name_val) or pd.isna(smiles_val):
+            if pd.isna(smiles_val):
                 continue
             
             name = str(name_val).strip()
             smiles = str(smiles_val).strip()
-            
-            # Skip rows with empty name or SMILES (validator will catch invalid SMILES)
-            if not name or not smiles:
+
+            if not smiles.strip():
                 continue
             
             # Let validator handle SMILES validation and mol_block generation
@@ -584,6 +687,11 @@ class LigandLoader:
                 "mol_block": "",
                 "source": source
             })
+        
+        if auto_naming:
+            for i in range(len(items)):
+                if not items[i]['name']:
+                    items[i]['name'] = f'{source}_mol_{i}'
         
         return items
 

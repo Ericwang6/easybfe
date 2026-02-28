@@ -199,8 +199,8 @@ class GAFF(SmallMoleculeForceField):
     :class:`easybfe.smff.openff.OpenFF` : OpenFF alternative.
     """
     
-    def __init__(self, forcefield: Literal['gaff2', 'gaff'] = 'gaff2', charge_method: Literal['bcc', 'gas'] = 'bcc'):
-        super().__init__(forcefield, charge_method)
+    def __init__(self, forcefield: Literal['gaff2', 'gaff'] = 'gaff2', charge_method: Literal['bcc', 'gas'] = 'bcc', *args, **kwargs):
+        super().__init__(forcefield, charge_method, *args, **kwargs)
 
         assert self.forcefield in ['gaff', 'gaff2'], f'Unsupported atom type: {forcefield}'
         assert self.charge_method in ['bcc', 'gas'], f'Unsupported charge method: {charge_method}'

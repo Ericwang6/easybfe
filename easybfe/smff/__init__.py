@@ -2,18 +2,20 @@
 Small molecule force field parameterization package.
 
 This package provides tools for parameterizing small molecules with various
-force fields including GAFF, GAFF2, and OpenFF. It supports automatic charge
-assignment and generates topology files in AMBER and OpenMM XML formats.
+force fields including GAFF, GAFF2, OpenFF, and custom XML-based force fields.
+It supports automatic charge assignment, parallel parametrization of multiple
+ligands, and generation of topology files in AMBER (prmtop/inpcrd) and OpenMM
+XML formats.
 """
-import os
-import logging
-import warnings
-from typing import Any, Union
-from pathlib import Path
 
-from .registry import PARAMETRIZER_REGISTRY
+import logging
+import os
+from pathlib import Path
+from typing import Any
+
 from .base import SmallMoleculeForceField
 from .custom import CustomForceField
+from .registry import PARAMETRIZER_REGISTRY
 try:
     from .gaff import GAFF
 except ImportError:
@@ -28,7 +30,7 @@ from ..core.ligand import Ligand, LigandLoader
 logger = logging.getLogger(__name__)
 
 
-def load_parametrizer(forcefield: str, charge_method: str, engine: str = '', **kwargs) -> SmallMoleculeForceField:
+def load_parametrizer(forcefield: str, charge_method: str, engine: str = '', raise_errors: bool = False, **kwargs) -> SmallMoleculeForceField:
     """
     Load a force field parameterizer based on force field name and engine.
 
@@ -92,7 +94,7 @@ def load_parametrizer(forcefield: str, charge_method: str, engine: str = '', **k
 
     logger.debug(f"Loading parameterizer: engine={engine}, forcefield={forcefield}, charge_method={charge_method}")
     try:
-        return PARAMETRIZER_REGISTRY.create(engine, forcefield, charge_method, **kwargs)
+        return PARAMETRIZER_REGISTRY.create(engine, forcefield, charge_method, raise_errors, **kwargs)
     except KeyError:
         available = ", ".join(PARAMETRIZER_REGISTRY.names())
         msg = (
@@ -102,110 +104,90 @@ def load_parametrizer(forcefield: str, charge_method: str, engine: str = '', **k
         raise NotImplementedError(msg)
 
 
-def parametrize_ligand_single(
-    ligand: Union[str, Path, Any],
-    name: str,
-    out_dir: Union[str, Path],
+def parametrize_ligands(
+    source: Any,
+    output_base_dir: str | Path,
     forcefield: str,
     charge_method: str,
-    engine: str = '',
-    **kwargs
-) -> Ligand:
+    engine: str = "",
+    raise_errors: bool = False,
+    nprocs: int = -1,
+    **kwargs: Any,
+) -> list[Ligand]:
     """
-    Load, parametrize, and save a ligand with the specified force field.
-    
-    This function provides a convenient high-level interface for the complete
-    ligand parametrization workflow. It loads a ligand from various input formats,
-    assigns it a name, generates force field parameters, and saves all output
-    files to the specified directory.
-    
+    Load, parametrize, and save one or more ligands with the specified force field.
+
+    This high-level convenience function wraps :class:`SmallMoleculeForceField`
+    implementations and :class:`easybfe.core.ligand.LigandLoader` to perform the
+    complete parametrization workflow:
+
+    1. Load ligands from a flexible ``source`` (files, SMILES, RDKit molecules, etc.).
+    2. Construct an appropriate parameterizer via :func:`load_parametrizer`.
+    3. Run parametrization (optionally in parallel) and write outputs under
+       ``output_base_dir / ligand.name`` for each ligand.
+
     Parameters
     ----------
-    ligand : str, Path, or Any
-        Ligand input source. Supported types:
-        
-        * :class:`str` or :class:`pathlib.Path`: File path (SDF, CSV, SMILES)
-        * :class:`pandas.DataFrame`: DataFrame with name and SMILES columns
-        * :class:`list` of :class:`rdkit.Chem.Mol`: List of RDKit molecules
-        
-        See :class:`easybfe.core.ligand.LigandLoader` for full supported formats.
-    name : str
-        Name to assign to the ligand. This will override any existing name
-        from the input source.
-    out_dir : str or Path
-        Output directory path where parametrized files will be saved.
-        Directory will be created if it does not exist.
+    source : Any
+        Ligand input source passed directly to
+        :meth:`easybfe.core.ligand.LigandLoader.load`. Typical values include:
+
+        * :class:`str` or :class:`pathlib.Path`: File path (SDF, CSV, SMILES, etc.)
+        * Sequence of :class:`rdkit.Chem.Mol`
+        * Other objects supported by :class:`LigandLoader`.
+    output_base_dir : str or Path
+        Base directory under which per-ligand subdirectories will be created
+        (one subdirectory per ligand name). Directories are created as needed.
     forcefield : str
-        Force field name or path. Auto-detection rules:
-        
-        * Contains 'gaff': :class:`easybfe.smff.gaff.GAFF` (engine ``acpype``)
-        * Contains 'openff' or ends with '.xml': :class:`easybfe.smff.openff.OpenFF`
-        * Otherwise: :class:`easybfe.smff.custom.CustomForceField`
+        Force field name or path. When ``engine`` is empty, the engine is
+        auto-detected from ``forcefield`` (see :func:`load_parametrizer`).
     charge_method : str
-        Partial charge assignment method (e.g., 'bcc', 'gas', 'am1bcc').
+        Partial charge assignment method (e.g. ``'bcc'``, ``'gas'``).
     engine : str, optional
-        Explicit engine override ('acpype', 'openff', or 'custom'). If empty,
-        engine is auto-detected from `forcefield`.
+        Explicit engine override (``'acpype'``, ``'openff'``, or ``'custom'``).
+        If empty, the engine is auto-detected from ``forcefield``.
+    raise_errors : bool, default=False
+        If ``True``, parametrization errors are raised immediately. If ``False``,
+        errors are logged/warned and failed ligands may be omitted from the
+        returned list.
+    nprocs : int, default=-1
+        Number of parallel processes. If -1, uses all available CPUs. If 1, runs
+        sequentially.
     **kwargs
-        Additional keyword arguments passed to the parameterizer constructor
-        or :meth:`easybfe.core.ligand.LigandLoader.load`.
-    
+        Additional keyword arguments forwarded to
+        :meth:`easybfe.core.ligand.LigandLoader.load` (e.g. ``only_first=True``,
+        ``name_from_stem=True``).
+
     Returns
     -------
-    Ligand
-        Parametrized ligand object with topology files (prmtop, inpcrd, pdb, xml)
-        stored as auxiliary files.
-    
+    list[Ligand]
+        List of successfully parametrized ligands. For single-ligand workflows
+        this will be a list of length 1.
+
     Raises
     ------
     ValueError
-        If ligand cannot be loaded, has invalid format, or duplicate names are
-        found when loading multiple molecules.
+        If no ligands can be loaded from ``source``.
     NotImplementedError
         If the specified or auto-detected engine is not supported.
-    AssertionError
-        If parametrization validation fails (energy mismatch between prmtop and XML).
-    
-    Examples
-    --------
-    >>> from easybfe.smff import parametrize_ligand
-    >>> # Parametrize from SDF file
-    >>> ligand = parametrize_ligand(
-    ...     ligand='ligand.sdf',
-    ...     name='benzene',
-    ...     out_dir='./output',
-    ...     forcefield='gaff2',
-    ...     charge_method='bcc'
-    ... )
-    >>> # Parametrize with explicit engine
-    >>> ligand = parametrize_ligand(
-    ...     ligand='molecule.sdf',
-    ...     name='molecule',
-    ...     out_dir='./output',
-    ...     forcefield='openff-2.1.0',
-    ...     charge_method='gas',
-    ...     engine='openff'
-    ... )
-    
+
     See Also
     --------
-    :func:`easybfe.smff.load_parametrizer` : Load a force field parameterizer.
-    :class:`easybfe.core.ligand.LigandLoader` : Load ligands from various sources.
-    :class:`easybfe.smff.base.SmallMoleculeForceField` : Base parameterizer interface.
+    :func:`easybfe.smff.load_parametrizer`
+        Load a force field parameterizer implementation.
+    :class:`easybfe.core.ligand.LigandLoader`
+        Flexible ligand loading from files/SMILES/RDKit molecules.
+    :class:`easybfe.smff.base.SmallMoleculeForceField`
+        Base parameterizer interface.
     """
     loader = LigandLoader()
-    ligands = loader.load(ligand, only_first=True, **kwargs)
+    ligands = loader.load(source, **kwargs)
     if not ligands:
-        raise ValueError(f"No ligands loaded from source: {ligand}")
-    if len(ligands) > 0:
-        warnings.warn('Multiple ligands found, only the first one will be parameterized.')
-    
-    ligand_obj = ligands[0]
-    ligand_obj.name = name
-    
-    parametrizer = load_parametrizer(forcefield, charge_method, engine, **kwargs)
-    parametrized_ligand = parametrizer.run(ligand_obj)
-    
-    parametrized_ligand.dump(out_dir)
-    
-    return parametrized_ligand
+        raise ValueError(f"No ligands loaded from source: {source!r}")
+
+    logger.info("Loaded %d ligand(s) from source %r", len(ligands), source)
+
+    parametrizer = load_parametrizer(forcefield, charge_method, engine, raise_errors)
+    parametrized_ligands = parametrizer.run(ligands, output_base_dir, nprocs)
+
+    return parametrized_ligands

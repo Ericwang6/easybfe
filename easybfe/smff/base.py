@@ -6,19 +6,19 @@ parametrization jobs. All concrete implementations must inherit from
 :class:`SmallMoleculeForceField` and implement the :meth:`_parametrize` method.
 """
 import abc
-import os
-import traceback
-from pathlib import Path
-import shutil
 import logging
-import tempfile, shutil
+import os
+import shutil
+import tempfile
+import traceback
 import warnings
+from collections import defaultdict
+from pathlib import Path
 
 import openmm as mm
-import openmm.unit as unit
 import openmm.app as app
+import openmm.unit as unit
 import parmed
-
 
 from .utils import convert_to_xml
 from ..core.ligand import Ligand
@@ -79,10 +79,17 @@ class SmallMoleculeForceField(abc.ABC):
     :class:`easybfe.smff.custom.CustomForceField` : Custom force field implementation.
     """
     
-    def __init__(self, forcefield: str = '', charge_method: str = '', *args, **kwargs):
+    def __init__(self, forcefield: str = '', charge_method: str = '', raise_errors: bool = True, *args, **kwargs):
         """Initialize the force field parameterizer."""
         self.forcefield = forcefield
         self.charge_method = charge_method
+        self._raise_errors = raise_errors
+    
+    def raise_error(self, msg):
+        if self._raise_errors:
+            raise Exception(msg)
+        else:
+            warnings.warn(f'Parameterization failed: {msg}')
     
     def _setup(self, ligand: Ligand):
         return ligand.embed(return_new=True)
@@ -193,27 +200,42 @@ class SmallMoleculeForceField(abc.ABC):
         --------
         :meth:`run` : Public interface supporting parallel execution.
         """
-        tmpd = tempfile.mkdtemp() if wdir is None else wdir
+        tmpd = tempfile.mkdtemp() if wdir is None else Path(wdir).resolve() / '.smff.tmp'
+        Path(tmpd).mkdir(exist_ok=True, parents=True)
         # setup
         try:
             ligand = self._setup(ligand)
         except Exception as e:
-            raise Exception(f"Ligand setup failed:\n {traceback.format_exc()}")
+            self.raise_error(f"Ligand setup failed:\n {traceback.format_exc()}")
+            return None
+        
         # parameterize
         try:
             ligand = self._parametrize(ligand, tmpd)
         except Exception as e:
-            raise Exception(f'{traceback.format_exc()}\n\n ERROR: Ligand parameterization failed due to the above reason, please check {tmpd}')
+            self.raise_error(f'{traceback.format_exc()}\n\n ERROR: Ligand parameterization failed due to the above reason, please check {tmpd}')
+            return None
+        
         # validation
         try:
             ligand = self._validate(ligand, tmpd)
         except Exception as e:
-            raise Exception(f'Ligand parameterization failed to be validated because of the following error: {traceback.format_exc()}')
-        if wdir is None:
-            shutil.rmtree(tmpd)
+            self.raise_error(f'Ligand parameterization failed to be validated because of the following error: {traceback.format_exc()}')
+            return None
+        
+        shutil.rmtree(tmpd)
+        ligand.dump(wdir)
         return ligand
     
-    def run(self, ligand: list[Ligand] | Ligand, nprocs: int = -1) -> list[Ligand]:
+    def _run_wrapper(self, args):
+        return self._run(*args)
+    
+    def run(
+        self,
+        ligand: list[Ligand] | Ligand,
+        output_base_dir: str | Path | None = None,
+        nprocs: int = -1,
+    ) -> Ligand | list[Ligand]:
         """
         Parametrize one or more ligands with optional parallel execution.
         
@@ -221,6 +243,10 @@ class SmallMoleculeForceField(abc.ABC):
         ----------
         ligand : Ligand or list of Ligand
             Single ligand or list of ligands to parametrize.
+        output_base_dir : str or Path, optional
+            Base directory where per-ligand subdirectories will be created. If
+            provided, each ligand is written to ``output_base_dir / ligand.name``.
+            Duplicate ligand names are automatically disambiguated.
         nprocs : int, default=-1
             Number of parallel processes. If -1, uses all available CPUs.
             If 1, runs sequentially without multiprocessing overhead.
@@ -229,6 +255,8 @@ class SmallMoleculeForceField(abc.ABC):
         -------
         Ligand or list of Ligand
             Parametrized ligand(s) with topology files and validated parameters.
+            If the input is a single :class:`Ligand`, a single :class:`Ligand`
+            is returned; otherwise a list is returned.
         
         Examples
         --------
@@ -249,29 +277,83 @@ class SmallMoleculeForceField(abc.ABC):
         :class:`easybfe.ligand.LigandLoader` : Load ligands from files or other sources.
         """
         from ..parallel import run_func_parallel
+
+        # Track whether a single ligand was passed in
+        single_input = isinstance(ligand, Ligand)
+
         # Normalize input to list
-        input_ligands = [ligand] if isinstance(ligand, Ligand) else ligand
-        
-        # Check for duplicate names in input
-        input_names = [lig.name for lig in input_ligands]
+        input_ligands = [ligand] if single_input else list(ligand)
+
+        if output_base_dir is not None:
+            names_count: dict[str, int] = defaultdict(int)
+            input_names: list[str] = []
+            output_dirs: list[Path] = []
+            base_dir = Path(output_base_dir)
+            for i, lig in enumerate(input_ligands):
+                if not lig.name:
+                    lig.name = f"unnamed_{i}"
+                    warnings.warn(
+                        f"Ligand {i} has no name, '{lig.name}' is assigned",
+                        UserWarning,
+                    )
+                count = names_count[lig.name]
+                if count > 0:
+                    new_name = f"{lig.name}_{count}"
+                    warnings.warn(
+                        f"Duplicated name {lig.name} found. "
+                        f"Ligand {i} is renamed to {new_name}",
+                        UserWarning,
+                    )
+                    lig.name = new_name
+                names_count[lig.name] += 1
+                input_names.append(lig.name)
+                output_dirs.append(base_dir / lig.name)
+        else:
+            output_dirs = [None for _ in range(len(input_ligands))]
+            input_names = [lig.name for lig in input_ligands]
+
         # Run parametrization in parallel (order may not be preserved)
-        output_ligands = run_func_parallel(self._run, input_ligands, nprocs)
+        output_ligands = run_func_parallel(
+            self._run_wrapper,
+            [(l, p) for l, p in zip(input_ligands, output_dirs)],
+            nprocs,
+        )
+
+        if not self._raise_errors:
+            n_total = len(output_ligands)
+            n_failed = sum(lig is None for lig in output_ligands)
+            n_success = n_total - n_failed
+            logger.info(
+                "Parametrization finished: %d succeeded, %d failed.",
+                n_success,
+                n_failed,
+            )
 
         if len(input_names) != len(set(input_names)):
-            logger.warning(
-                "Duplicate ligand names detected in input. Cannot reorder outputs by name. "
-                "Results will be returned in parallel execution order."
-            )            
+            warnings.warn(
+                "Duplicate ligand names detected in input. Returned ligands are not in "
+                "the input order.",
+                UserWarning,
+            )
             return output_ligands
-        
-        # Create mapping from output name to output ligand
-        output_name_to_ligand = {lig.name: lig for lig in output_ligands}
-        
+
+        # Create mapping from output name to output ligand (skip failures)
+        output_name_to_ligand = {
+            lig.name: lig for lig in output_ligands if lig is not None
+        }
+
         # Reorder outputs to match input order using name keys
-        output_ligands = [output_name_to_ligand[name] for name in input_names]
-        
+        ordered_outputs: list[Ligand | None] = [
+            output_name_to_ligand.get(name) for name in input_names
+        ]
+
+        # Filter out failed parametrizations (None)
+        ordered_outputs = [lig for lig in ordered_outputs if lig is not None]
+
         # Return single ligand if input was single, otherwise return list
-        return output_ligands[0] if isinstance(ligand, Ligand) else ligand
+        if single_input:
+            return ordered_outputs[0] if ordered_outputs else None
+        return ordered_outputs
 
 
     @abc.abstractmethod
