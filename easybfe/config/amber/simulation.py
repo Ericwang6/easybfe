@@ -139,6 +139,7 @@ class AmberFepSimulationConfig(AmberSimulationConfig):
 
     use_charge_change: bool = True 
     use_settle_for_alchemical_water: bool = True
+    add_restraint_for_alchem_water: bool = True
     charge_change_method: Literal['dummy_ion', 'coalchem_water'] = 'dummy_ion'
     lambdas: list[float] | None = None
     num_lambdas: int = 16

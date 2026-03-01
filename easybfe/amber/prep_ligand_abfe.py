@@ -83,7 +83,8 @@ def setup_ligand_abfe_leg(
         elif config.use_charge_change and (not config.gas_phase):
             scIndices = list[int](range(ligand_pdb.topology.getNumAtoms()))
             coion_info = create_alchemical_ions(modeller, ligand_charge, 0, scIndices, method=config.charge_change_method)
-            rst_settings = set_alchemical_water_restraints(modeller, scIndices, coion_info)
+            if config.add_restraint_for_alchem_water:
+                rst_settings = set_alchemical_water_restraints(modeller, scIndices, coion_info)
             alchem_waters = [] if config.use_settle_for_alchemical_water else coion_info['alchemical_water_residues']
             mask = generate_amber_mask(num_ligand_atoms, -1, {}, coion_info, mode=mode)
         else:
