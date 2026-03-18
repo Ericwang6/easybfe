@@ -3,133 +3,19 @@ from pathlib import Path
 import logging
 from collections import defaultdict
 from typing import Optional, Dict, List, TextIO, Tuple
-from textwrap import wrap
+
 
 import numpy as np
+from scipy.spatial.distance import cdist
 import openmm as mm
 import openmm.app as app
 import openmm.unit as unit
 from pdbfixer import PDBFixer
 
+from .utils import *
+from .utils import _residue_repr
+
 logger = logging.getLogger(__name__)
-
-aa_mapping = {
-    'A': 'ALA', 'R': 'ARG', 'N': 'ASN', 'D': 'ASP', 'C': 'CYS',
-    'Q': 'GLN', 'E': 'GLU', 'G': 'GLY', 'H': 'HIS', 'I': 'ILE',
-    'L': 'LEU', 'K': 'LYS', 'M': 'MET', 'F': 'PHE', 'P': 'PRO',
-    'S': 'SER', 'T': 'THR', 'W': 'TRP', 'Y': 'TYR','V': 'VAL',
-}
-
-# copied from PDBFixer
-proteinResidues = ['ALA', 'ASN', 'CYS', 'GLU', 'HIS', 'LEU', 'MET', 'PRO', 'THR', 'TYR', 'ARG', 'ASP', 'GLN', 'GLY', 'ILE', 'LYS', 'PHE', 'SER', 'TRP', 'VAL']
-rnaResidues = ['A', 'G', 'C', 'U', 'I']
-dnaResidues = ['DA', 'DG', 'DC', 'DT', 'DI']
-# OpenMM amber14/tip3p.xml
-ionResidues = [
-    "AL", "Ag", "BA", "BR", "Be", "CA", "CD", "CE", "CL", "CO", "CR", "CS", "CU",
-    "Ce", "Cr", "Dy", "EU", "EU3", "Er", "F", "FE", "FE2", "GD3", "HG", "Hf", "IN",
-    "IOD", "K", "LA", "LI", "LU", "MG", "MN", "NA", "NI", "Nd", "PB", "PD", "PR",
-    "PT", "Pu", "RB", "Ra", "SM", "SR", "Sm", "Sn", "TB", "Th", "Tl", "Tm",
-    "U4+", "V2+", "Y", "YB2", "ZN", "Zr"
-]
-# Water - OpenMM will standarize WAT to HOH
-waterResidues = ['HOH']
-# metal residues
-metalResidues = [
-    "AL", "Ag", "BA", "Be", "CA", "CD", "CE", "CO", "CR", "CS", "CU",
-    "Ce", "Cr", "Dy", "EU", "EU3", "Er", "FE", "FE2", "GD3", "HG", "Hf", "IN",
-    "K", "LA", "LI", "LU", "MG", "MN", "NA", "NI", "Nd", "PB", "PD", "PR",
-    "PT", "Pu", "RB", "Ra", "SM", "SR", "Sm", "Sn", "TB", "Th", "Tl", "Tm",
-    "U4+", "V2+", "Y", "YB2", "ZN", "Zr"
-]
-
-
-def convert_to_three_letter_seq(sequence: str):
-    """
-    Convert one-letter amino acid sequence to three-letter codes.
-
-    Handles sequences with parentheses for non-standard residues. Content
-    inside parentheses is preserved as-is (e.g., for modified residues).
-
-    Parameters
-    ----------
-    sequence : str
-        One-letter amino acid sequence. May contain parentheses for
-        non-standard residues, e.g., ``"MK(SEP)K"``.
-
-    Returns
-    -------
-    List[str]
-        List of three-letter residue codes. Non-standard residues in
-        parentheses are kept as-is.
-
-    Raises
-    ------
-    ValueError
-        If unmatched parentheses are found in the sequence.
-
-    Examples
-    --------
-    >>> convert_to_three_letter_seq("MK")
-    ['MET', 'LYS']
-    >>> convert_to_three_letter_seq("MK(SEP)K")
-    ['MET', 'LYS', 'SEP', 'LYS']
-    """
-    # Convert the one-letter code to three-letter code
-    result = []
-    i = 0
-    while i < len(sequence):
-        if sequence[i] == '(':
-            # Find the closing parenthesis
-            closing_index = sequence.find(')', i)
-            if closing_index != -1:
-                # Append the content inside the parentheses as is
-                result.append(sequence[i+1:closing_index])
-                i = closing_index + 1
-            else:
-                raise ValueError("Unmatched parenthesis in the sequence.")
-        else:
-            # Convert the single-letter code to three-letter code
-            result.append(aa_mapping.get(sequence[i], 'XAA'))  # 'XAA' for unknown residues
-            i += 1
-    return result
-
-
-def convert_to_seqres(sequence: List[str], chain_id: str):
-    """
-    Convert a sequence list to PDB SEQRES record format.
-
-    Creates properly formatted SEQRES lines following PDB format
-    specifications, with lines wrapped at 51 characters.
-
-    Parameters
-    ----------
-    sequence : List[str]
-        List of three-letter residue codes.
-    chain_id : str
-        Single character chain identifier.
-
-    Returns
-    -------
-    str
-        Multi-line string containing SEQRES records, with each line
-        formatted as ``"SEQRES  <num> <chain> <length>  <residues>"``.
-
-    Examples
-    --------
-    >>> convert_to_seqres(['MET', 'LYS', 'GLY'], 'A')
-    'SEQRES   1 A    3  MET LYS GLY'
-    """
-    lines = wrap(' '.join([s.upper() for s in sequence]), 51)
-    # Create the SEQRES lines
-    seqres_lines = []
-    for i, line in enumerate(lines):
-        seqres_lines.append(f"SEQRES  {i+1: >2} {chain_id} {len(sequence): >4}  {line}")
-    return '\n'.join(seqres_lines)
-
-
-def _residue_repr(residue):
-    return f'<Residue {residue.name} {residue.id}{residue.insertionCode} (chain {residue.chain.id})>'
 
 
 class ProteinFixer(PDBFixer):
@@ -166,11 +52,18 @@ class ProteinFixer(PDBFixer):
     MAX_WARN_MISSING_RES = 10
     
     def __init__(self, *args, **kwargs):
+        self.wizard = kwargs.pop("wizard", False)
         super().__init__(*args, **kwargs)
         self.mod_res_info = []
         self.missing_residues_added = []
         self.missing_residues_skipped = []
         self.missing_atoms_added = []
+    
+    def msg(self, msg):
+        if not self.wizard:
+            logger.info(msg)
+        else:
+            print(msg)
     
     def standarizeResidue(self):
         """
@@ -383,7 +276,7 @@ class ProteinFixer(PDBFixer):
         # logging
         msg = "Found following residues bound with metal:\n"
         msg += '\n'.join([f'{_residue_repr(hres)}, assigned variant {var}' for hres, var in variants.items()])
-        logger.info(msg)
+        self.msg(msg)
 
         return variants
     
@@ -422,28 +315,73 @@ class ProteinFixer(PDBFixer):
         self.positions = modeller.positions
         self.standarizeResidue()
                     
-    def findNonstandardResidues(self):
+    def fixNonStandardResidues(self):
         """
-        Find and record non-standard residues in the structure.
+        Find non-standard residues, optionally replace them (wizard or replace all).
 
-        Calls the parent :meth:`PDBFixer.findNonstandardResidues` method and
-        additionally records modification information in
-        :attr:`self.mod_res_info` for later use in generating MODRES records.
+        Calls the parent :meth:`PDBFixer.findNonstandardResidues` to detect
+        non-standard residues, then in wizard mode prompts the user to replace
+        all, replace none, or manually select. Records modification info in
+        :attr:`self.mod_res_info` for residues that are replaced, then calls
+        :meth:`replaceNonstandardResidues`.
 
         Notes
         -----
-        Stores tuples of ``(chain_id, residue_id, insertion_code,
-        original_name, standard_name)`` in :attr:`self.mod_res_info` for
-        each non-standard residue found. Logs information about each
-        non-standard residue found.
+        In wizard mode, options are: replace all, replace none, or manually
+        choose per residue. Stores ``(chain_id, residue_id, insertion_code,
+        original_name, standard_name)`` in :attr:`self.mod_res_info` for each
+        replaced residue.
         """
-        # Find non-std residues
         super().findNonstandardResidues()
+        to_replace = list(self.nonstandardResidues)
+
+        if self.wizard and to_replace:
+            self.msg("")
+            self.msg("  Non-standard residues")
+            self.msg("  " + "=" * 52)
+            for i, (residue, std_name) in enumerate(to_replace):
+                self.msg(
+                    "  [%d]  %s  ->  %s  (chain %s, res %s%s)"
+                    % (i, residue.name, std_name, residue.chain.id, residue.id, residue.insertionCode or "")
+                )
+            self.msg("  " + "=" * 52)
+            while True:
+                option = input(
+                    "    1 Replace all    2 Replace none    3 Choose per residue\n"
+                    "  Choice [1-3]: "
+                ).strip()
+                if option == "1":
+                    break
+                if option == "2":
+                    to_replace = []
+                    break
+                if option == "3":
+                    to_replace = []
+                    for residue, std_name in self.nonstandardResidues:
+                        while True:
+                            is_replace = input(
+                                "  Replace %s (chain %s, res %s%s) -> %s? [Y/n]: "
+                                % (residue.name, residue.chain.id, residue.id, residue.insertionCode or "", std_name)
+                            ).strip()
+                            if is_replace.lower() == "n":
+                                break
+                            if is_replace.lower() == "y" or is_replace == "":
+                                to_replace.append((residue, std_name))
+                                break
+                            print("  -> Enter y or n")
+                    break
+                print("  -> Enter 1, 2, or 3")
+
+        self.nonstandardResidues = to_replace
+
         for residue, std_res_name in self.nonstandardResidues:
             self.mod_res_info.append(
                 (residue.chain.id, int(residue.id), residue.insertionCode, residue.name, std_res_name)
             )
-            logger.info('Found non-standard residue: %s -> %s', _residue_repr(residue), std_res_name)
+            self.msg("Replace non-standard residue: %s -> %s" % (_residue_repr(residue), std_res_name))
+
+        if self.nonstandardResidues:
+            self.replaceNonstandardResidues()
 
     def findMissingAtoms(
         self, 
@@ -549,19 +487,22 @@ class ProteinFixer(PDBFixer):
         
         if force_cap_terminals:
             for i, chain in enumerate(chains):
-                # TODO: this may be risky - I just want to skip non-protein chains. if the beginning is a non-std residue followed by normal protein
-                # this will break
-                if (chain_residues[i][0].name not in proteinResidues):
+                protein_indices = [
+                    j for j, r in enumerate(chain_residues[i])
+                    if r.name in proteinResidues
+                ]
+                if not protein_indices:
                     continue
-                # N-terminal
-                key = (chain.index, 0)
+                first_protein = protein_indices[0]
+                last_protein = protein_indices[-1]
+                # N-terminal cap before first protein residue
+                key = (chain.index, first_protein)
                 if key not in newMissingResidues:
                     newMissingResidues[key] = ['ACE']
                 elif newMissingResidues[key][0] != 'ACE':
                     newMissingResidues[key].insert(0, 'ACE')
-                # C-terminal
-                num_res = len(list(chain.residues()))
-                key = (chain.index, num_res)
+                # C-terminal cap after last protein residue
+                key = (chain.index, last_protein + 1)
                 if key not in newMissingResidues:
                     newMissingResidues[key] = ['NME']
                 elif newMissingResidues[key][-1] != 'NME':
@@ -648,11 +589,11 @@ class ProteinFixer(PDBFixer):
         
         # Logging
         if self.missing_residues_added:
-            logger.info('Add  missing residues:\n %s', self.missing_residues_added)
+            self.msg('Add  missing residues:\n %s', self.missing_residues_added)
         if self.missing_residues_skipped:
-            logger.info('Skip missing residues:\n %s', self.missing_residues_skipped)
+            self.msg('Skip missing residues:\n %s', self.missing_residues_skipped)
         if self.missing_atoms_added:
-            logger.info('Add  missing atoms:\n %s', self.missing_atoms_added)
+            self.msg('Add  missing atoms:\n %s', self.missing_atoms_added)
 
     @classmethod
     def _getMappedResnumWithIcode(cls, res_id: int, chain: str, res_num_mapping: Dict[str, Dict[int, str]]) -> Tuple[str, str]:
@@ -713,11 +654,14 @@ class ProteinFixer(PDBFixer):
         for chain, res_id, icode, res_name, std_res_name in mod_res_info:
             if res_num_mapping:
                 res_id = res_num_mapping[chain][res_id]
-                if res_id[-1].isalpha():
+                if isinstance(res_id, str) and res_id[-1].isalpha():
                     icode = res_id[-1]
                     res_id = res_id[:-1]
-            # TODO: need to figure out how to deal with modfied residues with insertion code (Eric)
-            modres_lines.append(f"MODRES {pdb_id:>4} {res_name:3} {chain:1} {res_id:>4}{icode:1} {std_res_name:3}   MODIFIED RESIDUE")
+            seq_num = int(res_id) if isinstance(res_id, str) else res_id
+            icode_char = (icode or ' ')[:1]
+            modres_lines.append(
+                f"MODRES {pdb_id:>4} {res_name:3} {chain:1} {seq_num:>4}{icode_char:1} {std_res_name:3}   MODIFIED RESIDUE"
+            )
         return modres_lines
     
     def refineAddedAtomPositions(self, forcefield=None):
@@ -786,7 +730,119 @@ class ProteinFixer(PDBFixer):
         mm.LocalEnergyMinimizer.minimize(context, tolerance=10)
         self.positions = context.getState(getPositions=True).getPositions()
         return self.positions
-    
+
+    def selectResiduesToKeep(self):
+        """
+        Prompt user to select which components to keep and remove the rest.
+
+        In wizard mode, prints a structure summary (polymers, water, ions by
+        chain), then prompts for each polymer chain and for water/ion treatment
+        (keep all, remove all, keep within distance, or choose by chain).
+        Residues not selected are removed from the topology using
+        :class:`openmm.app.Modeller`.
+
+        Notes
+        -----
+        Modifies :attr:`self.topology` and :attr:`self.positions` in-place.
+        Intended to be called from :meth:`run` when :attr:`wizard` is True.
+        """
+        self.msg("")
+        self.msg("  Structure summary")
+        self.msg("  " + "=" * 52)
+        components = annotate_topology(self.topology)
+        for i, (content, comp, chain_id, nres) in enumerate(components):
+            self.msg(f"  [{i}]  {content:<10}  chain {chain_id}  ({nres} residues)")
+        self.msg("  " + "=" * 52)
+        self.msg("")
+
+        keep_residues = []
+
+        polymers = [data for data in components if data[0] in ('Protein', 'DNA', 'RNA')]
+        if polymers:
+            self.msg("  Polymers (protein / DNA / RNA)")
+        for data in polymers:
+            while True:
+                isKeep = input(
+                    f"  Keep {data[0]} (chain {data[2]}, {data[3]} residues)? [Y/n]: "
+                ).strip()
+                if isKeep.lower() == 'n':
+                    break
+                if isKeep.lower() == 'y' or isKeep == '':
+                    keep_residues.extend(data[1])
+                    break
+                print("  -> Enter y or n")
+
+        water_ions = [data for data in components if data[0] in ('Water', 'Ion')]
+        if water_ions:
+            n_water = sum(d[3] for d in water_ions if d[0] == 'Water')
+            n_ion = sum(d[3] for d in water_ions if d[0] == 'Ion')
+            self.msg("")
+            self.msg("  Water & ions" + (f"  ({n_water} water, {n_ion} ions)" if (n_water or n_ion) else ""))
+            while True:
+                option = input(
+                    "    1 Keep all    2 Remove all    3 Keep within distance    4 Choose by chain\n"
+                    "  Choice [1-4]: "
+                ).strip()
+                if option == '1':
+                    for data in water_ions:
+                        keep_residues.extend(data[1])
+                    break
+                if option == '2':
+                    break
+                if option == '3':
+                    while True:
+                        dist_in = input("  Distance cutoff (Angstrom): ").strip()
+                        try:
+                            dist = float(dist_in)
+                            if dist > 0:
+                                break
+                        except ValueError:
+                            pass
+                        print("  -> Enter a positive number")
+                    positions_angstrom = np.array(self.positions.value_in_unit(unit.angstroms))
+                    keep_atom_indices = np.array(
+                        [a.index for res in keep_residues for a in res.atoms()],
+                        dtype=np.intp,
+                    )
+                    pos_keep = positions_angstrom[keep_atom_indices]
+                    candidate_atom_indices = []
+                    residue_slices = []
+                    for data in water_ions:
+                        for res in data[1]:
+                            start = len(candidate_atom_indices)
+                            candidate_atom_indices.extend(a.index for a in res.atoms())
+                            residue_slices.append((start, len(candidate_atom_indices), res))
+                    if candidate_atom_indices:
+                        pos_candidates = positions_angstrom[np.array(candidate_atom_indices, dtype=np.intp)]
+                        dists = cdist(pos_candidates, pos_keep)
+                        min_dist_per_candidate = np.min(dists, axis=1)
+                        for start, end, res in residue_slices:
+                            if np.any(min_dist_per_candidate[start:end] < dist):
+                                keep_residues.append(res)
+                    break
+                if option == '4':
+                    for data in water_ions:
+                        while True:
+                            isKeep = input(
+                                f"  Keep {data[0]} (chain {data[2]}, {data[3]} residues)? [Y/n]: "
+                            ).strip()
+                            if isKeep.lower() == 'n':
+                                break
+                            if isKeep.lower() == 'y' or isKeep == '':
+                                keep_residues.extend(data[1])
+                                break
+                            print("  -> Enter y or n")
+                    break
+                print("  -> Enter 1, 2, 3, or 4")
+
+        if keep_residues:
+            keep_set = set(keep_residues)
+            toDelete = [r for r in self.topology.residues() if r not in keep_set]
+            modeller = app.Modeller(self.topology, self.positions)
+            modeller.delete(toDelete)
+            self.topology = modeller.topology
+            self.positions = modeller.positions
+
     def run(
         self,
         skip_missing_terminal_residues: bool = False,
@@ -874,77 +930,76 @@ class ProteinFixer(PDBFixer):
         If ``res_num_mapping`` is provided, residue numbers and insertion
         codes are restored to their original PDB values in the output file.
         """
+        self.selectResiduesToKeep()        
+        self.fixNonStandardResidues()
+#         self.removeHeterogens(keep_water=keep_water, keep_ions=keep_ions, extra_keep=extra_keep)
+#         self.findMissingAtoms(
+#             skip_missing_terminal_residues=skip_missing_terminal_residues,
+#             max_num_consecutive_missing_residues=max_num_consecutive_missing_residues,
+#             cap_gaps=cap_gaps,
+#             force_cap_terminals=force_cap_terminals
+#         )
+#         self.addMissingAtoms()
+#         self.addMissingHydrogens(pH=pH, forcefield=forcefield)
+#         self.refineAddedAtomPositions(forcefield=forcefield)
+
+#         protein_top = self.topology
+#         protein_pos = self.positions
         
-        self.findNonstandardResidues()
-        self.replaceNonstandardResidues()
-        self.removeHeterogens(keep_water=keep_water, keep_ions=keep_ions, extra_keep=extra_keep)
-        self.findMissingAtoms(
-            skip_missing_terminal_residues=skip_missing_terminal_residues,
-            max_num_consecutive_missing_residues=max_num_consecutive_missing_residues,
-            cap_gaps=cap_gaps,
-            force_cap_terminals=force_cap_terminals
-        )
-        self.addMissingAtoms()
-        self.addMissingHydrogens(pH=pH, forcefield=forcefield)
-        self.refineAddedAtomPositions(forcefield=forcefield)
+#         # Save protein
+#         seqres = [(seq.chainId, convert_to_seqres(seq.residues, seq.chainId)) for seq in self.sequences]
+#         seqres.sort(key=lambda x: x[0])
+#         headers = [x[1] for x in seqres]
+#         headers += ProteinFixer.getFixedResidueRemarks(self.missing_residues_skipped, res_num_mapping, use_fixed_remark=False)
+#         headers += ProteinFixer.getFixedResidueRemarks(self.missing_residues_added, res_num_mapping)
+#         headers += ProteinFixer.getFixedAtomRemarks(self.missing_atoms_added, res_num_mapping)
+#         headers += ProteinFixer.getModresRecords(self.mod_res_info, res_num_mapping, '')
 
-        protein_top = self.topology
-        protein_pos = self.positions
-        
-        # Save protein
-        seqres = [(seq.chainId, convert_to_seqres(seq.residues, seq.chainId)) for seq in self.sequences]
-        seqres.sort(key=lambda x: x[0])
-        headers = [x[1] for x in seqres]
-        headers += ProteinFixer.getFixedResidueRemarks(self.missing_residues_skipped, res_num_mapping, use_fixed_remark=False)
-        headers += ProteinFixer.getFixedResidueRemarks(self.missing_residues_added, res_num_mapping)
-        headers += ProteinFixer.getFixedAtomRemarks(self.missing_atoms_added, res_num_mapping)
-        headers += ProteinFixer.getModresRecords(self.mod_res_info, res_num_mapping, '')
+#         if out is not None:
+#             is_file = (not hasattr(out, 'write'))
+#             fp = open(out, 'w') if is_file else out
+#         else:
+#             is_file = False
+#             fp = io.StringIO()
 
-        if out is not None:
-            is_file = (not hasattr(out, 'write'))
-            fp = open(out, 'w') if is_file else out
-        else:
-            is_file = False
-            fp = io.StringIO()
+#         app.PDBFile.writeHeader(protein_top, fp)
+#         for line in headers:
+#             print(line, file=fp)
+#         # map back residue id and icode
+#         if res_num_mapping:
+#             for residue in protein_top.residues():
+#                 res_id = res_num_mapping[residue.chain.id][int(residue.id)]
+#                 if res_id[-1].isalpha():
+#                     insert_code = res_id[-1]
+#                     res_id = res_id[:-1]
+#                 else:
+#                     insert_code = " "
+#                 residue.id = res_id
+#                 residue.insertionCode = insert_code
 
-        app.PDBFile.writeHeader(protein_top, fp)
-        for line in headers:
-            print(line, file=fp)
-        # map back residue id and icode
-        if res_num_mapping:
-            for residue in protein_top.residues():
-                res_id = res_num_mapping[residue.chain.id][int(residue.id)]
-                if res_id[-1].isalpha():
-                    insert_code = res_id[-1]
-                    res_id = res_id[:-1]
-                else:
-                    insert_code = " "
-                residue.id = res_id
-                residue.insertionCode = insert_code
+#         app.PDBFile.writeModel(protein_top, protein_pos, keepIds=True, file=fp)
+#         app.PDBFile.writeFooter(protein_top, file=fp)
 
-        app.PDBFile.writeModel(protein_top, protein_pos, keepIds=True, file=fp)
-        app.PDBFile.writeFooter(protein_top, file=fp)
-
-        if is_file:
-            fp.close()
-        if out is None:
-            fp.seek(0)
-            return fp.read()
-        return
+#         if is_file:
+#             fp.close()
+#         if out is None:
+#             fp.seek(0)
+#             return fp.read()
+#         return
         
             
-if __name__ == '__main__':
-    logger.setLevel(logging.DEBUG)
-    fixer = ProteinFixer(
-        # "/Users/ericwang/Documents/ReasonedTherapeutics/chd1/8umg_chain_A_water.pdb"
-        # '/Users/ericwang/Documents/Berkeley/easybfe/tests/data/proteinfixer/5ROB.pdb',
-        '/Users/ericwang/Documents/Berkeley/cache/PGK1_cmp45_water.pdb'
+# if __name__ == '__main__':
+#     logger.setLevel(logging.DEBUG)
+#     fixer = ProteinFixer(
+#         # "/Users/ericwang/Documents/ReasonedTherapeutics/chd1/8umg_chain_A_water.pdb"
+#         # '/Users/ericwang/Documents/Berkeley/easybfe/tests/data/proteinfixer/5ROB.pdb',
+#         '/Users/ericwang/Documents/Berkeley/cache/PGK1_cmp45_water.pdb'
 
-    )
-    fixer.run(
-        skip_missing_terminal_residues=False, 
-        force_cap_terminals=False, 
-        out='/Users/ericwang/Documents/Berkeley/cache/PGK1_cmp45_water_prepared.pdb',
-        keep_ions=False,
-        keep_water=True
-    )
+#     )
+#     fixer.run(
+#         skip_missing_terminal_residues=False, 
+#         force_cap_terminals=False, 
+#         out='/Users/ericwang/Documents/Berkeley/cache/PGK1_cmp45_water_prepared.pdb',
+#         keep_ions=False,
+#         keep_water=True
+#     )

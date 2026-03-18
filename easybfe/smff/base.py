@@ -224,7 +224,8 @@ class SmallMoleculeForceField(abc.ABC):
             return None
         
         shutil.rmtree(tmpd)
-        ligand.dump(wdir)
+        if wdir is not None:
+            ligand.dump(wdir)
         return ligand
     
     def _run_wrapper(self, args):

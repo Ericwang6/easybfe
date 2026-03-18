@@ -1,0 +1,10 @@
+numpy
+pandas
+matplotlib
+scipy
+rdkit
+acpype
+parmed
+openmm
+alchemlyb
+spyrmsd

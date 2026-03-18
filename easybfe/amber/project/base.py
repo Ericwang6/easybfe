@@ -244,27 +244,35 @@ class BaseAmberRbfeProject:
                     pool.map(func, mols)
            
     def parametrize_ligand(self, name: str, protein_name: str, forcefield: str = 'gaff2', charge_method: str = 'bcc', overwrite: bool = False):
-        from ...smff import GAFF, OpenFF, CustomForceField, SmallMoleculeForceField
+        from ...smff import load_parametrizer, SmallMoleculeForceField
+        from ...core.ligand import LigandLoader
 
         lig_dir = self.ligands_dir / protein_name / name
-        
-        ff_name = forcefield
+        sdf_path = lig_dir / f'{name}.sdf'
+
         if isinstance(forcefield, SmallMoleculeForceField):
             ff = forcefield
             ff_name = ff.__class__.__name__
         elif os.path.isfile(forcefield):
-            ff = CustomForceField(forcefield, overwrite)
+            ff = load_parametrizer(forcefield, '', engine='custom', overwrite=overwrite)
             ff_name = 'custom'
         elif forcefield.startswith('gaff'):
-            ff = GAFF(forcefield, charge_method)
+            ff = load_parametrizer(forcefield, charge_method, engine='acpype')
+            ff_name = forcefield
         elif forcefield.startswith('openff'):
-            ff = OpenFF(forcefield, charge_method) 
+            ff = load_parametrizer(forcefield, charge_method, engine='openff')
+            ff_name = forcefield
         else:
             msg = f"Unsupported force field: {forcefield}"
             self.logger.error(msg)
             raise NotImplementedError(msg)
 
-        ff.parametrize(lig_dir / f'{name}.sdf', lig_dir)
+        loader = LigandLoader()
+        ligands = loader.load(sdf_path, only_first=True, name_from_stem=True)
+        if not ligands:
+            raise ValueError(f"No ligand loaded from {sdf_path}")
+        ligand = ff.run(ligands[0], nprocs=1)
+        ligand.dump(lig_dir)
         self.logger.info(f"Ligand {name} is parametrized with {forcefield} and charge method {charge_method}")
         return ff_name
 
