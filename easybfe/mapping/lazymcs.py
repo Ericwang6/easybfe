@@ -7,7 +7,7 @@ This file contains a lazy implementation to generate atom mapping between two mo
 import os
 import logging
 from pathlib import Path
-from typing import Dict, Union
+from typing import Optional, Union
 import numpy as np
 from scipy.spatial.distance import cdist
 from rdkit import Chem
@@ -16,7 +16,9 @@ try:
 except:
     from rdkit.Chem.MCS import FindMCS
 
+from ..core import Ligand
 from .base import LigandRbfeAtomMapper
+from .registry import MAPPER_REGISTRY
 
 
 logger = logging.getLogger(__name__)
@@ -78,13 +80,27 @@ def get_common_core(molA, molB, mcs, use_positions=True, map_hydrogens=True):
     return cc
 
 
+@MAPPER_REGISTRY.register("lazymcs")
 class LazyMCSMapper(LigandRbfeAtomMapper):
     """
-    A lazy implementation of MCS search with RDKit plus geomtry-based mapping for hydrogens.
-    Not fully tested and cannot handle all cases
+    A lazy implementation of MCS search with RDKit plus geometry-based mapping for hydrogens.
+    Not fully tested and cannot handle all cases.
     """
-    def __init__(self, mcs: Union[str, Chem.Mol, Path, None], use_positions: bool = True, map_hydrogens: bool = True):
-        
+    def __init__(
+        self,
+        mcs: Union[str, Chem.Mol, Path, None] = None,
+        use_positions: bool = True,
+        map_hydrogens: bool = True,
+        *,
+        allow_element_change: bool = True,
+        allow_map_hydrogen_to_non_hydrogen: bool = True,
+        allow_hybridization_change: bool = True,
+    ):
+        super().__init__(
+            allow_element_change=allow_element_change,
+            allow_map_hydrogen_to_non_hydrogen=allow_map_hydrogen_to_non_hydrogen,
+            allow_hybridization_change=allow_hybridization_change,
+        )
         self.use_positions = use_positions
         self.map_hydrogens = map_hydrogens
 
@@ -112,10 +128,12 @@ class LazyMCSMapper(LigandRbfeAtomMapper):
         
         self.mcs = mcs_mol
         
-    def run_mapping(self, ligandA: Chem.Mol, ligandB: Chem.Mol) -> Dict[int, int]:
+    def propose_mapping(self, ligandA: Ligand, ligandB: Ligand) -> dict[int, int]:
+        molA = ligandA.get_rdmol()
+        molB = ligandB.get_rdmol()
         if self.mcs is None:
-            self.mcs = find_mcs(ligandA, ligandB)
-        cc = get_common_core(ligandA, ligandB, self.mcs, use_positions=self.use_positions, map_hydrogens=self.map_hydrogens)
+            self.mcs = find_mcs(molA, molB)
+        cc = get_common_core(molA, molB, self.mcs, use_positions=self.use_positions, map_hydrogens=self.map_hydrogens)
         mapping = {int(c[0]): int(c[1]) for c in cc}
         return mapping
 
