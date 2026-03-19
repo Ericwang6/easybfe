@@ -484,7 +484,7 @@ class LigandLoader:
                 raise ValueError(f"Fail to parse molecule {i} in {fpath}")
         if len(mols) > 1:
             if use_stem:
-                warnings.warn(f"Muliple ligands found in {fpath}. use_stem will be forcibly to be False. Molecule names will be read from {name_prop}")
+                warnings.warn(f"Multiple ligands found in {fpath}. use_stem will be forcibly to be False. Molecule names will be read from {name_prop}")
             names = []
         else:
             names = [fpath.stem for _ in mols] if use_stem else []

@@ -36,6 +36,7 @@ def ligand():
 )
 @click.option(
     "--charge-method",
+    "-c",
     type=str,
     default="bcc",
     show_default=True,

@@ -70,8 +70,8 @@ def default_md_workflow():
     return [AmberStepConfig.model_validate(jdatas[i]) for i in range(len(jdatas))]
 
 
-def default_abfe_workflow():
-    with open(os.path.join(os.path.dirname(__file__), 'abfe_default.json')) as f:
+def default_fep_workflow():
+    with open(os.path.join(os.path.dirname(__file__), 'fep_default.json')) as f:
         jdatas = json.load(f)
     return [AmberStepConfig.model_validate(jdatas[i]) for i in range(len(jdatas))]
 
@@ -137,6 +137,7 @@ class AmberPlainMDConfig(BaseModel):
 
 class AmberFepSimulationConfig(AmberSimulationConfig):
 
+    workflow: list[AmberStepConfig] = Field(default_factory=default_fep_workflow)
     use_charge_change: bool = True 
     use_settle_for_alchemical_water: bool = True
     add_restraint_for_alchem_water: bool = True

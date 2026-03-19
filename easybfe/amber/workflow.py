@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import warnings
 from pathlib import Path
 from typing import List, Dict
@@ -8,6 +9,14 @@ from collections import OrderedDict
 
 from ..config import AmberMdin, AmberStepConfig
 from ..cmd import run_command, set_directory
+
+RUN_SH_SHEBANG = "#!/usr/bin/env bash"
+
+
+def _make_executable(path: Path) -> None:
+    """Set user/group/other execute bits on a file (e.g. generated ``run.sh``)."""
+    mode = path.stat().st_mode
+    path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
 class Step:
@@ -122,22 +131,25 @@ class Workflow:
         self.wdir.mkdir(exist_ok=True)
         for name, step in self.steps.items():
             step.create(**kwargs)
-        with open(self.wdir / 'run.sh', 'w') as f:
+        run_sh = self.wdir / "run.sh"
+        with open(run_sh, "w") as f:
+            f.write(RUN_SH_SHEBANG + "\n\n")
             for name, step in self.steps.items():
-                f.write(f'cd {name}\n')
-                f.write(f'echo Running {name} && touch running.tag\n')
-                f.write('if [ ! -f done.tag ]; then\n')
-                f.write(f'  source {name}.sh > {name}.stdout 2>&1\n')
-                f.write('  if [ $? -ne 0 ]; then\n')
+                f.write(f"cd {name}\n")
+                f.write(f"echo Running {name} && touch running.tag\n")
+                f.write("if [ ! -f done.tag ]; then\n")
+                f.write(f"  source {name}.sh > {name}.stdout 2>&1\n")
+                f.write("  if [ $? -ne 0 ]; then\n")
                 f.write('    mv running.tag error.tag && echo "Error occurs!" && exit 1\n')
-                f.write('  fi\n')
-                f.write('  mv running.tag done.tag\n')
-                f.write('fi\n')
-                f.write('cd ..\n\n')
-        with open(self.wdir / 'run.submit', 'w') as f:
-            f.write('#!/bin/bash\n')
-            f.write(self.header + '\n')
-            f.write('source run.sh')
+                f.write("  fi\n")
+                f.write("  mv running.tag done.tag\n")
+                f.write("fi\n")
+                f.write("cd ..\n\n")
+        _make_executable(run_sh)
+        with open(self.wdir / "run.submit", "w") as f:
+            f.write("#!/usr/bin/env bash\n")
+            f.write(self.header + "\n")
+            f.write("./run.sh\n")
         
     def submit(self, platform: str = "slurm"):
         if platform == 'slurm':
@@ -219,12 +231,18 @@ trap cleanup TERM INT HUP
 '''
 
     script_lines = [
-        'WDIR=$(pwd)',
+        RUN_SH_SHEBANG,
+        "",
+        'WDIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"',
         afunc,
         cleanup_func,
         r'start=$(date +%s)',
-        f'if [ -f running.tag ] || [ -f error.tag ] || [ -f done.tag ]; then exit 0; fi'
-        '\ntouch running.tag'
+        (
+            'if [ -f done.tag ] || [ -f running.tag ] || [ -f error.tag ]; then\n'
+            '  exit 0\n'
+            'fi\n'
+            'touch running.tag'
+        ),
     ]
     for name in step_names:
         cfg = workflows[0].steps[name].config
@@ -247,8 +265,7 @@ trap cleanup TERM INT HUP
     
     script_lines += [
         '\n',
-        'mv running.tag done.tag'
-        '\n',
+        'mv running.tag done.tag\n',
         r"end=$(date +%s)",
         "duration=$((end - start))\n",
         'hours=$(( duration / 3600 ))',
@@ -256,6 +273,8 @@ trap cleanup TERM INT HUP
         'seconds=$(( duration % 60 ))\n',
         r'echo "Execution time: ${hours} h ${minutes} min ${seconds} sec"'
     ]
-    with open(wdir / 'run.sh', 'w') as f:
-        f.write('\n'.join(script_lines))
-        
+    run_sh = wdir / "run.sh"
+    with open(run_sh, "w") as f:
+        f.write("\n".join(script_lines))
+    _make_executable(run_sh)
+

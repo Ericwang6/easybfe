@@ -27,6 +27,21 @@ from ..core.ligand import Ligand
 logger = logging.getLogger(__name__)
 
 
+def _openmm_platform_for_validation():
+    """Pick a host-only OpenMM platform for prmtop/XML energy checks.
+
+    Default platform (often CUDA/OpenCL) can stall or contend when many
+    :class:`multiprocessing.Pool` workers validate in parallel; Reference/CPU
+    avoids that for these lightweight single-point energies.
+    """
+    for name in ("Reference", "CPU"):
+        try:
+            return mm.Platform.getPlatformByName(name)
+        except Exception:
+            continue
+    return None
+
+
 class SmallMoleculeForceField(abc.ABC):
     """
     Abstract base class for small molecule force field parameterizers.
@@ -150,14 +165,32 @@ class SmallMoleculeForceField(abc.ABC):
         app.PDBFile.writeFile(struct.topology, struct.positions, pdb, keepIds=True)
         convert_to_xml(struct, xml)
 
+        _plat = _openmm_platform_for_validation()
+        if _plat is not None:
+            logger.debug(
+                "Using OpenMM platform %r for validation of %s",
+                _plat.getName(),
+                ligand.name,
+            )
+
         system_ref = app.AmberPrmtopFile(prmtop).createSystem()
-        ctx_ref = mm.Context(system_ref, mm.LangevinIntegrator(300, 1.0, 0.001))
+        integ_ref = mm.LangevinIntegrator(300, 1.0, 0.001)
+        ctx_ref = (
+            mm.Context(system_ref, integ_ref, _plat)
+            if _plat is not None
+            else mm.Context(system_ref, integ_ref)
+        )
         ctx_ref.setPositions(app.AmberInpcrdFile(inpcrd).positions)
         energy_ref = ctx_ref.getState(getEnergy=True).getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
 
         pdb_obj = app.PDBFile(pdb)
         system = app.ForceField(xml).createSystem(pdb_obj.topology)
-        ctx = mm.Context(system, mm.LangevinIntegrator(300, 1.0, 0.001))
+        integ_xml = mm.LangevinIntegrator(300, 1.0, 0.001)
+        ctx = (
+            mm.Context(system, integ_xml, _plat)
+            if _plat is not None
+            else mm.Context(system, integ_xml)
+        )
         ctx.setPositions(app.AmberInpcrdFile(inpcrd).positions)
         energy = ctx.getState(getEnergy=True).getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
 
@@ -202,20 +235,37 @@ class SmallMoleculeForceField(abc.ABC):
         """
         tmpd = tempfile.mkdtemp() if wdir is None else Path(wdir).resolve() / '.smff.tmp'
         Path(tmpd).mkdir(exist_ok=True, parents=True)
+        pid = os.getpid()
+        logger.info(
+            "Ligand %s [pid=%s]: stage=setup (tmp=%s)",
+            ligand.name,
+            pid,
+            tmpd,
+        )
         # setup
         try:
             ligand = self._setup(ligand)
         except Exception as e:
             self.raise_error(f"Ligand setup failed:\n {traceback.format_exc()}")
             return None
-        
+
+        logger.info(
+            "Ligand %s [pid=%s]: stage=force_field (acpype/openff/...)",
+            ligand.name,
+            pid,
+        )
         # parameterize
         try:
             ligand = self._parametrize(ligand, tmpd)
         except Exception as e:
             self.raise_error(f'{traceback.format_exc()}\n\n ERROR: Ligand parameterization failed due to the above reason, please check {tmpd}')
             return None
-        
+
+        logger.info(
+            "Ligand %s [pid=%s]: stage=openmm_validate",
+            ligand.name,
+            pid,
+        )
         # validation
         try:
             ligand = self._validate(ligand, tmpd)
