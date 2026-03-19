@@ -4,7 +4,8 @@ from pathlib import Path
 
 from easybfe.core.ligand import LigandLoader
 from easybfe.core.protein import Protein
-from easybfe.config import AmberFepSimulationConfig, default_md_workflow
+from easybfe.config import AmberFepSimulationConfig
+from easybfe.config.amber.simulation import default_fep_workflow
 from easybfe.amber.prep_ligand_rbfe import setup_ligand_rbfe
 from easybfe.smff import load_parametrizer
 
@@ -41,8 +42,8 @@ def test_setup_ligand_rbfe_normal():
     protein = Protein.from_pdb(data_dir / "tyk2_pdbfixer.pdb", name="tyk2")
 
     leg_configs = {
-        "complex": AmberFepSimulationConfig(num_lambdas=8, workflow=default_md_workflow()),
-        "solvent": AmberFepSimulationConfig(num_lambdas=8, workflow=default_md_workflow()),
+        "complex": AmberFepSimulationConfig(num_lambdas=8, workflow=default_fep_workflow()),
+        "solvent": AmberFepSimulationConfig(num_lambdas=8, workflow=default_fep_workflow()),
     }
 
     output_dir = test_dir / "rbfe_output"
@@ -83,12 +84,12 @@ def test_setup_ligand_rbfe_charge_change():
     leg_configs = {
         "complex": AmberFepSimulationConfig(
             num_lambdas=8,
-            workflow=default_md_workflow(),
+            workflow=default_fep_workflow(),
             charge_change_method="dummy_ion",
         ),
         "solvent": AmberFepSimulationConfig(
             num_lambdas=8,
-            workflow=default_md_workflow(),
+            workflow=default_fep_workflow(),
             charge_change_method="dummy_ion",
         ),
     }

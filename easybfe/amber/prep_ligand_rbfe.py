@@ -14,6 +14,7 @@ from rdkit import Chem
 
 from .prep_utils import *
 from ..config import AmberFepSimulationConfig, AmberWtSettings
+from ..parallel import run_func_parallel
 from .workflow import Step, Workflow, create_script_for_workflows
 from ..smff.utils import OpenmmXML
 from ..core import Ligand, Protein
@@ -531,16 +532,66 @@ def setup_ligand_rbfe(
         leg_protein = protein if 'complex' in leg else None
         setup_ligand_rbfe_leg(ligandA_processed, ligandB_processed, len(mapping), leg_protein, config, output_dir/leg, basename='system')
 
-        
+
+def _pair_subdir_name(p0: os.PathLike, p1: os.PathLike) -> str:
+    """Build ``pair[0]~pair[1]`` output segment; flatten path separators for one directory name."""
+    s0 = Path(p0).as_posix().replace("/", "_")
+    s1 = Path(p1).as_posix().replace("/", "_")
+    return f"{s0}~{s1}"
+
+
+def _resolve_ligand_directory(ligand_base: Path | None, component: os.PathLike) -> Path:
+    """Resolve a ligand directory under optional ``ligand_base`` or as an absolute path."""
+    comp = Path(component)
+    if ligand_base is not None:
+        return (Path(ligand_base).expanduser().resolve() / comp).resolve()
+    return comp.expanduser().resolve()
+
+
+def _setup_ligand_rbfe_one(job: tuple) -> None:
+    """Load ligands from directories and run :func:`setup_ligand_rbfe` (batch / parallel entry point).
+
+    Parameters
+    ----------
+    job : tuple
+        ``(ligand_a_dir, ligand_b_dir, mapping, protein, leg_configs, output_dir)``.
+    """
+    ligand_a_dir, ligand_b_dir, mapping, protein, leg_configs, output_dir = job
+    ligandA = Ligand.from_directory(ligand_a_dir)
+    ligandB = Ligand.from_directory(ligand_b_dir)
+    setup_ligand_rbfe(
+        ligandA=ligandA,
+        ligandB=ligandB,
+        mapping=mapping,
+        protein=protein,
+        leg_configs=leg_configs,
+        output_dir=output_dir,
+    )
+
 
 def setup_ligand_rbfe_from_config(
     config: AmberLigandRbfeConfig,
+    num_procs: int | None = None,
 ) -> None:
-    """Run RBFE setup from an :class:`AmberLigandRbfeConfig`."""
+    """Run RBFE setup from an :class:`AmberLigandRbfeConfig`.
+
+    **Ligand directories**
+
+    If :attr:`~AmberLigandRbfeConfig.ligand_base` is set, single-pair mode uses
+    ``ligand_base / ligandA`` and ``ligand_base / ligandB``; batch mode (non-empty
+    :attr:`~AmberLigandRbfeConfig.ligand_pairs`) uses ``ligand_base / pair[0]`` and
+    ``ligand_base / pair[1]`` for each pair. If ``ligand_base`` is not set,
+    :attr:`~AmberLigandRbfeConfig.ligandA` / ``ligandB`` (or each pair entry) are
+    treated as full ligand directory paths.
+
+    **Output**
+
+    Batch mode requires :attr:`~AmberLigandRbfeConfig.output_base`; each run writes
+    under ``output_base / "<pair0>~<pair1>"``. Single-pair mode uses
+    ``output_base / "{ligandA.name}~{ligandB.name}"`` when ``output_base`` is set,
+    otherwise :attr:`~AmberLigandRbfeConfig.output_dir` (required in that case).
+    """
     assert config.protein is not None, "AmberLigandRbfeConfig.protein must be set"
-    assert config.output_dir is not None, "AmberLigandRbfeConfig.output_dir must be set"
-    assert config.ligandA is not None, "AmberLigandRbfeConfig.ligandA must be set"
-    assert config.ligandB is not None, "AmberLigandRbfeConfig.ligandB must be set"
 
     leg_configs = {
         "complex": config.complex,
@@ -549,22 +600,66 @@ def setup_ligand_rbfe_from_config(
     if config.gas is not None:
         leg_configs["gas"] = config.gas
 
-    base_out = Path(config.output_dir)
-    base_out.mkdir(exist_ok=True)
     protein = Protein.from_pdb(config.protein, name=config.protein.stem)
 
-    def _load_ligand(path: Path) -> Ligand:
-        if path.is_dir():
-            return Ligand.from_directory(path)
-        return Ligand.from_file(path, only_first=True, name_from_stem=True)
+    use_pairs = config.ligand_pairs is not None and len(config.ligand_pairs) > 0
+    lig_base = Path(config.ligand_base).expanduser().resolve() if config.ligand_base is not None else None
 
-    ligandA = _load_ligand(config.ligandA)
-    ligandB = _load_ligand(config.ligandB)
-    setup_ligand_rbfe(
-        ligandA=ligandA,
-        ligandB=ligandB,
-        mapping=config.atom_mapping,
-        protein=protein,
-        leg_configs=leg_configs,
-        output_dir=base_out,
+    if use_pairs:
+        if config.output_base is None:
+            raise ValueError(
+                "AmberLigandRbfeConfig.output_base is required for batch mode (non-empty ligand_pairs)"
+            )
+        if config.ligandA is not None or config.ligandB is not None:
+            logger.info("ligand_pairs batch mode: ignoring ligandA and ligandB for ligand paths")
+        out_base = Path(config.output_base).expanduser().resolve()
+        out_base.mkdir(parents=True, exist_ok=True)
+        nprocs = num_procs if num_procs is not None else -1
+        args_list = [
+            (
+                _resolve_ligand_directory(lig_base, p0),
+                _resolve_ligand_directory(lig_base, p1),
+                config.atom_mapping,
+                protein,
+                leg_configs,
+                out_base / _pair_subdir_name(p0, p1),
+            )
+            for p0, p1 in config.ligand_pairs
+        ]
+        run_func_parallel(
+            _setup_ligand_rbfe_one,
+            args_list,
+            nprocs=nprocs,
+            desc="setup_ligand_rbfe",
+        )
+        return
+
+    if config.ligandA is None or config.ligandB is None:
+        raise ValueError(
+            "AmberLigandRbfeConfig.ligandA and ligandB are required when ligand_pairs is not set"
+        )
+
+    if config.output_base is not None:
+        run_out = (
+            Path(config.output_base).expanduser().resolve()
+            / f"{Path(config.ligandA).name}~{Path(config.ligandB).name}"
+        )
+    elif config.output_dir is not None:
+        run_out = Path(config.output_dir).expanduser().resolve()
+    else:
+        raise ValueError(
+            "Set output_base or output_dir for single-pair RBFE setup "
+            "(output_dir is required when output_base is not set)"
+        )
+
+    run_out.mkdir(parents=True, exist_ok=True)
+    _setup_ligand_rbfe_one(
+        (
+            _resolve_ligand_directory(lig_base, config.ligandA),
+            _resolve_ligand_directory(lig_base, config.ligandB),
+            config.atom_mapping,
+            protein,
+            leg_configs,
+            run_out,
+        )
     )
