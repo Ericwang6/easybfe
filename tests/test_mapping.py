@@ -4,6 +4,7 @@ import pytest
 from rdkit import Chem
 
 from easybfe.core import Ligand
+from easybfe.core.ligand import LigandLoader
 from easybfe.mapping import LazyMCSMapper, LomapAtomMapper, KartografAtomMapper
 from easybfe.mapping.base import CustomLigandAtomMapper
 
@@ -105,5 +106,20 @@ def test_mapping_kartograf_allow_element_change():
         0: 1, 2: 0, 3: 2, 4: 3, 5: 4,
         6: 5, 7: 6, 8: 7, 9: 8, 10: 9, 11: 10,
     }
+    assert (wdir / "atom_mapping.json").is_file()
+    assert (wdir / "atom_mapping.png").is_file()
+
+
+def test_mapping_2d():
+    loader = LigandLoader()
+    ligands = loader.load([
+        Chem.AddHs(Chem.MolFromSmiles(Chem.MolToSmiles(Chem.SDMolSupplier(str(_data_path("CDD_1819.sdf")))[0]))),
+        Chem.AddHs(Chem.MolFromSmiles(Chem.MolToSmiles(Chem.SDMolSupplier(str(_data_path("CDD_1845.sdf")))[0]))),
+    ])
+    ligandA, ligandB = ligands[0], ligands[1]
+    mapper = LomapAtomMapper(max3d=10000)
+    wdir = Path(__file__).parent / "_test_mapping_2d"
+    wdir.mkdir(exist_ok=True, parents=True)
+    mapping = mapper.run(ligandA, ligandB, wdir)
     assert (wdir / "atom_mapping.json").is_file()
     assert (wdir / "atom_mapping.png").is_file()
