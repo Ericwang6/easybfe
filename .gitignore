@@ -182,3 +182,6 @@ agent/
 .debug/
 workspace/
 .cursor/
+
+examples/rbfe/ligands
+examples/rbfe/rbfe
