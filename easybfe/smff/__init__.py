@@ -10,6 +10,7 @@ XML formats.
 
 import logging
 import os
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -106,12 +107,15 @@ def load_parametrizer(forcefield: str, charge_method: str, engine: str = '', rai
 
 def parametrize_ligands(
     source: Any,
-    output_base_dir: str | Path,
-    forcefield: str,
-    charge_method: str,
+    output: str | Path | None = None,
+    output_base: str | Path | None = None,
+    forcefield: str = "gaff2",
+    charge_method: str = "bcc",
     engine: str = "",
     raise_errors: bool = False,
     nprocs: int = -1,
+    resp_engine: str = "",
+    keep_cache: bool = False,
     **kwargs: Any,
 ) -> list[Ligand]:
     """
@@ -123,8 +127,8 @@ def parametrize_ligands(
 
     1. Load ligands from a flexible ``source`` (files, SMILES, RDKit molecules, etc.).
     2. Construct an appropriate parameterizer via :func:`load_parametrizer`.
-    3. Run parametrization (optionally in parallel) and write outputs under
-       ``output_base_dir / ligand.name`` for each ligand.
+    3. Route to single- or multi-ligand parametrization based on loaded count and
+       output arguments.
 
     Parameters
     ----------
@@ -135,14 +139,20 @@ def parametrize_ligands(
         * :class:`str` or :class:`pathlib.Path`: File path (SDF, CSV, SMILES, etc.)
         * Sequence of :class:`rdkit.Chem.Mol`
         * Other objects supported by :class:`LigandLoader`.
-    output_base_dir : str or Path
-        Base directory under which per-ligand subdirectories will be created
-        (one subdirectory per ligand name). Directories are created as needed.
-    forcefield : str
+    output : str, Path, or None, optional
+        Direct output directory for a single ligand. Files are written directly
+        under this path. Only valid when exactly one ligand is loaded. If both
+        ``output`` and ``output_base`` are provided, ``output`` takes precedence
+        and a warning is emitted.
+    output_base : str, Path, or None, optional
+        Base directory for per-ligand output subdirectories. Each ligand is
+        written under ``output_base / ligand.name``. Required when multiple
+        ligands are loaded or when ``output`` is not provided.
+    forcefield : str, default='gaff2'
         Force field name or path. When ``engine`` is empty, the engine is
         auto-detected from ``forcefield`` (see :func:`load_parametrizer`).
-    charge_method : str
-        Partial charge assignment method (e.g. ``'bcc'``, ``'gas'``).
+    charge_method : str, default='bcc'
+        Partial charge assignment method (e.g. ``'bcc'``, ``'gas'``, ``'resp'``).
     engine : str, optional
         Explicit engine override (``'acpype'``, ``'openff'``, or ``'custom'``).
         If empty, the engine is auto-detected from ``forcefield``.
@@ -153,6 +163,12 @@ def parametrize_ligands(
     nprocs : int, default=-1
         Number of parallel processes. If -1, uses all available CPUs. If 1, runs
         sequentially.
+    resp_engine : str, optional
+        Engine for RESP charge calculations (e.g. ``'qchem'``). Only used when
+        ``charge_method`` starts with ``'resp'``.
+    keep_cache : bool, default=False
+        If ``True``, keep the intermediate ``.smff.tmp`` working directory after
+        parametrization.
     **kwargs
         Additional keyword arguments forwarded to
         :meth:`easybfe.core.ligand.LigandLoader.load` (e.g. ``only_first=True``,
@@ -161,13 +177,13 @@ def parametrize_ligands(
     Returns
     -------
     list[Ligand]
-        List of successfully parametrized ligands. For single-ligand workflows
-        this will be a list of length 1.
+        List of successfully parametrized ligands.
 
     Raises
     ------
     ValueError
-        If no ligands can be loaded from ``source``.
+        If no ligands can be loaded from ``source``, or if ``output_base`` is
+        required but not provided.
     NotImplementedError
         If the specified or auto-detected engine is not supported.
 
@@ -187,7 +203,25 @@ def parametrize_ligands(
 
     logger.info("Loaded %d ligand(s) from source %r", len(ligands), source)
 
-    parametrizer = load_parametrizer(forcefield, charge_method, engine, raise_errors)
-    parametrized_ligands = parametrizer.run(ligands, output_base_dir, nprocs)
+    parametrizer = load_parametrizer(
+        forcefield, charge_method, engine, raise_errors,
+        resp_engine=resp_engine, keep_cache=keep_cache,
+    )
 
-    return parametrized_ligands
+    is_single = len(ligands) == 1
+
+    if is_single and output is not None:
+        if output_base is not None:
+            warnings.warn(
+                "--output (-o) will override --output-base (-O) for single ligand mode.",
+                UserWarning,
+            )
+        result = parametrizer.run(ligands[0], output, nprocs)
+        return [result] if result is not None else []
+    else:
+        if output_base is None:
+            raise ValueError(
+                "--output-base (-O) is required when parametrizing multiple ligands "
+                "or when --output (-o) is not provided."
+            )
+        return parametrizer.run(ligands, output_base, nprocs)

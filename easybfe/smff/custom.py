@@ -69,8 +69,9 @@ class CustomForceField(SmallMoleculeForceField):
     :class:`easybfe.smff.openff.OpenFF` : Generate parameters using OpenFF.
     """
     
-    def __init__(self, custom_ff: os.PathLike, charge_method: str = '', *args, **kwargs):
-        super().__init__(custom_ff, charge_method, *args, **kwargs)
+    def __init__(self, custom_ff: os.PathLike, *args, **kwargs):
+        super().__init__(custom_ff, *args, **kwargs)
+        self.charge_method = ''
         logger.info(f"Loading custom force field from: {custom_ff}")
         self.parmed_struct = parmed.load_file(custom_ff)
     

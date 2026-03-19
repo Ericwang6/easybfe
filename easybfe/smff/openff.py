@@ -90,14 +90,16 @@ class OpenFF(SmallMoleculeForceField):
     
     def __init__(self, forcefield: str = 'openff-2.1.0', charge_method: str = 'bcc', *args, **kwargs):
         super().__init__(forcefield, charge_method, *args, **kwargs)
-        
-        if charge_method == 'gas':
-            self.charge_method = 'gasteiger'
+
+        if charge_method.startswith('resp'):
+            self._openff_charge_method = 'gasteiger'
+        elif charge_method == 'gas':
+            self._openff_charge_method = 'gasteiger'
         elif charge_method == 'bcc':
-            self.charge_method = 'am1bcc'
+            self._openff_charge_method = 'am1bcc'
         else:
-            self.charge_method = charge_method
-        logger.info(f"Initialized OpenFF with forcefield={forcefield}, charge_method={self.charge_method}")
+            self._openff_charge_method = charge_method
+        logger.info(f"Initialized OpenFF with forcefield={forcefield}, charge_method={self._openff_charge_method}")
         
     def _parametrize(self, ligand: Ligand, wdir: str):
         """
@@ -151,8 +153,8 @@ class OpenFF(SmallMoleculeForceField):
         logger.info(f"Generating OpenFF parameters for {stem}")
         Chem.AssignStereochemistry(mol, cleanIt=True, force=True)
         off_mol = Molecule.from_rdkit(mol, allow_undefined_stereo=True, hydrogens_are_explicit=True)
-        logger.info(f"Assigning partial charges using {self.charge_method}")
-        off_mol.assign_partial_charges(self.charge_method, use_conformers=off_mol.conformers)
+        logger.info(f"Assigning partial charges using {self._openff_charge_method}")
+        off_mol.assign_partial_charges(self._openff_charge_method, use_conformers=off_mol.conformers)
         generator = SMIRNOFFTemplateGenerator(molecules=[off_mol], forcefield=self.forcefield).generator
         ff = app.ForceField()
         ff.registerTemplateGenerator(generator)

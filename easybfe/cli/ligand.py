@@ -21,10 +21,18 @@ def ligand():
 @click.option(
     "--output",
     "-o",
-    "output_base_dir",
+    "output",
     type=click.Path(path_type=Path),
-    required=True,
-    help="Base directory for per-ligand output subdirectories.",
+    default=None,
+    help="Output directory for a single ligand (files written directly here).",
+)
+@click.option(
+    "--output-base",
+    "-O",
+    "output_base",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Base directory for per-ligand output subdirectories (required for multiple ligands).",
 )
 @click.option(
     "--forcefield",
@@ -40,13 +48,25 @@ def ligand():
     type=str,
     default="bcc",
     show_default=True,
-    help="Partial charge assignment method (e.g. bcc, gas).",
+    help="Partial charge assignment method (e.g. bcc, gas, resp).",
 )
 @click.option(
     "--engine",
     type=str,
     default="",
     help="Explicit engine: acpype, openff, or custom. Auto-detected from forcefield if empty.",
+)
+@click.option(
+    "--resp-engine",
+    type=str,
+    default="",
+    help="Engine for RESP charge calculations (default: qchem). Only used when charge-method starts with 'resp'.",
+)
+@click.option(
+    "--keep-cache",
+    is_flag=True,
+    default=False,
+    help="Keep the intermediate .smff.tmp working directory after parametrization.",
 )
 @click.option(
     "--raise-errors",
@@ -96,10 +116,13 @@ def ligand():
 )
 def pargen(
     ligand_files: tuple[Path, ...],
-    output_base_dir: Path,
+    output: Path | None,
+    output_base: Path | None,
     forcefield: str,
     charge_method: str,
     engine: str,
+    resp_engine: str,
+    keep_cache: bool,
     raise_errors: bool,
     nprocs: int,
     no_name_from_stem: bool,
@@ -110,6 +133,9 @@ def pargen(
 ) -> None:
     """Parameterize one or more ligands with the given force field and write outputs."""
     from ..smff import parametrize_ligands
+
+    if output is None and output_base is None:
+        raise click.UsageError("At least one of --output (-o) or --output-base (-O) must be provided.")
 
     source = list(ligand_files) if len(ligand_files) > 1 else ligand_files[0]
     loader_kwargs = {
@@ -123,11 +149,14 @@ def pargen(
 
     parametrize_ligands(
         source,
-        output_base_dir=output_base_dir,
+        output=output,
+        output_base=output_base,
         forcefield=forcefield,
         charge_method=charge_method,
         engine=engine or "",
         raise_errors=raise_errors,
         nprocs=nprocs,
+        resp_engine=resp_engine,
+        keep_cache=keep_cache,
         **loader_kwargs,
     )

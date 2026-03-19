@@ -57,6 +57,9 @@ class SmallMoleculeForceField(abc.ABC):
         Force field identifier or path (interpretation depends on subclass).
     charge_method : str, optional
         Partial charge assignment method (e.g., 'bcc', 'gas', 'am1bcc').
+    keep_cache : bool, default=False
+        If True, leave the working directory ``.smff.tmp`` under the output
+        path after a successful run. If False, it is removed after validation.
     *args
         Additional positional arguments for subclasses.
     **kwargs
@@ -94,18 +97,74 @@ class SmallMoleculeForceField(abc.ABC):
     :class:`easybfe.smff.custom.CustomForceField` : Custom force field implementation.
     """
     
-    def __init__(self, forcefield: str = '', charge_method: str = '', raise_errors: bool = True, *args, **kwargs):
+    def __init__(self, forcefield: str = '', charge_method: str = '', raise_errors: bool = True,
+                 *args, resp_engine: str = '', nproc_resp: int = 4, keep_cache: bool = False,
+                 **kwargs):
         """Initialize the force field parameterizer."""
         self.forcefield = forcefield
         self.charge_method = charge_method
         self._raise_errors = raise_errors
+        self.keep_cache = keep_cache
+        self.resp_engine = resp_engine if resp_engine else ('qchem' if self._is_resp else '')
+        self.nproc_resp = nproc_resp
+        if self._is_resp and self.resp_engine != 'qchem':
+            raise ValueError(
+                f"Unsupported resp_engine={self.resp_engine!r}; only 'qchem' is supported"
+            )
     
     def raise_error(self, msg):
         if self._raise_errors:
             raise Exception(msg)
         else:
             warnings.warn(f'Parameterization failed: {msg}')
-    
+
+    @property
+    def _is_resp(self) -> bool:
+        return self.charge_method.startswith('resp')
+
+    def _apply_resp_charges(self, ligand: Ligand, wdir: str) -> Ligand:
+        """Replace partial charges with Q-Chem RESP charges.
+
+        Writes a Q-Chem input, runs the calculation, parses charges, and
+        overwrites the charges in the AMBER topology stored in
+        ``ligand.auxiliary_files``.
+        """
+        from .resp import (
+            parse_resp_spec,
+            generate_qchem_input,
+            run_qchem,
+            parse_resp_charges,
+            apply_resp_charges,
+        )
+
+        functional, basis = parse_resp_spec(self.charge_method)
+        mol = ligand.get_rdmol()
+        net_charge = sum(a.GetFormalCharge() for a in mol.GetAtoms())
+
+        qchem_in = os.path.join(wdir, f'{ligand.name}_resp.in')
+        qchem_out = os.path.join(wdir, f'{ligand.name}_resp.out')
+
+        logger.info(
+            "Computing RESP charges for %s (%s/%s) via Q-Chem",
+            ligand.name, functional, basis,
+        )
+        inp_text = generate_qchem_input(mol, functional, basis, net_charge=net_charge)
+        Path(qchem_in).write_text(inp_text)
+
+        run_qchem(qchem_in, qchem_out, nproc=self.nproc_resp)
+        charges = parse_resp_charges(qchem_out)
+
+        prmtop_path = os.path.join(wdir, f'{ligand.name}.prmtop')
+        inpcrd_path = os.path.join(wdir, f'{ligand.name}.inpcrd')
+        Path(prmtop_path).write_text(ligand.auxiliary_files['prmtop'])
+        Path(inpcrd_path).write_text(ligand.auxiliary_files['inpcrd'])
+
+        prmtop_text, inpcrd_text = apply_resp_charges(prmtop_path, inpcrd_path, charges)
+        ligand.add_aux_file('prmtop', prmtop_text)
+        ligand.add_aux_file('inpcrd', inpcrd_text)
+        logger.info("RESP charges applied to %s", ligand.name)
+        return ligand
+
     def _setup(self, ligand: Ligand):
         return ligand.embed(return_new=True)
 
@@ -217,7 +276,9 @@ class SmallMoleculeForceField(abc.ABC):
         
         This method orchestrates the full parametrization process by calling
         :meth:`_setup`, :meth:`_parametrize` (subclass-specific), and :meth:`_validate`
-        (base class validation) in sequence within a temporary directory.
+        (base class validation)         in sequence within a temporary directory (or ``output_dir/.smff.tmp``
+        when an output directory is set), removed after success unless
+        :attr:`keep_cache` is True.
         
         Parameters
         ----------
@@ -261,6 +322,21 @@ class SmallMoleculeForceField(abc.ABC):
             self.raise_error(f'{traceback.format_exc()}\n\n ERROR: Ligand parameterization failed due to the above reason, please check {tmpd}')
             return None
 
+        # RESP charge post-processing (replaces charges before validation)
+        if self._is_resp:
+            logger.info(
+                "Ligand %s [pid=%s]: stage=resp_charges",
+                ligand.name,
+                pid,
+            )
+            try:
+                ligand = self._apply_resp_charges(ligand, tmpd)
+            except Exception:
+                self.raise_error(
+                    f"RESP charge calculation failed:\n{traceback.format_exc()}"
+                )
+                return None
+
         logger.info(
             "Ligand %s [pid=%s]: stage=openmm_validate",
             ligand.name,
@@ -272,8 +348,9 @@ class SmallMoleculeForceField(abc.ABC):
         except Exception as e:
             self.raise_error(f'Ligand parameterization failed to be validated because of the following error: {traceback.format_exc()}')
             return None
-        
-        shutil.rmtree(tmpd)
+
+        if not self.keep_cache:
+            shutil.rmtree(tmpd)
         if wdir is not None:
             ligand.dump(wdir)
         return ligand
@@ -295,9 +372,10 @@ class SmallMoleculeForceField(abc.ABC):
         ligand : Ligand or list of Ligand
             Single ligand or list of ligands to parametrize.
         output_base_dir : str or Path, optional
-            Base directory where per-ligand subdirectories will be created. If
-            provided, each ligand is written to ``output_base_dir / ligand.name``.
-            Duplicate ligand names are automatically disambiguated.
+            Directory for dumped outputs (prmtop, inpcrd, etc.). If the input is
+            a list of ligands, each is written under ``output_base_dir / ligand.name``. 
+            For a single ligand, files are written directly under ``output_base_dir``. 
+            Duplicate names among multiple ligands are automatically disambiguated.
         nprocs : int, default=-1
             Number of parallel processes. If -1, uses all available CPUs.
             If 1, runs sequentially without multiprocessing overhead.
@@ -358,7 +436,8 @@ class SmallMoleculeForceField(abc.ABC):
                     lig.name = new_name
                 names_count[lig.name] += 1
                 input_names.append(lig.name)
-                output_dirs.append(base_dir / lig.name)
+                out_dir = base_dir if single_input else base_dir / lig.name
+                output_dirs.append(out_dir)
         else:
             output_dirs = [None for _ in range(len(input_ligands))]
             input_names = [lig.name for lig in input_ligands]

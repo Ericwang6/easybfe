@@ -239,8 +239,8 @@ def test_parametrize_ligands_single_file(forcefield, charge_method, testdir, ami
     assert "xml" in lig.auxiliary_files
     assert "pdb" in lig.auxiliary_files
 
-    # Output directory should be base/name
-    wdir = out_base / lig.name
+    # Single loaded ligand: outputs directly under base (no per-name subdir)
+    wdir = out_base
     assert (wdir / f"{lig.name}.prmtop").is_file()
     assert (wdir / f"{lig.name}.inpcrd").is_file()
     assert (wdir / f"{lig.name}.sdf").is_file()

@@ -199,11 +199,17 @@ class GAFF(SmallMoleculeForceField):
     :class:`easybfe.smff.openff.OpenFF` : OpenFF alternative.
     """
     
-    def __init__(self, forcefield: Literal['gaff2', 'gaff'] = 'gaff2', charge_method: Literal['bcc', 'gas'] = 'bcc', *args, **kwargs):
+    def __init__(self, forcefield: Literal['gaff2', 'gaff'] = 'gaff2', charge_method: str = 'bcc', *args, **kwargs):
         super().__init__(forcefield, charge_method, *args, **kwargs)
 
         assert self.forcefield in ['gaff', 'gaff2'], f'Unsupported atom type: {forcefield}'
-        assert self.charge_method in ['bcc', 'gas'], f'Unsupported charge method: {charge_method}'
+        valid_cm = self.charge_method in ('bcc', 'gas') or self.charge_method.startswith('resp')
+        assert valid_cm, f'Unsupported charge method: {charge_method}'
+
+        if self.charge_method.startswith('resp'):
+            self._acpype_charge_method = 'gas'
+        else:
+            self._acpype_charge_method = self.charge_method
         logger.info(f"Initialized GAFF with forcefield={forcefield}, charge_method={charge_method}")
 
         self.reuse_cache = False
@@ -270,7 +276,7 @@ class GAFF(SmallMoleculeForceField):
             run_acpype(
                 ligand_file,
                 basename=stem,
-                charge_method=self.charge_method,
+                charge_method=self._acpype_charge_method,
                 atom_type=self.forcefield,
                 net_charge='auto'
             )
