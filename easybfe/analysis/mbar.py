@@ -4,6 +4,7 @@ from typing import Optional
 from pathlib import Path
 from dataclasses import dataclass
 
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
@@ -11,11 +12,169 @@ import alchemlyb
 from alchemlyb.estimators import MBAR
 from alchemlyb.parsing.amber import extract_u_nk
 from alchemlyb.convergence import forward_backward_convergence
-from alchemlyb.visualisation.convergence import plot_convergence
 from alchemlyb.visualisation.mbar_matrix import plot_mbar_overlap_matrix
+from matplotlib.axes import Axes
 
 
 logger = logging.getLogger(__name__)
+
+
+_COLOR_FORWARD = "#1B4965"
+_COLOR_BACKWARD = "#C44536"
+_COLOR_FORWARD_FILL = "#62B6CB"
+_COLOR_BACKWARD_FILL = "#F4A261"
+_COLOR_FINAL_BAND = "#B8B8D1"
+
+
+def plot_convergence(
+    dataframe: pd.DataFrame,
+    units: str | None = None,
+    final_error: float | None = None,
+    ax: Axes | None = None,
+    *,
+    x_column: str | None = "data_fraction",
+) -> Axes:
+    """Plot forward and backward cumulative convergence with styled defaults."""
+    forward = dataframe["Forward"].to_numpy(dtype=float)
+    if "Forward_Error" in dataframe:
+        forward_error = dataframe["Forward_Error"].to_numpy(dtype=float)
+    else:
+        forward_error = np.zeros(len(forward))
+    backward = dataframe["Backward"].to_numpy(dtype=float)
+    if "Backward_Error" in dataframe:
+        backward_error = dataframe["Backward_Error"].to_numpy(dtype=float)
+    else:
+        backward_error = np.zeros(len(backward))
+
+    n = len(forward)
+    if x_column is not None and x_column in dataframe.columns:
+        f_ts = r_ts = dataframe[x_column].to_numpy(dtype=float)
+    else:
+        f_ts = np.linspace(0, 1, n + 1)[1:]
+        r_ts = np.linspace(0, 1, n + 1)[1:]
+
+    if final_error is None:
+        final_error = float(backward_error[-1])
+
+    if units is None:
+        units = dataframe.attrs.get("energy_unit", "kcal/mol")
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(7, 6.5), dpi=120)
+        ax.set_facecolor("#FAFAFA")
+
+    for spine in ("top", "right", "bottom", "left"):
+        ax.spines[spine].set_visible(True)
+        ax.spines[spine].set_color("#4A4A4A")
+        ax.spines[spine].set_linewidth(0.8)
+
+    ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.35, color="#888888")
+    ax.set_axisbelow(True)
+
+    if np.isfinite(backward[-1]) and np.isfinite(final_error):
+        ax.axhspan(
+            backward[-1] - final_error,
+            backward[-1] + final_error,
+            facecolor=_COLOR_FINAL_BAND,
+            edgecolor="none",
+            alpha=0.35,
+            zorder=1,
+            label="_nolegend_",
+        )
+
+    m = np.isfinite(forward) & np.isfinite(forward_error)
+    if m.any():
+        ax.fill_between(
+            f_ts[m],
+            forward[m] - forward_error[m],
+            forward[m] + forward_error[m],
+            color=_COLOR_FORWARD_FILL,
+            alpha=0.35,
+            zorder=2,
+            linewidth=0,
+        )
+    m = np.isfinite(backward) & np.isfinite(backward_error)
+    if m.any():
+        ax.fill_between(
+            r_ts[m],
+            backward[m] - backward_error[m],
+            backward[m] + backward_error[m],
+            color=_COLOR_BACKWARD_FILL,
+            alpha=0.35,
+            zorder=3,
+            linewidth=0,
+        )
+
+    ax.errorbar(
+        f_ts,
+        forward,
+        yerr=forward_error,
+        fmt="none",
+        ecolor=_COLOR_FORWARD,
+        elinewidth=1.3,
+        capsize=3.0,
+        alpha=0.95,
+        zorder=4,
+    )
+    ax.errorbar(
+        r_ts,
+        backward,
+        yerr=backward_error,
+        fmt="none",
+        ecolor=_COLOR_BACKWARD,
+        elinewidth=1.3,
+        capsize=3.0,
+        alpha=0.95,
+        zorder=5,
+    )
+
+    ax.plot(
+        f_ts,
+        forward,
+        color=_COLOR_FORWARD,
+        lw=2.2,
+        marker="o",
+        markersize=8,
+        markerfacecolor="white",
+        markeredgewidth=1.8,
+        markeredgecolor=_COLOR_FORWARD,
+        zorder=6,
+        label="Forward",
+    )
+    ax.plot(
+        r_ts,
+        backward,
+        color=_COLOR_BACKWARD,
+        lw=2.2,
+        marker="s",
+        markersize=8,
+        markerfacecolor="white",
+        markeredgewidth=1.8,
+        markeredgecolor=_COLOR_BACKWARD,
+        zorder=7,
+        label="Reverse",
+    )
+
+    ax.set_xlabel("Fraction of simulation time", fontsize=13, color="#222222")
+    ax.set_ylabel(rf"$\Delta G$ ({units})", fontsize=13, color="#222222")
+    ax.set_xlim(0.05, 1.05)
+    ax.set_xticks(np.arange(0.1, 1.01, 0.1))
+    ax.tick_params(axis="both", labelsize=12, colors="#333333")
+
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend(
+        handles,
+        labels,
+        loc="best",
+        frameon=True,
+        framealpha=0.92,
+        edgecolor="#DDDDDD",
+        fontsize=11,
+    )
+    fig = ax.figure
+    fig.patch.set_facecolor("#FFFFFF")
+    fig.tight_layout()
+    return ax
 
 
 @dataclass
@@ -97,7 +256,7 @@ def run_mbar(
         conv_df[key] *= kBT
     conv_df.to_csv(dirname / "convergence.csv", index=None)
     conv_ax = plot_convergence(conv_df)
-    conv_ax.set_ylabel("$\Delta G$ (kcal/mol)")
+    conv_ax.set_ylabel(r"$\Delta G$ (kcal/mol)")
     conv_ax.set_title(f"Convergence Analysis - {dirname.name.capitalize()}")
     conv_ax.figure.savefig(str(dirname /"convergence.png"), dpi=300)
 
