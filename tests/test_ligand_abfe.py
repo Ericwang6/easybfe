@@ -6,7 +6,7 @@ from pathlib import Path
 from easybfe.core.ligand import LigandLoader
 from easybfe.core.protein import Protein
 from easybfe.config import AmberFepSimulationConfig
-from easybfe.config.amber.simulation import default_abfe_workflow
+from easybfe.config.amber.simulation import default_fep_workflow
 from easybfe.amber.prep_ligand_abfe import setup_ligand_abfe
 from easybfe.amber.boresch import RxRxBoreschRestraintsFinder
 from easybfe.analysis.abfe import analyze_abfe
@@ -56,9 +56,9 @@ def test_setup_ligand_abfe():
     # Create configs for each leg
     # Use minimal lambdas for faster testing and the default ABFE workflow
     leg_configs = {
-        'solvent': AmberFepSimulationConfig(num_lambdas=16, workflow=default_abfe_workflow()),
-        'complex': AmberFepSimulationConfig(num_lambdas=16, workflow=default_abfe_workflow()),
-        'restraint': AmberFepSimulationConfig(num_lambdas=16, workflow=default_abfe_workflow()),
+        'solvent': AmberFepSimulationConfig(num_lambdas=16, workflow=default_fep_workflow()),
+        'complex': AmberFepSimulationConfig(num_lambdas=16, workflow=default_fep_workflow()),
+        'restraint': AmberFepSimulationConfig(num_lambdas=16, workflow=default_fep_workflow()),
     }
     
     # Setup ABFE
@@ -128,17 +128,17 @@ def test_setup_ligand_abfe_charge_change():
         leg_configs = {
             "solvent": AmberFepSimulationConfig(
                 num_lambdas=8,
-                workflow=default_abfe_workflow(),
+                workflow=default_fep_workflow(),
                 charge_change_method=method,
             ),
             "complex": AmberFepSimulationConfig(
                 num_lambdas=8,
-                workflow=default_abfe_workflow(),
+                workflow=default_fep_workflow(),
                 charge_change_method=method,
             ),
             "restraint": AmberFepSimulationConfig(
                 num_lambdas=8,
-                workflow=default_abfe_workflow(),
+                workflow=default_fep_workflow(),
                 charge_change_method=method,
             ),
         }

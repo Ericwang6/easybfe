@@ -21,7 +21,7 @@ from .amber.simulation import (
     AmberFepSimulationConfig,
     AmberPlainMDConfig,
     default_md_workflow,
-    default_abfe_workflow,
+    default_fep_workflow,
 )
 from .protein_prep import ProteinPrepareConfig
 from .analysis import PlainMDAnalysisConfig
