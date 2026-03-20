@@ -1,0 +1,129 @@
+{
+  "ligandA": "ejm_44", "ligandB": "ejm_31",
+  "ligand_base": "./ligands",
+  "output_base": "./rbfe",
+  "protein": "../tyk2/tyk2_pdbfixer.pdb",
+  "atom_mapping": {
+    "algorithm": "kartograf",
+    "options": {
+      "allow_map_hydrogen_to_non_hydrogen": true,
+      "allow_hybridization_change": false,
+      "allow_element_change": true,
+      "atom_max_distance": 0.95
+    }
+  },
+  "solvent": {
+    "num_procs": -1,
+    "box_shape": "cube",
+    "buffer": 20.0,
+    "neutralize": true,
+    "ionic_strength": 0.15,
+    "do_hmr": true,
+    "hydrogen_mass": 3.024,
+    "water_model": "tip3p",
+    "protein_ff": ["amber14-all.xml"],
+    "water_ff": ["amber14/tip3p.xml"],
+    "workflow": [
+      {
+        "type": "em", "name": "01.em", "exec": "pmemd.cuda", "use_remd": false, "use_mpi": false,
+        "cntrl": {"maxcyc": 2000, "ofreq": 100}
+      },
+      {
+        "type": "heat", "name": "02.heat", "exec": "pmemd.cuda", "use_remd": false, "use_mpi": true,
+        "cntrl": {"nstlim": 1250, "dt": 0.002, "ofreq": 1250}
+      },
+      {
+        "type": "pres", "name": "03.pres", "exec": "pmemd.cuda", "use_remd": false, "use_mpi": true,
+        "cntrl": {"nstlim": 1250, "dt": 0.002, "ofreq": 1250}
+      },
+      {
+        "type": "prod", "name": "04.pre_prod", "exec": "pmemd.cuda", "use_remd": false, "use_mpi": true,
+        "cntrl": {"nstlim": 1250, "dt": 0.004, "ofreq": 1250}
+      },
+      {
+        "type": "prod", "name": "05.prod", "exec": "pmemd.cuda", "use_remd": true, "use_mpi": true,
+        "cntrl": {
+          "nstlim": 125, "dt": 0.004, "ofreq": 1250, "numexchg": 500
+        }
+      }
+    ],
+    "use_charge_change": true,
+    "use_settle_for_alchemical_water": true,
+    "lambdas": [
+      0.0,
+      0.06666666666666667,
+      0.13333333333333333,
+      0.2,
+      0.26666666666666666,
+      0.3333333333333333,
+      0.4,
+      0.4666666666666667,
+      0.5333333333333333,
+      0.6,
+      0.6666666666666666,
+      0.7333333333333333,
+      0.8,
+      0.8666666666666667,
+      0.9333333333333333,
+      1.0
+    ],
+    "num_lambdas": 16
+  },
+  "complex": {
+    "num_procs": -1,
+    "box_shape": "dodecahedron",
+    "buffer": 15.0,
+    "neutralize": true,
+    "ionic_strength": 0.15,
+    "do_hmr": true,
+    "hydrogen_mass": 3.024,
+    "water_model": "tip3p",
+    "protein_ff": ["amber14-all.xml"],
+    "water_ff": ["amber14/tip3p.xml"],
+    "workflow": [
+      {
+        "type": "em", "name": "01.em", "exec": "pmemd.cuda", "use_remd": false, "use_mpi": false,
+        "cntrl": {"maxcyc": 2000, "ofreq": 100}
+      },
+      {
+        "type": "heat", "name": "02.heat", "exec": "pmemd.cuda", "use_remd": false, "use_mpi": true,
+        "cntrl": {"nstlim": 1250, "dt": 0.002, "ofreq": 1250}
+      },
+      {
+        "type": "pres", "name": "03.pres", "exec": "pmemd.cuda", "use_remd": false, "use_mpi": true,
+        "cntrl": {"nstlim": 1250, "dt": 0.002, "ofreq": 1250}
+      },
+      {
+        "type": "prod", "name": "04.pre_prod", "exec": "pmemd.cuda", "use_remd": false, "use_mpi": true,
+        "cntrl": {"nstlim": 1250, "dt": 0.004, "ofreq": 1250}
+      },
+      {
+        "type": "prod", "name": "05.prod", "exec": "pmemd.cuda", "use_remd": true, "use_mpi": true,
+        "cntrl": {
+          "nstlim": 125, "dt": 0.004, "ofreq": 1250, "numexchg": 500
+        }
+      }
+    ],
+    "use_charge_change": true,
+    "use_settle_for_alchemical_water": true,
+    "lambdas": [
+      0.0,
+      0.06666666666666667,
+      0.13333333333333333,
+      0.2,
+      0.26666666666666666,
+      0.3333333333333333,
+      0.4,
+      0.4666666666666667,
+      0.5333333333333333,
+      0.6,
+      0.6666666666666666,
+      0.7333333333333333,
+      0.8,
+      0.8666666666666667,
+      0.9333333333333333,
+      1.0
+    ],
+    "num_lambdas": 16
+  }
+}
