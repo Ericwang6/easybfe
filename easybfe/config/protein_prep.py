@@ -11,41 +11,46 @@ class ProteinPrepareConfig(BaseModel):
     preparation and fixing workflow. It is intended to be a serializable
     representation of the options passed to
     :meth:`easybfe.protein_prep.fixer.ProteinFixer.run`.
-
-    Parameters
-    ----------
-    output_protein : str
-        Path to output PDB file where the fixed structure will be saved.
-    skip_missing_terminal_residues : bool, optional
-        If ``True``, skip adding missing residues at chain termini.
-        See :meth:`easybfe.protein_prep.fixer.ProteinFixer.findMissingAtoms`.
-    max_num_consecutive_missing_residues : int, optional
-        Maximum number of consecutive missing residues to add. Gaps longer
-        than this will be skipped.
-    keep_water : bool, optional
-        If ``True``, retain water residues when removing heterogens.
-        See :meth:`easybfe.protein_prep.fixer.ProteinFixer.removeHeterogens`.
-    keep_ions : bool, optional
-        If ``True``, retain ion residues when removing heterogens.
-        See :meth:`easybfe.protein_prep.fixer.ProteinFixer.removeHeterogens`.
-    extra_keep : List[str], optional
-        Additional residue names to retain when removing heterogens.
-    pH : float, optional
-        pH value for determining protonation states when adding hydrogens.
-        See :meth:`easybfe.protein_prep.fixer.ProteinFixer.addMissingHydrogens`.
-    forcefield : Any, optional
-        OpenMM ``ForceField`` object for adding hydrogens and refining
-        positions. If ``None``, :class:`pdbfixer.PDBFixer` defaults are used.
-    cap_gaps : bool, optional
-        If ``True``, add ``ACE`` and ``NME`` caps to skipped gaps.
-    force_cap_terminals : bool, optional
-        If ``True``, force addition of ``ACE`` at N-terminus and ``NME`` at
-        C-terminus for all chains.
-    res_num_mapping : Dict[str, Dict[int, str]], optional
-        Mapping from chain ID to residue number mapping used to restore
-        original PDB residue numbering and insertion codes.
     """
 
+    keep_chains: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Chain IDs of polymer chains to keep. If None, keep all polymer chains."
+        ),
+        json_schema_extra={"is_cli": True}
+    )
+    keep_water: bool = Field(
+        True,
+        description="If True, retain water residues.",
+        json_schema_extra={"is_cli": True}
+    )
+    keep_ions: bool = Field(
+        True,
+        description="If True, retain ion residues.",
+        json_schema_extra={"is_cli": True}
+    )
+    extra_keep: Optional[List[str]] = Field(
+        None,
+        description="Additional heterogen residue names to retain.",
+        json_schema_extra={"is_cli": True}
+    )
+    water_ion_distance: Optional[float] = Field(
+        None,
+        description=(
+            "If set, only keep water/ions within this distance (Angstrom) from "
+            "kept residues. Overrides keep_water and keep_ions."
+        ),
+        json_schema_extra={"is_cli": True}
+    )
+    replace_nonstandard: bool = Field(
+        True,
+        description=(
+            "If True, replace all non-standard residues with their standard "
+            "equivalents."
+        ),
+        json_schema_extra={"is_cli": True}
+    )
     skip_missing_terminal_residues: bool = Field(
         False,
         description=(
@@ -60,21 +65,6 @@ class ProteinPrepareConfig(BaseModel):
             "Maximum number of consecutive missing residues to add; longer gaps "
             "will be skipped."
         ),
-        json_schema_extra={"is_cli": True}
-    )
-    keep_water: bool = Field(
-        True,
-        description="If True, retain water residues when removing heterogens.",
-        json_schema_extra={"is_cli": True}
-    )
-    keep_ions: bool = Field(
-        True,
-        description="If True, retain ion residues when removing heterogens.",
-        json_schema_extra={"is_cli": True}
-    )
-    extra_keep: Optional[List[str]] = Field(
-        None,
-        description="Additional residue names to retain when removing heterogens.",
         json_schema_extra={"is_cli": True}
     )
     pH: float = Field(

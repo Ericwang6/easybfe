@@ -158,51 +158,32 @@ class ProteinFixer(PDBFixer):
             if std_name:
                 residue.name = std_name
     
-    def removeHeterogens(self, keep_water: bool = True, keep_ions: bool = True, extra_keep: Optional[List[str]] = None):
-        """
-        Remove heterogen residues from the structure.
-
-        Removes all residues that are not standard protein, DNA, or RNA
-        residues, with optional retention of water and ions. This method
-        overrides the original :class:`PDBFixer.removeHeterogens` method.
-
-        Parameters
-        ----------
-        keep_water : bool, optional
-            If ``True``, retain water residues (default: ``True``).
-        keep_ions : bool, optional
-            If ``True``, retain ion residues (default: ``True``).
-        extra_keep : List[str], optional
-            Additional residue names to retain beyond standard residues,
-            water, and ions (default: ``[]``).
-
-        Returns
-        -------
-        List[Residue]
-            List of residues that were deleted from the structure.
-
-        Notes
-        -----
-        Modifies :attr:`self.topology` and :attr:`self.positions` in-place.
-        Standard residues include those in :data:`proteinResidues`,
-        :data:`dnaResidues`, and :data:`rnaResidues`.
-        """
-        extra_keep = list() if extra_keep is None else extra_keep
-        keep = set(proteinResidues).union(dnaResidues).union(rnaResidues)
-        if keep_water:
-            keep = keep.union(waterResidues)
-        if keep_ions:
-            keep = keep.union(ionResidues)
-        keep = keep.union(extra_keep)
-        toDelete = []
-        for residue in self.topology.residues():
-            if residue.name not in keep:
-                toDelete.append(residue)
-        modeller = app.Modeller(self.topology, self.positions)
-        modeller.delete(toDelete)
-        self.topology = modeller.topology
-        self.positions = modeller.positions
-        return toDelete
+    def _filter_by_distance(self, keep_residues, candidate_residues, distance):
+        """Return candidate residues within ``distance`` Angstrom of any kept residue."""
+        positions_angstrom = np.array(self.positions.value_in_unit(unit.angstroms))
+        keep_atom_indices = np.array(
+            [a.index for res in keep_residues for a in res.atoms()],
+            dtype=np.intp,
+        )
+        if len(keep_atom_indices) == 0:
+            return []
+        pos_keep = positions_angstrom[keep_atom_indices]
+        candidate_atom_indices = []
+        residue_slices = []
+        for res in candidate_residues:
+            start = len(candidate_atom_indices)
+            candidate_atom_indices.extend(a.index for a in res.atoms())
+            residue_slices.append((start, len(candidate_atom_indices), res))
+        if not candidate_atom_indices:
+            return []
+        pos_candidates = positions_angstrom[np.array(candidate_atom_indices, dtype=np.intp)]
+        dists = cdist(pos_candidates, pos_keep)
+        min_dist_per_candidate = np.min(dists, axis=1)
+        result = []
+        for start, end, res in residue_slices:
+            if np.any(min_dist_per_candidate[start:end] < distance):
+                result.append(res)
+        return result
     
     def determineVariantFromMetal(self):
         """
@@ -315,62 +296,65 @@ class ProteinFixer(PDBFixer):
         self.positions = modeller.positions
         self.standarizeResidue()
                     
-    def fixNonStandardResidues(self):
+    def fixNonStandardResidues(self, replace_nonstandard: bool = True):
         """
-        Find non-standard residues, optionally replace them (wizard or replace all).
+        Find non-standard residues, optionally replace them.
 
         Calls the parent :meth:`PDBFixer.findNonstandardResidues` to detect
-        non-standard residues, then in wizard mode prompts the user to replace
-        all, replace none, or manually select. Records modification info in
+        non-standard residues. In wizard mode, prompts the user to replace
+        all, replace none, or manually select. In non-wizard mode, uses the
+        ``replace_nonstandard`` parameter. Records modification info in
         :attr:`self.mod_res_info` for residues that are replaced, then calls
         :meth:`replaceNonstandardResidues`.
 
-        Notes
-        -----
-        In wizard mode, options are: replace all, replace none, or manually
-        choose per residue. Stores ``(chain_id, residue_id, insertion_code,
-        original_name, standard_name)`` in :attr:`self.mod_res_info` for each
-        replaced residue.
+        Parameters
+        ----------
+        replace_nonstandard : bool, optional
+            If ``True``, replace all non-standard residues with their standard
+            equivalents (default: ``True``). Only used in non-wizard mode.
         """
         super().findNonstandardResidues()
         to_replace = list(self.nonstandardResidues)
 
-        if self.wizard and to_replace:
-            self.msg("")
-            self.msg("  Non-standard residues")
-            self.msg("  " + "=" * 52)
-            for i, (residue, std_name) in enumerate(to_replace):
-                self.msg(
-                    "  [%d]  %s  ->  %s  (chain %s, res %s%s)"
-                    % (i, residue.name, std_name, residue.chain.id, residue.id, residue.insertionCode or "")
-                )
-            self.msg("  " + "=" * 52)
-            while True:
-                option = input(
-                    "    1 Replace all    2 Replace none    3 Choose per residue\n"
-                    "  Choice [1-3]: "
-                ).strip()
-                if option == "1":
-                    break
-                if option == "2":
-                    to_replace = []
-                    break
-                if option == "3":
-                    to_replace = []
-                    for residue, std_name in self.nonstandardResidues:
-                        while True:
-                            is_replace = input(
-                                "  Replace %s (chain %s, res %s%s) -> %s? [Y/n]: "
-                                % (residue.name, residue.chain.id, residue.id, residue.insertionCode or "", std_name)
-                            ).strip()
-                            if is_replace.lower() == "n":
-                                break
-                            if is_replace.lower() == "y" or is_replace == "":
-                                to_replace.append((residue, std_name))
-                                break
-                            print("  -> Enter y or n")
-                    break
-                print("  -> Enter 1, 2, or 3")
+        if to_replace:
+            if self.wizard:
+                self.msg("")
+                self.msg("  Non-standard residues")
+                self.msg("  " + "=" * 52)
+                for i, (residue, std_name) in enumerate(to_replace):
+                    self.msg(
+                        "  [%d]  %s  ->  %s  (chain %s, res %s%s)"
+                        % (i, residue.name, std_name, residue.chain.id, residue.id, residue.insertionCode or "")
+                    )
+                self.msg("  " + "=" * 52)
+                while True:
+                    option = input(
+                        "    1 Replace all    2 Replace none    3 Choose per residue\n"
+                        "  Choice [1-3]: "
+                    ).strip()
+                    if option == "1":
+                        break
+                    if option == "2":
+                        to_replace = []
+                        break
+                    if option == "3":
+                        to_replace = []
+                        for residue, std_name in self.nonstandardResidues:
+                            while True:
+                                ans = input(
+                                    "  Replace %s (chain %s, res %s%s) -> %s? [Y/n]: "
+                                    % (residue.name, residue.chain.id, residue.id, residue.insertionCode or "", std_name)
+                                ).strip()
+                                if ans.lower() == "n":
+                                    break
+                                if ans.lower() == "y" or ans == "":
+                                    to_replace.append((residue, std_name))
+                                    break
+                                print("  -> Enter y or n")
+                        break
+                    print("  -> Enter 1, 2, or 3")
+            elif not replace_nonstandard:
+                to_replace = []
 
         self.nonstandardResidues = to_replace
 
@@ -378,15 +362,15 @@ class ProteinFixer(PDBFixer):
             self.mod_res_info.append(
                 (residue.chain.id, int(residue.id), residue.insertionCode, residue.name, std_res_name)
             )
-            self.msg("Replace non-standard residue: %s -> %s" % (_residue_repr(residue), std_res_name))
+            self.msg(f"Replace non-standard residue: {_residue_repr(residue)} -> {std_res_name}")
 
         if self.nonstandardResidues:
             self.replaceNonstandardResidues()
 
     def findMissingAtoms(
-        self, 
-        skip_missing_terminal_residues: bool = False, 
-        max_num_consecutive_missing_residues: Optional[int] = None, 
+        self,
+        skip_missing_terminal_residues: bool = False,
+        max_num_consecutive_missing_residues: Optional[int] = None,
         cap_gaps: bool = True,
         force_cap_terminals: bool = False
     ):
@@ -397,21 +381,26 @@ class ProteinFixer(PDBFixer):
         and :meth:`PDBFixer.findMissingAtoms` with enhanced control over
         terminal residue handling and gap capping.
 
+        In wizard mode, prompts the user per gap (fix / skip / skip and cap)
+        and per chain terminal (cap N-terminus / C-terminus). In non-wizard
+        mode, uses the provided parameters.
+
         Parameters
         ----------
         skip_missing_terminal_residues : bool, optional
             If ``True``, skip adding missing residues at chain termini
-            (default: ``True``).
+            (default: ``False``). Only used in non-wizard mode.
         max_num_consecutive_missing_residues : int, optional
             Maximum number of consecutive missing residues to add. Gaps
             longer than this will be skipped (default: ``None``, no limit).
+            Only used in non-wizard mode.
         cap_gaps : bool, optional
             If ``True``, add ``ACE`` and ``NME`` caps to skipped gaps
-            (default: ``True``).
+            (default: ``True``). Only used in non-wizard mode.
         force_cap_terminals : bool, optional
             If ``True``, force addition of ``ACE`` at N-terminus and
-            ``NME`` at C-terminus for all chains (default: ``False``) no matter if
-            that is needed.
+            ``NME`` at C-terminus for all chains (default: ``False``).
+            Only used in non-wizard mode.
 
         Notes
         -----
@@ -421,99 +410,160 @@ class ProteinFixer(PDBFixer):
         terminal residues without capping, adds ``OXT`` to the terminal
         residue's missing atoms list.
         """
-        # delete terminal oxygen if force cap terminals
-        if force_cap_terminals:
-            mod = app.Modeller(self.topology, self.positions)
-            ters = []
-            for chain in self.topology.chains():
-                for atom in list(chain.residues())[-1].atoms():
-                    if atom.name == 'OXT':
-                        ters.append(atom)
-            mod.delete(ters)
-            self.topology = mod.topology
-            self.positions = mod.positions
-
         sequences = {seq.chainId: seq.residues for seq in self.sequences}
         chains = list(self.topology.chains())
         chain_residues = [list(chain.residues()) for chain in chains]
-        
-        # Find missing residues
+
+        # --- Determine which chain terminals to cap ---
+        # cap_n / cap_c map chain ID -> bool
+        cap_n = {}
+        cap_c = {}
+        if self.wizard:
+            self.msg("")
+            self.msg("  Terminal capping")
+            self.msg("  " + "=" * 52)
+            for chain in chains:
+                has_protein = any(r.name in proteinResidues for r in chain.residues())
+                if not has_protein:
+                    continue
+                while True:
+                    ans = input(f"  Cap N-terminus of chain {chain.id}? [y/N]: ").strip()
+                    if ans.lower() == 'y':
+                        cap_n[chain.id] = True
+                        break
+                    if ans.lower() == 'n' or ans == '':
+                        cap_n[chain.id] = False
+                        break
+                    print("  -> Enter y or n")
+                while True:
+                    ans = input(f"  Cap C-terminus of chain {chain.id}? [y/N]: ").strip()
+                    if ans.lower() == 'y':
+                        cap_c[chain.id] = True
+                        break
+                    if ans.lower() == 'n' or ans == '':
+                        cap_c[chain.id] = False
+                        break
+                    print("  -> Enter y or n")
+        else:
+            for chain in chains:
+                cap_n[chain.id] = force_cap_terminals
+                cap_c[chain.id] = force_cap_terminals
+
+        # Remove OXT from chains whose C-terminus will be capped
+        any_cap_c = any(cap_c.get(c.id, False) for c in chains)
+        if any_cap_c:
+            mod = app.Modeller(self.topology, self.positions)
+            ters = []
+            for chain in self.topology.chains():
+                if not cap_c.get(chain.id, False):
+                    continue
+                for atom in list(chain.residues())[-1].atoms():
+                    if atom.name == 'OXT':
+                        ters.append(atom)
+            if ters:
+                mod.delete(ters)
+                self.topology = mod.topology
+                self.positions = mod.positions
+                chains = list(self.topology.chains())
+                chain_residues = [list(chain.residues()) for chain in chains]
+
+        # --- Find missing residues ---
         super().findMissingResidues()
         num_missing_residues = {chain.id: 0 for chain in chains}
         newMissingResidues = {}
         c_ter_residues = []
+
+        if self.wizard and self.missingResidues:
+            self.msg("")
+            self.msg("  Missing residues")
+            self.msg("  " + "=" * 52)
+
         for info, residues in self.missingResidues.items():
             chain_index, res_id_start = info
             chain_id = chains[chain_index].id
-            is_n_ter = (res_id_start == 0) 
+            is_n_ter = (res_id_start == 0)
             is_c_ter = (num_missing_residues[chain_id] + len(residues) + res_id_start == len(sequences[chain_id]))
             is_ter = is_n_ter or is_c_ter
             is_too_long = (isinstance(max_num_consecutive_missing_residues, int) and len(residues) > max_num_consecutive_missing_residues)
             num_missing_residues[chain_id] += len(residues)
 
-            if (is_ter and skip_missing_terminal_residues) or is_too_long:
-                # This is the way PDBFixer find start index
-                if res_id_start < len(chain_residues[chain_index]):
-                    start = int(chain_residues[chain_index][res_id_start].id) - len(residues)
-                else:
-                    start = int(chain_residues[chain_index][res_id_start-1].id) + 1
-                for i, residue in enumerate(residues):
-                    self.missing_residues_skipped.append((chain_id, start + i, residue))
-                
-                residues = []
+            # Compute gap location for display / recording
+            if res_id_start < len(chain_residues[chain_index]):
+                gap_start = int(chain_residues[chain_index][res_id_start].id) - len(residues)
+            else:
+                gap_start = int(chain_residues[chain_index][res_id_start - 1].id) + 1
 
-                if cap_gaps:
+            # --- Decide: fix, skip, or skip_and_cap ---
+            if self.wizard:
+                gap_type = "N-terminal" if is_n_ter else ("C-terminal" if is_c_ter else "loop")
+                gap_end = gap_start + len(residues) - 1
+                self.msg(f"  Missing {gap_type} residues {gap_start}-{gap_end} in chain {chain_id} ({len(residues)} residues)")
+                if len(residues) > self.MAX_WARN_MISSING_RES:
+                    self.msg(f"  WARNING: Large gap ({len(residues)} residues) - result may not be trustworthy")
+                while True:
+                    option = input("    1 Fix    2 Skip    3 Skip and cap\n  Choice [1-3]: ").strip()
+                    if option in ('1', '2', '3'):
+                        break
+                    print("  -> Enter 1, 2, or 3")
+                should_skip = option in ('2', '3')
+                should_cap = option == '3'
+            else:
+                should_skip = (is_ter and skip_missing_terminal_residues) or is_too_long
+                should_cap = cap_gaps if should_skip else False
+
+            if should_skip:
+                for i, residue in enumerate(residues):
+                    self.missing_residues_skipped.append((chain_id, gap_start + i, residue))
+
+                residues = []
+                if should_cap:
                     if is_n_ter:
                         residues.insert(0, 'ACE')
                     elif is_c_ter:
                         residues.append('NME')
                     elif len(residues) == 0:
-                        # skipped long non-terminal missing residues
                         residues = ['NME', 'ACE']
                 else:
-                    # if not capped with NME, record them as terminal residues and OXT will be added
                     if not is_n_ter:
-                        c_ter_residues.append(chain_residues[chain_index][res_id_start-1])
-            
+                        c_ter_residues.append(chain_residues[chain_index][res_id_start - 1])
+
+            # Record added residues (original gap or caps)
             if res_id_start < len(chain_residues[chain_index]):
                 start = int(chain_residues[chain_index][res_id_start].id) - len(residues)
             else:
-                start = int(chain_residues[chain_index][res_id_start-1].id) + 1
+                start = int(chain_residues[chain_index][res_id_start - 1].id) + 1
             for i, residue in enumerate(residues):
                 self.missing_residues_added.append((chain_id, start + i, residue))
-            
+
             if len(residues) > 0:
                 newMissingResidues[info] = residues
-        
-        if force_cap_terminals:
-            for i, chain in enumerate(chains):
-                protein_indices = [
-                    j for j, r in enumerate(chain_residues[i])
-                    if r.name in proteinResidues
-                ]
-                if not protein_indices:
-                    continue
-                first_protein = protein_indices[0]
-                last_protein = protein_indices[-1]
-                # N-terminal cap before first protein residue
+
+        # --- Apply terminal capping (ACE / NME) ---
+        for i, chain in enumerate(chains):
+            protein_indices = [
+                j for j, r in enumerate(chain_residues[i])
+                if r.name in proteinResidues
+            ]
+            if not protein_indices:
+                continue
+            first_protein = protein_indices[0]
+            last_protein = protein_indices[-1]
+            if cap_n.get(chain.id, False):
                 key = (chain.index, first_protein)
                 if key not in newMissingResidues:
                     newMissingResidues[key] = ['ACE']
                 elif newMissingResidues[key][0] != 'ACE':
                     newMissingResidues[key].insert(0, 'ACE')
-                # C-terminal cap after last protein residue
+            if cap_c.get(chain.id, False):
                 key = (chain.index, last_protein + 1)
                 if key not in newMissingResidues:
                     newMissingResidues[key] = ['NME']
                 elif newMissingResidues[key][-1] != 'NME':
                     newMissingResidues[key].append('NME')
 
-        # Check if number of missing residues (excluding ACE, NME) exceeds warning threshold
-        print(newMissingResidues)
+        # Warn about large gaps
         for info, residues in newMissingResidues.items():
-            # Count only non-cap residues
             num_miss = len([r for r in residues if r not in ('ACE', 'NME')])
-        
             if num_miss > self.MAX_WARN_MISSING_RES:
                 logger.warning(
                     'Too many missing residues (%d, exceed %d) starting from residue %s%s in chain %s. '
@@ -525,15 +575,27 @@ class ProteinFixer(PDBFixer):
                 )
 
         self.missingResidues = newMissingResidues
-        
-        # Find Missing Atoms
+
+        # --- Find missing atoms ---
         super().findMissingAtoms()
         for ter in c_ter_residues:
             if ter not in self.missingTerminals:
                 self.missingTerminals[ter] = ['OXT']
-        if force_cap_terminals:
-            self.missingTerminals = {}
-        
+
+        # Clear terminals for capped chains
+        capped_chain_ids = set()
+        for cid, do_cap in cap_n.items():
+            if do_cap:
+                capped_chain_ids.add(cid)
+        for cid, do_cap in cap_c.items():
+            if do_cap:
+                capped_chain_ids.add(cid)
+        if capped_chain_ids:
+            self.missingTerminals = {
+                res: atoms for res, atoms in self.missingTerminals.items()
+                if res.chain.id not in capped_chain_ids
+            }
+
         missingAtomNames = {residue: [at.name for at in atoms] for residue, atoms in self.missingAtoms.items()}
         for residue in self.missingTerminals:
             if residue not in missingAtomNames:
@@ -541,7 +603,7 @@ class ProteinFixer(PDBFixer):
             else:
                 missingAtomNames[residue] += self.missingTerminals[residue]
 
-        for residue, atom_names in missingAtomNames.items():            
+        for residue, atom_names in missingAtomNames.items():
             self.missing_atoms_added.append(
                 (residue.chain.id, int(residue.id), residue.name, atom_names)
             )
@@ -589,11 +651,11 @@ class ProteinFixer(PDBFixer):
         
         # Logging
         if self.missing_residues_added:
-            self.msg('Add  missing residues:\n %s', self.missing_residues_added)
+            self.msg(f'Add  missing residues:\n {self.missing_residues_added}')
         if self.missing_residues_skipped:
-            self.msg('Skip missing residues:\n %s', self.missing_residues_skipped)
+            self.msg(f'Skip missing residues:\n {self.missing_residues_skipped}')
         if self.missing_atoms_added:
-            self.msg('Add  missing atoms:\n %s', self.missing_atoms_added)
+            self.msg(f'Add  missing atoms:\n {self.missing_atoms_added}')
 
     @classmethod
     def _getMappedResnumWithIcode(cls, res_id: int, chain: str, res_num_mapping: Dict[str, Dict[int, str]]) -> Tuple[str, str]:
@@ -698,31 +760,40 @@ class ProteinFixer(PDBFixer):
         """
         if forcefield is None:
             forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
-        # Conver List missing atoms information to dictionary, for better indexing
-        missing_atoms_info_as_dict = defaultdict(list)
-        for chain, res_id, res_name, atoms in self.missing_atoms_added:
-            missing_atoms_info_as_dict[(chain, res_id, res_name)] += atoms
         system = forcefield.createSystem(self.topology, nonbondedMethod=app.CutoffNonPeriodic, constraints=None, rigidWater=False)
-        nonstd_names = [res.name for res, stdname in self.nonstandardResidues]
-        for residue in self.topology.residues():
-            resdata = (residue.chain.id, int(residue.id), residue.name)
-            if resdata in self.missing_residues_added:
-                logger.debug('Found fixed residue: %s', residue)
-                continue
-            
-            for i, atom in enumerate(residue.atoms()):
-                # Always constrained all atoms in modified residue, including hydrogens (because we don't have good force field)
-                if residue.name in nonstd_names:
-                    system.setParticleMass(atom.index, 0.0)
-                    continue
-                if (resdata in missing_atoms_info_as_dict) and (atom.name in missing_atoms_info_as_dict[resdata]):
-                    logger.debug('Found fixed atom: %s', atom)
-                    continue
-                if atom.element is app.element.hydrogen:
-                    continue
-                # if (self._has_ligand) and (residue.index == self.topology.getNumResidues() - 1) and (i in self.ligand_missing_atoms):
-                #     continue
+
+        current_positions_angstrom = np.array(self.positions.value_in_unit(unit.angstroms))
+        for atom in self.topology.atoms():
+            atom_pos = current_positions_angstrom[atom.index]
+            dists = np.linalg.norm(self._initial_positions_angstrom - atom_pos, axis=1)
+            if np.min(dists) < 0.001:
                 system.setParticleMass(atom.index, 0.0)
+                continue
+            logger.info(f"Find added atom: {atom}")
+
+        # # Original logic (commented out):
+        # missing_atoms_info_as_dict = defaultdict(list)
+        # for chain, res_id, res_name, atoms in self.missing_atoms_added:
+        #     missing_atoms_info_as_dict[(chain, res_id, res_name)] += atoms
+        # nonstd_names = [res.name for res, stdname in self.nonstandardResidues]
+        # for residue in self.topology.residues():
+        #     resdata = (residue.chain.id, int(residue.id), residue.name)
+        #     if resdata in self.missing_residues_added:
+        #         logger.info('Found fixed residue: %s', residue)
+        #         continue
+        #
+        #     for i, atom in enumerate(residue.atoms()):
+        #         if residue.name in nonstd_names:
+        #             system.setParticleMass(atom.index, 0.0)
+        #             continue
+        #         if (resdata in missing_atoms_info_as_dict) and (atom.name in missing_atoms_info_as_dict[resdata]):
+        #             logger.info('Found fixed atom: %s', atom)
+        #             continue
+        #         if atom.element is app.element.hydrogen:
+        #             continue
+        #         # if (self._has_ligand) and (residue.index == self.topology.getNumResidues() - 1) and (i in self.ligand_missing_atoms):
+        #         #     continue
+        #         system.setParticleMass(atom.index, 0.0)
 
         integrator = mm.LangevinIntegrator(300*unit.kelvin, 10/unit.picosecond, 5*unit.femtosecond)
         context = mm.Context(system, integrator)
@@ -731,113 +802,157 @@ class ProteinFixer(PDBFixer):
         self.positions = context.getState(getPositions=True).getPositions()
         return self.positions
 
-    def selectResiduesToKeep(self):
+    def selectResiduesToKeep(
+        self,
+        keep_chains: Optional[List[str]] = None,
+        keep_water: bool = True,
+        keep_ions: bool = True,
+        extra_keep: Optional[List[str]] = None,
+        water_ion_distance: Optional[float] = None,
+    ):
         """
-        Prompt user to select which components to keep and remove the rest.
+        Select which components to keep and remove the rest.
 
-        In wizard mode, prints a structure summary (polymers, water, ions by
-        chain), then prompts for each polymer chain and for water/ion treatment
-        (keep all, remove all, keep within distance, or choose by chain).
-        Residues not selected are removed from the topology using
-        :class:`openmm.app.Modeller`.
+        Handles polymer chains, heterogens, water, and ions. In wizard mode,
+        prompts the user interactively for each decision. In non-wizard mode,
+        uses the provided parameters.
+
+        Parameters
+        ----------
+        keep_chains : List[str], optional
+            Chain IDs of polymer chains to keep. If ``None``, keep all
+            polymer chains (default: ``None``). Only used in non-wizard mode.
+        keep_water : bool, optional
+            If ``True``, retain water residues (default: ``True``).
+            Only used in non-wizard mode.
+        keep_ions : bool, optional
+            If ``True``, retain ion residues (default: ``True``).
+            Only used in non-wizard mode.
+        extra_keep : List[str], optional
+            Additional heterogen residue names to retain (e.g., ``["OCT"]``).
+            Only used in non-wizard mode (default: ``None``).
+        water_ion_distance : float, optional
+            If set, only keep water and ions within this distance (Angstrom)
+            from kept residues. Overrides ``keep_water`` and ``keep_ions``
+            (default: ``None``). Only used in non-wizard mode.
 
         Notes
         -----
         Modifies :attr:`self.topology` and :attr:`self.positions` in-place.
-        Intended to be called from :meth:`run` when :attr:`wizard` is True.
         """
+        extra_keep = list() if extra_keep is None else extra_keep
+        components = annotate_topology(self.topology)
+
         self.msg("")
         self.msg("  Structure summary")
         self.msg("  " + "=" * 52)
-        components = annotate_topology(self.topology)
         for i, (content, comp, chain_id, nres) in enumerate(components):
             self.msg(f"  [{i}]  {content:<10}  chain {chain_id}  ({nres} residues)")
         self.msg("  " + "=" * 52)
         self.msg("")
 
         keep_residues = []
-
         polymers = [data for data in components if data[0] in ('Protein', 'DNA', 'RNA')]
-        if polymers:
-            self.msg("  Polymers (protein / DNA / RNA)")
-        for data in polymers:
-            while True:
-                isKeep = input(
-                    f"  Keep {data[0]} (chain {data[2]}, {data[3]} residues)? [Y/n]: "
-                ).strip()
-                if isKeep.lower() == 'n':
-                    break
-                if isKeep.lower() == 'y' or isKeep == '':
-                    keep_residues.extend(data[1])
-                    break
-                print("  -> Enter y or n")
-
+        heterogens = [data for data in components if data[0] not in ('Protein', 'DNA', 'RNA', 'Water', 'Ion')]
         water_ions = [data for data in components if data[0] in ('Water', 'Ion')]
-        if water_ions:
-            n_water = sum(d[3] for d in water_ions if d[0] == 'Water')
-            n_ion = sum(d[3] for d in water_ions if d[0] == 'Ion')
-            self.msg("")
-            self.msg("  Water & ions" + (f"  ({n_water} water, {n_ion} ions)" if (n_water or n_ion) else ""))
-            while True:
-                option = input(
-                    "    1 Keep all    2 Remove all    3 Keep within distance    4 Choose by chain\n"
-                    "  Choice [1-4]: "
-                ).strip()
-                if option == '1':
-                    for data in water_ions:
-                        keep_residues.extend(data[1])
-                    break
-                if option == '2':
-                    break
-                if option == '3':
-                    while True:
-                        dist_in = input("  Distance cutoff (Angstrom): ").strip()
-                        try:
-                            dist = float(dist_in)
-                            if dist > 0:
-                                break
-                        except ValueError:
-                            pass
-                        print("  -> Enter a positive number")
-                    positions_angstrom = np.array(self.positions.value_in_unit(unit.angstroms))
-                    keep_atom_indices = np.array(
-                        [a.index for res in keep_residues for a in res.atoms()],
-                        dtype=np.intp,
-                    )
-                    pos_keep = positions_angstrom[keep_atom_indices]
-                    candidate_atom_indices = []
-                    residue_slices = []
-                    for data in water_ions:
-                        for res in data[1]:
-                            start = len(candidate_atom_indices)
-                            candidate_atom_indices.extend(a.index for a in res.atoms())
-                            residue_slices.append((start, len(candidate_atom_indices), res))
-                    if candidate_atom_indices:
-                        pos_candidates = positions_angstrom[np.array(candidate_atom_indices, dtype=np.intp)]
-                        dists = cdist(pos_candidates, pos_keep)
-                        min_dist_per_candidate = np.min(dists, axis=1)
-                        for start, end, res in residue_slices:
-                            if np.any(min_dist_per_candidate[start:end] < dist):
-                                keep_residues.append(res)
-                    break
-                if option == '4':
-                    for data in water_ions:
-                        while True:
-                            isKeep = input(
-                                f"  Keep {data[0]} (chain {data[2]}, {data[3]} residues)? [Y/n]: "
-                            ).strip()
-                            if isKeep.lower() == 'n':
-                                break
-                            if isKeep.lower() == 'y' or isKeep == '':
-                                keep_residues.extend(data[1])
-                                break
-                            print("  -> Enter y or n")
-                    break
-                print("  -> Enter 1, 2, 3, or 4")
 
-        if keep_residues:
-            keep_set = set(keep_residues)
-            toDelete = [r for r in self.topology.residues() if r not in keep_set]
+        if self.wizard:
+            # --- Polymer selection ---
+            if polymers:
+                self.msg("  Polymers (protein / DNA / RNA)")
+            for data in polymers:
+                while True:
+                    ans = input(
+                        f"  Keep {data[0]} (chain {data[2]}, {data[3]} residues)? [Y/n]: "
+                    ).strip()
+                    if ans.lower() == 'n':
+                        break
+                    if ans.lower() == 'y' or ans == '':
+                        keep_residues.extend(data[1])
+                        break
+                    print("  -> Enter y or n")
+
+            # --- Heterogen selection ---
+            if heterogens:
+                self.msg("")
+                self.msg("  Heterogens")
+            for data in heterogens:
+                while True:
+                    ans = input(
+                        f"  Keep {data[0]} (chain {data[2]})? [y/N]: "
+                    ).strip()
+                    if ans.lower() == 'y':
+                        keep_residues.extend(data[1])
+                        break
+                    if ans.lower() == 'n' or ans == '':
+                        break
+                    print("  -> Enter y or n")
+
+            # --- Water & ion selection ---
+            if water_ions:
+                n_water = sum(d[3] for d in water_ions if d[0] == 'Water')
+                n_ion = sum(d[3] for d in water_ions if d[0] == 'Ion')
+                self.msg("")
+                self.msg("  Water & ions" + (f"  ({n_water} water, {n_ion} ions)" if (n_water or n_ion) else ""))
+                while True:
+                    option = input(
+                        "    1 Keep all    2 Remove all    3 Keep within distance    4 Choose by chain\n"
+                        "  Choice [1-4]: "
+                    ).strip()
+                    if option == '1':
+                        for data in water_ions:
+                            keep_residues.extend(data[1])
+                        break
+                    if option == '2':
+                        break
+                    if option == '3':
+                        while True:
+                            dist_in = input("  Distance cutoff (Angstrom): ").strip()
+                            try:
+                                dist = float(dist_in)
+                                if dist > 0:
+                                    break
+                            except ValueError:
+                                pass
+                            print("  -> Enter a positive number")
+                        all_wi = [res for data in water_ions for res in data[1]]
+                        keep_residues.extend(self._filter_by_distance(keep_residues, all_wi, dist))
+                        break
+                    if option == '4':
+                        for data in water_ions:
+                            while True:
+                                ans = input(
+                                    f"  Keep {data[0]} (chain {data[2]}, {data[3]} residues)? [Y/n]: "
+                                ).strip()
+                                if ans.lower() == 'n':
+                                    break
+                                if ans.lower() == 'y' or ans == '':
+                                    keep_residues.extend(data[1])
+                                    break
+                                print("  -> Enter y or n")
+                        break
+                    print("  -> Enter 1, 2, 3, or 4")
+        else:
+            # --- Non-wizard: parameter-driven selection ---
+            for data in polymers:
+                if keep_chains is None or data[2] in keep_chains:
+                    keep_residues.extend(data[1])
+
+            for data in heterogens:
+                if data[0] in extra_keep:
+                    keep_residues.extend(data[1])
+
+            if water_ion_distance is not None:
+                all_wi = [res for data in water_ions for res in data[1]]
+                keep_residues.extend(self._filter_by_distance(keep_residues, all_wi, water_ion_distance))
+            else:
+                for data in water_ions:
+                    if (data[0] == 'Water' and keep_water) or (data[0] == 'Ion' and keep_ions):
+                        keep_residues.extend(data[1])
+
+        keep_set = set(keep_residues)
+        toDelete = [r for r in self.topology.residues() if r not in keep_set]
+        if toDelete:
             modeller = app.Modeller(self.topology, self.positions)
             modeller.delete(toDelete)
             self.topology = modeller.topology
@@ -845,161 +960,147 @@ class ProteinFixer(PDBFixer):
 
     def run(
         self,
-        skip_missing_terminal_residues: bool = False,
-        max_num_consecutive_missing_residues: Optional[int] = None,
+        # selectResiduesToKeep params
+        keep_chains: Optional[List[str]] = None,
         keep_water: bool = True,
         keep_ions: bool = True,
-        extra_keep: List[str] = None,
-        pH: float = 7.4,
-        forcefield = None,
+        extra_keep: Optional[List[str]] = None,
+        water_ion_distance: Optional[float] = None,
+        # fixNonStandardResidues params
+        replace_nonstandard: bool = True,
+        # findMissingAtoms params
+        skip_missing_terminal_residues: bool = False,
+        max_num_consecutive_missing_residues: Optional[int] = None,
         cap_gaps: bool = True,
         force_cap_terminals: bool = False,
+        # hydrogen / refinement
+        pH: float = 7.4,
+        forcefield=None,
+        # output
         res_num_mapping: Optional[Dict[str, Dict[int, str]]] = None,
         out: str | Path | TextIO | None = None
     ) -> str | None:
         """
         Run the complete protein fixing pipeline.
 
-        Executes the full workflow to fix a PDB structure: finding and
-        replacing non-standard residues, removing heterogens, finding and
+        Executes the full workflow to fix a PDB structure: selecting
+        components to keep, replacing non-standard residues, finding and
         adding missing atoms/residues, adding hydrogens, refining positions,
         and writing the output file with appropriate REMARK records.
 
+        In wizard mode, interactively prompts the user for each decision.
+        In non-wizard mode, uses the provided parameters.
+
         Parameters
         ----------
-        output_protein : str
-            Path to output PDB file where the fixed structure will be saved.
-        res_num_mapping : Dict[str, Dict[int, str]], optional
-            Mapping from chain ID to residue number mapping. Used to restore
-            original PDB residue numbering and insertion codes in the output
-            (default: ``None``).
+        keep_chains : List[str], optional
+            Chain IDs of polymer chains to keep. If ``None``, keep all
+            polymer chains (default: ``None``).
+            See :meth:`selectResiduesToKeep`.
+        keep_water : bool, optional
+            If ``True``, retain water residues (default: ``True``).
+            See :meth:`selectResiduesToKeep`.
+        keep_ions : bool, optional
+            If ``True``, retain ion residues (default: ``True``).
+            See :meth:`selectResiduesToKeep`.
+        extra_keep : List[str], optional
+            Additional heterogen residue names to retain (default: ``None``).
+            See :meth:`selectResiduesToKeep`.
+        water_ion_distance : float, optional
+            If set, only keep water/ions within this distance (Angstrom) from
+            kept residues (default: ``None``).
+            See :meth:`selectResiduesToKeep`.
+        replace_nonstandard : bool, optional
+            If ``True``, replace all non-standard residues with standard
+            equivalents (default: ``True``).
+            See :meth:`fixNonStandardResidues`.
         skip_missing_terminal_residues : bool, optional
             If ``True``, skip adding missing residues at chain termini
-            (default: ``False``). See :meth:`findMissingAtoms` for details.
+            (default: ``False``). See :meth:`findMissingAtoms`.
         max_num_consecutive_missing_residues : int, optional
-            Maximum number of consecutive missing residues to add. If a gap
-            contains more than this number of consecutive missing residues,
-            the entire gap will be skipped (not added). Skipped gaps may be
-            capped with ``ACE`` and ``NME`` if ``cap_gaps=True``
-            (default: ``None``, meaning it tries to fix all missing residues
-            regardless of gap length). See :meth:`findMissingAtoms` for details.
-        keep_water : bool, optional
-            If ``True``, retain water residues when removing heterogens
-            (default: ``True``). See :meth:`removeHeterogens` for details.
-        keep_ions : bool, optional
-            If ``True``, retain ion residues when removing heterogens
-            (default: ``True``). See :meth:`removeHeterogens` for details.
-        extra_keep : List[str], optional
-            Additional residue names to retain when removing heterogens
-            (default: ``None``). See :meth:`removeHeterogens` for details.
-        pH : float, optional
-            pH value for determining protonation states when adding
-            hydrogens (default: ``7.4``). See :meth:`addMissingHydrogens`
-            for details.
-        forcefield : ForceField, optional
-            OpenMM ForceField object for adding hydrogens and refining
-            positions. If ``None``, uses default behavior:
-            
-            - For adding hydrogens: uses the default forcefield from
-              :class:`PDBFixer`. See :meth:`addMissingHydrogens` for details.
-            - For refining positions: uses ``amber14-all.xml`` with
-              ``amber14/tip3p.xml`` water model. See
-              :meth:`refineAddedAtomPositions` for details.
-              
-            (default: ``None``).
+            Maximum number of consecutive missing residues to add
+            (default: ``None``). See :meth:`findMissingAtoms`.
         cap_gaps : bool, optional
-            If ``True``, add ``ACE`` and ``NME`` caps to skipped gaps
-            (default: ``True``). See :meth:`findMissingAtoms` for details.
+            If ``True``, add ``ACE``/``NME`` caps to skipped gaps
+            (default: ``True``). See :meth:`findMissingAtoms`.
         force_cap_terminals : bool, optional
-            If ``True``, force addition of ``ACE`` at N-terminus and
-            ``NME`` at C-terminus for all chains (default: ``False``) no matter if
-            that is needed. See :meth:`findMissingAtoms` for details.
+            If ``True``, force ``ACE``/``NME`` caps on all chain termini
+            (default: ``False``). See :meth:`findMissingAtoms`.
+        pH : float, optional
+            pH for protonation states (default: ``7.4``).
+            See :meth:`addMissingHydrogens`.
+        forcefield : ForceField, optional
+            OpenMM ForceField object (default: ``None``).
+        res_num_mapping : Dict[str, Dict[int, str]], optional
+            Mapping to restore original PDB residue numbering in output
+            (default: ``None``).
+        out : str or Path or TextIO or None, optional
+            Output destination. File path, file-like object, or ``None``
+            to return the PDB string (default: ``None``).
 
-        Notes
-        -----
-        The workflow consists of:
-        1. Finding and replacing non-standard residues
-        2. Removing heterogens (with optional water/ion retention)
-        3. Finding missing atoms and residues
-        4. Adding missing atoms and residues
-        5. Adding missing hydrogens
-        6. Refining positions of added atoms
-        7. Writing output PDB with REMARK 465 (missing residues), REMARK 470
-           (missing atoms), and MODRES records
-
-        If ``res_num_mapping`` is provided, residue numbers and insertion
-        codes are restored to their original PDB values in the output file.
+        Returns
+        -------
+        str or None
+            PDB content as string if ``out`` is ``None``, otherwise ``None``.
         """
-        self.selectResiduesToKeep()        
-        self.fixNonStandardResidues()
-#         self.removeHeterogens(keep_water=keep_water, keep_ions=keep_ions, extra_keep=extra_keep)
-#         self.findMissingAtoms(
-#             skip_missing_terminal_residues=skip_missing_terminal_residues,
-#             max_num_consecutive_missing_residues=max_num_consecutive_missing_residues,
-#             cap_gaps=cap_gaps,
-#             force_cap_terminals=force_cap_terminals
-#         )
-#         self.addMissingAtoms()
-#         self.addMissingHydrogens(pH=pH, forcefield=forcefield)
-#         self.refineAddedAtomPositions(forcefield=forcefield)
+        self.selectResiduesToKeep(
+            keep_chains=keep_chains,
+            keep_water=keep_water,
+            keep_ions=keep_ions,
+            extra_keep=extra_keep,
+            water_ion_distance=water_ion_distance,
+        )
+        self.fixNonStandardResidues(replace_nonstandard=replace_nonstandard)
+        self.findMissingAtoms(
+            skip_missing_terminal_residues=skip_missing_terminal_residues,
+            max_num_consecutive_missing_residues=max_num_consecutive_missing_residues,
+            cap_gaps=cap_gaps,
+            force_cap_terminals=force_cap_terminals,
+        )
+        self._initial_positions_angstrom = np.array(self.positions.value_in_unit(unit.angstroms))
+        self.addMissingAtoms()
+        self.addMissingHydrogens(pH=pH, forcefield=forcefield)
+        self.refineAddedAtomPositions(forcefield=forcefield)
 
-#         protein_top = self.topology
-#         protein_pos = self.positions
-        
-#         # Save protein
-#         seqres = [(seq.chainId, convert_to_seqres(seq.residues, seq.chainId)) for seq in self.sequences]
-#         seqres.sort(key=lambda x: x[0])
-#         headers = [x[1] for x in seqres]
-#         headers += ProteinFixer.getFixedResidueRemarks(self.missing_residues_skipped, res_num_mapping, use_fixed_remark=False)
-#         headers += ProteinFixer.getFixedResidueRemarks(self.missing_residues_added, res_num_mapping)
-#         headers += ProteinFixer.getFixedAtomRemarks(self.missing_atoms_added, res_num_mapping)
-#         headers += ProteinFixer.getModresRecords(self.mod_res_info, res_num_mapping, '')
+        protein_top = self.topology
+        protein_pos = self.positions
 
-#         if out is not None:
-#             is_file = (not hasattr(out, 'write'))
-#             fp = open(out, 'w') if is_file else out
-#         else:
-#             is_file = False
-#             fp = io.StringIO()
+        # Save protein
+        seqres = [(seq.chainId, convert_to_seqres(seq.residues, seq.chainId)) for seq in self.sequences]
+        seqres.sort(key=lambda x: x[0])
+        headers = [x[1] for x in seqres]
+        headers += ProteinFixer.getFixedResidueRemarks(self.missing_residues_skipped, res_num_mapping, use_fixed_remark=False)
+        headers += ProteinFixer.getFixedResidueRemarks(self.missing_residues_added, res_num_mapping)
+        headers += ProteinFixer.getFixedAtomRemarks(self.missing_atoms_added, res_num_mapping)
+        headers += ProteinFixer.getModresRecords(self.mod_res_info, res_num_mapping, '')
 
-#         app.PDBFile.writeHeader(protein_top, fp)
-#         for line in headers:
-#             print(line, file=fp)
-#         # map back residue id and icode
-#         if res_num_mapping:
-#             for residue in protein_top.residues():
-#                 res_id = res_num_mapping[residue.chain.id][int(residue.id)]
-#                 if res_id[-1].isalpha():
-#                     insert_code = res_id[-1]
-#                     res_id = res_id[:-1]
-#                 else:
-#                     insert_code = " "
-#                 residue.id = res_id
-#                 residue.insertionCode = insert_code
+        if out is not None:
+            is_file = (not hasattr(out, 'write'))
+            fp = open(out, 'w') if is_file else out
+        else:
+            is_file = False
+            fp = io.StringIO()
 
-#         app.PDBFile.writeModel(protein_top, protein_pos, keepIds=True, file=fp)
-#         app.PDBFile.writeFooter(protein_top, file=fp)
+        app.PDBFile.writeHeader(protein_top, fp)
+        for line in headers:
+            print(line, file=fp)
+        if res_num_mapping:
+            for residue in protein_top.residues():
+                res_id = res_num_mapping[residue.chain.id][int(residue.id)]
+                if res_id[-1].isalpha():
+                    insert_code = res_id[-1]
+                    res_id = res_id[:-1]
+                else:
+                    insert_code = " "
+                residue.id = res_id
+                residue.insertionCode = insert_code
 
-#         if is_file:
-#             fp.close()
-#         if out is None:
-#             fp.seek(0)
-#             return fp.read()
-#         return
-        
-            
-# if __name__ == '__main__':
-#     logger.setLevel(logging.DEBUG)
-#     fixer = ProteinFixer(
-#         # "/Users/ericwang/Documents/ReasonedTherapeutics/chd1/8umg_chain_A_water.pdb"
-#         # '/Users/ericwang/Documents/Berkeley/easybfe/tests/data/proteinfixer/5ROB.pdb',
-#         '/Users/ericwang/Documents/Berkeley/cache/PGK1_cmp45_water.pdb'
+        app.PDBFile.writeModel(protein_top, protein_pos, keepIds=True, file=fp)
+        app.PDBFile.writeFooter(protein_top, file=fp)
 
-#     )
-#     fixer.run(
-#         skip_missing_terminal_residues=False, 
-#         force_cap_terminals=False, 
-#         out='/Users/ericwang/Documents/Berkeley/cache/PGK1_cmp45_water_prepared.pdb',
-#         keep_ions=False,
-#         keep_water=True
-#     )
+        if is_file:
+            fp.close()
+        if out is None:
+            fp.seek(0)
+            return fp.read()
+        return
