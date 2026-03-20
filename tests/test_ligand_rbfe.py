@@ -1,5 +1,6 @@
 import shutil
 import logging
+import tarfile
 from pathlib import Path
 
 from easybfe.core.ligand import LigandLoader
@@ -7,6 +8,7 @@ from easybfe.core.protein import Protein
 from easybfe.config import AmberFepSimulationConfig
 from easybfe.config.amber.simulation import default_fep_workflow
 from easybfe.amber.prep_ligand_rbfe import setup_ligand_rbfe
+from easybfe.analysis.rbfe import analyze_rbfe
 from easybfe.smff import load_parametrizer
 
 
@@ -16,7 +18,7 @@ logging.basicConfig(
 )
 
 
-def _load_and_parametrize(sdf_path: Path) -> "Ligand":
+def _load_and_parametrize(sdf_path: Path):
     loader = LigandLoader()
     ligands = loader.load(sdf_path, only_first=True, name_from_stem=True)
     assert len(ligands) == 1
@@ -114,3 +116,37 @@ def test_setup_ligand_rbfe_charge_change():
         assert (leg_dir / "lambda0").exists()
         assert (leg_dir / "lambda1").exists()
         assert (leg_dir / "run.sh").exists()
+
+
+def test_analyze_rbfe_with_extracted_archive(tmp_path: Path):
+    data_dir = Path(__file__).parent / "data"
+    archive_path = data_dir / "ejm_44~ejm_31.tar.gz"
+    extract_root = data_dir / "_test_rbfe_data"
+    if extract_root.is_dir():
+        shutil.rmtree(extract_root)
+    extract_root.mkdir(parents=True, exist_ok=True)
+
+    with tarfile.open(archive_path, "r:gz") as tf:
+        tf.extractall(extract_root, filter="data")
+
+    wdir = extract_root / "ejm_44~ejm_31"
+    assert wdir.exists()
+
+    for leg in ["complex", "solvent"]:
+        (wdir / leg / "done.tag").touch()
+
+    result = analyze_rbfe(wdir, prod_prefix="05.prod", force_run=True)
+
+    assert "dg_complex" in result
+    assert "dg_complex_std" in result
+    assert "dg_solvent" in result
+    assert "dg_solvent_std" in result
+    assert "ddg_total" in result
+    assert "ddg_total_std" in result
+    assert isinstance(result["ddg_total"], float)
+    assert isinstance(result["ddg_total_std"], float)
+    assert result["ddg_total_std"] >= 0.0
+
+    assert (wdir / "result.json").exists()
+    assert (wdir / "total_convergence.csv").exists()
+    assert (wdir / "total_convergence.png").exists()

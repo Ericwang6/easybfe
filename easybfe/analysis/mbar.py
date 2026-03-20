@@ -61,7 +61,7 @@ def plot_convergence(
 
     if ax is None:
         _, ax = plt.subplots(figsize=(7, 6.5), dpi=120)
-        ax.set_facecolor("#FAFAFA")
+    ax.set_facecolor("#FFFFFF")
 
     for spine in ("top", "right", "bottom", "left"):
         ax.spines[spine].set_visible(True)
@@ -257,7 +257,13 @@ def run_mbar(
     conv_df.to_csv(dirname / "convergence.csv", index=None)
     conv_ax = plot_convergence(conv_df)
     conv_ax.set_ylabel(r"$\Delta G$ (kcal/mol)")
-    conv_ax.set_title(f"Convergence Analysis - {dirname.name.capitalize()}")
+    conv_ax.set_title(
+        f"Convergence Analysis - {dirname.name.capitalize()}",
+        fontsize=14,
+        fontweight="semibold",
+        pad=12,
+    )
+    conv_ax.figure.tight_layout(rect=(0, 0, 1, 0.97))
     conv_ax.figure.savefig(str(dirname /"convergence.png"), dpi=300)
 
     # overlap matrix

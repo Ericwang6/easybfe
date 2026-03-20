@@ -38,7 +38,13 @@ def analyze_abfe(directory: os.PathLike, prod_prefix: str = '05.prod', temperatu
     conv_df.to_csv(wdir / "convergence.csv", index=None)
     conv_ax = plot_convergence(conv_df)
     conv_ax.set_ylabel("$\Delta G$ (kcal/mol)")
-    conv_ax.set_title(f"ABFE Convergence Analysis - {wdir.name.capitalize()}")
+    conv_ax.set_title(
+        f"ABFE Convergence: {wdir.name.capitalize()}",
+        fontsize=14,
+        fontweight="semibold",
+        pad=12,
+    )
+    conv_ax.figure.tight_layout(rect=(0, 0, 1, 0.97))
     conv_ax.figure.savefig(str(wdir /"convergence.png"), dpi=300)
 
     res = {

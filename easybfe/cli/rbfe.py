@@ -152,3 +152,45 @@ def setup(
 
     rbfe_config = AmberLigandRbfeConfig.model_validate(cfg_dict)
     setup_ligand_rbfe_from_config(rbfe_config)
+
+
+@rbfe.command()
+@click.argument(
+    "directory",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    required=True,
+    help="RBFE output directory (contains complex/, solvent/, and optional gas/).",
+)
+@click.option(
+    "--prod-prefix",
+    "-p",
+    type=str,
+    default="05.prod",
+    help="Production run subdirectory name. Default: 05.prod",
+)
+@click.option(
+    "--temperature",
+    "-t",
+    type=float,
+    default=298.15,
+    help="Temperature in Kelvin. Default: 298.15",
+)
+@click.option(
+    "--force",
+    "-f",
+    "force_run",
+    is_flag=True,
+    default=False,
+    help="Re-run MBAR and overwrite result.json even if it exists.",
+)
+def analyze(
+    directory: Path,
+    prod_prefix: str,
+    temperature: float,
+    force_run: bool,
+) -> None:
+    """Run RBFE analysis (MBAR) and write result.json and convergence plots."""
+
+    from ..analysis.rbfe import analyze_rbfe
+
+    analyze_rbfe(directory, prod_prefix=prod_prefix, temperature=temperature, force_run=force_run)
