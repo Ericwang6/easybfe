@@ -340,8 +340,8 @@ def generate_amber_mask(natomsA: int, natomsB: int, mapping: dict[int, int], coi
             # "noshakemask": f"@1-{natomsA+natomsB}",
             "timask1": f"@1-{natomsA}",
             "timask2": f"@{natomsA+1}-{natomsA+natomsB}",
-            "scmask1": "@{}".format(','.join(str(i+1) for i in scA)),
-            "scmask2": "@{}".format(','.join(str(i+1+natomsA) for i in scB))
+            "scmask1": "@{}".format(','.join(str(i+1) for i in scA)) if len(scA) > 0 else '',
+            "scmask2": "@{}".format(','.join(str(i+1+natomsA) for i in scB)) if len(scB) > 0 else ''
         }
     elif mode == 'abfe':
         res = {
@@ -373,4 +373,9 @@ def update_mask(mask: dict[str, str], update: dict[str, Any]):
         elif upd:
             assert upd[0] == ori[0], f'Mask specification not same: {upd} startswith {upd[0]}, but {ori} startswith {ori[0]}'
             assert ori[0] in (':', '@'), f'Mask should startswith ":" or "@"'
-            mask[key] = ori + ',' + update[key][1:]
+            new = ori + ',' + update[key][1:]
+            new = new.replace('@,', '@')
+            if new == '@,' or new == '@':
+                new = ''
+            mask[key] = new
+            
