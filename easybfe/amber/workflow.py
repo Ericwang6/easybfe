@@ -238,7 +238,19 @@ trap cleanup TERM INT HUP
         cleanup_func,
         r'start=$(date +%s)',
         (
-            'if [ -f done.tag ] || [ -f running.tag ] || [ -f error.tag ]; then\n'
+            'if [ -f running.tag ]; then\n'
+            '  echo "Found running.tag: a run may still be in progress. Skip this run."\n'
+            '  echo "Delete running.tag to force rerun."\n'
+            '  exit 0\n'
+            'fi\n'
+            'if [ -f done.tag ]; then\n'
+            '  echo "Found done.tag: previous run has finished. Skip this run."\n'
+            '  echo "Delete done.tag to force rerun."\n'
+            '  exit 0\n'
+            'fi\n'
+            'if [ -f error.tag ]; then\n'
+            '  echo "Found error.tag: previous run ended with error. Skip this run."\n'
+            '  echo "Delete error.tag to force rerun."\n'
             '  exit 0\n'
             'fi\n'
             'touch running.tag'
