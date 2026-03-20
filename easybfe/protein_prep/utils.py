@@ -1,4 +1,5 @@
 import openmm.app as app
+from pathlib import Path
 from textwrap import wrap
 
 aa_mapping = {
@@ -149,3 +150,42 @@ def annotate_topology(top: app.Topology):
             if ions:
                 components.append(('Ion', ions, chain.id, len(ions)))
     return components
+
+
+def check_ff(
+    protein_file: str | Path,
+    forcefield_files: str | list[str] | tuple[str, ...] | None = None,
+) -> bool:
+    """
+    Validate that a force field can parameterize a protein topology.
+
+    Parameters
+    ----------
+    protein_file : str or Path
+        Input protein structure file in PDB format.
+    forcefield_files : str or list[str] or tuple[str, ...], optional
+        OpenMM force field XML file(s). If ``None``, defaults to
+        ``("amber14-all.xml", "amber14/tip3p.xml")``.
+
+    Returns
+    -------
+    bool
+        ``True`` if system creation succeeds.
+
+    Raises
+    ------
+    Exception
+        Raised by OpenMM when the topology cannot be parameterized by
+        the given force field combination.
+    """
+    if forcefield_files is None:
+        forcefield_files = ("amber14-all.xml", "amber14/tip3p.xml")
+    elif isinstance(forcefield_files, str):
+        forcefield_files = (forcefield_files,)
+    else:
+        forcefield_files = tuple(forcefield_files)
+
+    pdb = app.PDBFile(str(protein_file))
+    ff = app.ForceField(*forcefield_files)
+    ff.createSystem(pdb.topology)
+    return True
