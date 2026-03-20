@@ -31,3 +31,16 @@ def check(protein_file: Path, forcefield_files: tuple[str, ...]) -> None:
     ff_files = forcefield_files if forcefield_files else None
     check_ff(protein_file=protein_file, forcefield_files=ff_files)
     click.echo("Force field check passed.")
+
+
+@protein.command("summary")
+@click.argument(
+    "protein_file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+)
+def summary(protein_file: Path) -> None:
+    """Print a user-friendly summary of structure quality issues."""
+    from ..protein_prep.utils import summary_pdb
+
+    click.echo(summary_pdb(protein_file=protein_file))

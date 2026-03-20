@@ -1,6 +1,7 @@
 import openmm.app as app
 from pathlib import Path
 from textwrap import wrap
+from pdbfixer import PDBFixer
 
 aa_mapping = {
     'A': 'ALA', 'R': 'ARG', 'N': 'ASN', 'D': 'ASP', 'C': 'CYS',
@@ -189,3 +190,93 @@ def check_ff(
     ff = app.ForceField(*forcefield_files)
     ff.createSystem(pdb.topology)
     return True
+
+
+def summary_pdb(protein_file: str | Path) -> str:
+    """
+    Summarize a PDB structure without modifying coordinates.
+
+    The summary includes:
+
+    - Chain/component overview from :func:`annotate_topology`
+    - Non-standard residues detected by :class:`pdbfixer.PDBFixer`
+    - Missing residues detected from SEQRES vs ATOM records
+    - Missing atoms and terminal atoms
+
+    Parameters
+    ----------
+    protein_file : str or Path
+        Input protein structure file in PDB format.
+
+    Returns
+    -------
+    str
+        Human-readable multi-line summary text.
+    """
+    protein_file = Path(protein_file)
+    fixer = PDBFixer(filename=str(protein_file))
+    lines: list[str] = []
+
+    lines.append(f"Structure summary for: {protein_file}")
+    lines.append("=" * 64)
+
+    components = annotate_topology(fixer.topology)
+    lines.append("Components")
+    lines.append("-" * 64)
+    for i, (content, _residues, chain_id, nres) in enumerate(components):
+        lines.append(f"[{i}] {content:<10} chain {chain_id} ({nres} residues)")
+
+    fixer.findNonstandardResidues()
+    lines.append("")
+    lines.append("Non-standard residues")
+    lines.append("-" * 64)
+    if fixer.nonstandardResidues:
+        for residue, std_name in fixer.nonstandardResidues:
+            lines.append(
+                f"- {_residue_repr(residue)} -> suggested replacement: {std_name}"
+            )
+    else:
+        lines.append("None")
+
+    fixer.findMissingResidues()
+    lines.append("")
+    lines.append("Missing residues")
+    lines.append("-" * 64)
+    if fixer.missingResidues:
+        chains = list(fixer.topology.chains())
+        chain_residues = [list(chain.residues()) for chain in chains]
+        for (chain_index, res_id_start), residues in fixer.missingResidues.items():
+            chain = chains[chain_index]
+            if res_id_start < len(chain_residues[chain_index]):
+                gap_start = int(chain_residues[chain_index][res_id_start].id) - len(residues)
+            else:
+                gap_start = int(chain_residues[chain_index][res_id_start - 1].id) + 1
+            gap_end = gap_start + len(residues) - 1
+            lines.append(
+                f"- Chain {chain.id}: residues {gap_start}-{gap_end} "
+                f"({len(residues)} missing) -> {', '.join(residues)}"
+            )
+    else:
+        lines.append("None")
+
+    fixer.findMissingAtoms()
+    lines.append("")
+    lines.append("Missing atoms")
+    lines.append("-" * 64)
+    missing_atom_names = {
+        residue: [atom.name for atom in atoms]
+        for residue, atoms in fixer.missingAtoms.items()
+    }
+    for residue, atoms in fixer.missingTerminals.items():
+        if residue in missing_atom_names:
+            missing_atom_names[residue] += atoms
+        else:
+            missing_atom_names[residue] = list(atoms)
+
+    if missing_atom_names:
+        for residue, atom_names in missing_atom_names.items():
+            lines.append(f"- {_residue_repr(residue)}: {', '.join(atom_names)}")
+    else:
+        lines.append("None")
+
+    return "\n".join(lines)
