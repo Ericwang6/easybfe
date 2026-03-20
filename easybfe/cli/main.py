@@ -12,6 +12,7 @@ from ..logging import setup_logging
 from .abfe import abfe
 from .ligand import ligand
 from .md import md
+from .protein import protein
 from .rbfe import rbfe
 
 
@@ -32,6 +33,7 @@ def main(ctx):
 main.add_command(abfe)
 main.add_command(ligand)
 main.add_command(md)
+main.add_command(protein)
 main.add_command(rbfe)
 
 if __name__ == '__main__':
