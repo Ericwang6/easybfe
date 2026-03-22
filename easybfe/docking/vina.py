@@ -1,246 +1,454 @@
 import os
-from pathlib import Path
-from typing import Dict, List
+import logging
 import tempfile
-import shutil
-from copy import deepcopy
+from typing import Tuple, Optional, List, Dict, Any
+from pathlib import Path
 
 import numpy as np
+from rdkit import RDLogger
+RDLogger.DisableLog('rdApp.*')
 from rdkit import Chem
-from rdkit.Chem import AllChem
-from meeko import MoleculePreparation, PDBQTMolecule, RDKitMolCreate
+from meeko import MoleculePreparation, PDBQTWriterLegacy, PDBQTMolecule, RDKitMolCreate
+from vina import Vina
 
-from .base import compute_box_from_coordinates
-from ..cmd import run_command, find_executable, init_logger
-from .embed import constrained_optimization
-from ..mapping import OpenFEAtomMapper, LazyMCSMapper
+from .base import BaseDocking
+from .embed import constr_embed_with_rdkit, constrained_em_with_protein
+from ..cmd import run_command
 
-
-def convert_pdb_to_pdbqt(protein_pdb: os.PathLike, output_path: os.PathLike, tool: str = 'adfr'):
-    if tool == 'adfr':
-        exec = find_executable('prepare_receptor')
-        run_command([exec, '-r', protein_pdb, '-o', output_path, '-A', 'checkhydrogens'])
-    elif tool == 'obabel':
-        exec = find_executable('obabel')
-        run_command([exec, '-ipdb', protein_pdb, '-opdbqt', '-O', output_path, '-xr'])
-    else:
-        raise NotImplementedError(f'Unsupported tool: {tool}')
+logger = logging.getLogger(__name__)
 
 
-def convert_mol_to_pdbqt(mol, pdbqt_path):
-    prep = MoleculePreparation()
-    prep.prepare(mol)
-    prep.write_pdbqt_file(str(pdbqt_path))
+class VinaDocking(BaseDocking):
+    """Molecular docking with AutoDock Vina via its Python bindings.
 
+    Wraps the :class:`vina.Vina` API to dock, score, and locally optimise
+    ligands against a protein receptor.  Ligand conversion between RDKit
+    ``Mol`` objects and the PDBQT format required by Vina is handled
+    transparently through `meeko`.
 
-def convert_sdf_to_pdbqt(sdf_path, pdbqt_path):
-    mol = Chem.SDMolSupplier(str(sdf_path), removeHs=False)[0]
-    convert_mol_to_pdbqt(mol, pdbqt_path)
+    Inherits common initialisation (protein validation, docking-box setup,
+    working directory) from :class:`~easybfe.docking.base.BaseDocking`.
 
+    Parameters
+    ----------
+    protein : os.PathLike
+        Path to the protein structure (``.pdb`` or ``.pdbqt``).
+    box_center : tuple of float, optional
+        ``(x, y, z)`` coordinates of the docking box centre in Angstrom.
+        Required unless *ref_mol* is given.
+    box_size : tuple of float, optional
+        ``(x, y, z)`` dimensions of the docking box in Angstrom.
+        Required unless *ref_mol* is given.
+    ref_mol : :class:`rdkit.Chem.Mol`, optional
+        Reference molecule used to compute *box_center* / *box_size*
+        automatically via :func:`~easybfe.docking.base.compute_box_from_coordinates`.
+    wdir : os.PathLike, optional
+        Working directory for intermediate files (e.g. protein PDBQT).
+        A temporary directory is used when *None*.
+    protein_prep_exec : str, optional
+        Executable for PDB-to-PDBQT protein conversion.  Supported values
+        are ``'prepare_receptor'`` (ADFR suite) and ``'obabel'``.
+    extra_docking_settings : dict, optional
+        Override any of the default docking parameters
+        (``num_modes``, ``min_rmsd``, ``energy_range``, ``exhaustiveness``).
+    sf_name : str, optional
+        Vina scoring-function name (``'vina'``, ``'vinardo'``, or ``'ad4'``).
+    cpu : int, optional
+        Number of CPUs for Vina (0 = all available).
+    seed : int, optional
+        Random seed for reproducibility (0 = random).
+    verbosity : int, optional
+        Vina verbosity level (0 = silent, 1 = normal, 2 = verbose).
 
-def convert_pdbqt_to_sdf(pdbqt_path, sdf_path):
-    pdbqt_mol = PDBQTMolecule.from_file(str(pdbqt_path), skip_typing=True)
-    sdstring, _ = RDKitMolCreate.write_sd_string(pdbqt_mol)
-    with open(sdf_path, 'w') as f:
-        f.write(sdstring)
+    Raises
+    ------
+    FileNotFoundError
+        If *protein* does not exist.
+    ValueError
+        If neither explicit box parameters nor *ref_mol* are provided.
+    """
 
+    DEFAULT_DOCKING_SETTINGS: Dict[str, Any] = {
+        "num_modes": 5,
+        "min_rmsd": 0.5,
+        "energy_range": 5,
+        "exhaustiveness": 32,
+    }
 
-def write_config(config: Dict, fpath: os.PathLike):
-    with open(fpath, 'w') as f:
-        for k, v in config.items():
-            f.write(f'{k} = {v}\n')
-
-
-def compute_rmsd(pos1, pos2):
-    return np.sqrt(np.sum((pos1 - pos2) ** 2) / pos1.shape[0])
-
-
-class VinaDocking:
-    
     def __init__(
-        self, 
-        protein: os.PathLike, 
-        box_center: List[float] = [0.0, 0.0, 0.0], 
-        box_size: List[float] = [0.0, 0.0, 0.0], 
-        wdir: os.PathLike = '.', 
-        **kwargs
+        self,
+        protein: os.PathLike,
+        *,
+        box_center: Optional[Tuple[float, float, float]] = None,
+        box_size: Optional[Tuple[float, float, float]] = None,
+        ref_mol: Optional[Chem.Mol] = None,
+        wdir: Optional[os.PathLike] = None,
+        protein_prep_exec: str = 'prepare_receptor',
+        extra_docking_settings: Optional[Dict[str, Any]] = None,
+        sf_name: str = 'vina',
+        cpu: int = 0,
+        seed: int = 0,
+        verbosity: int = 0,
     ):
-        self.vina_binary = kwargs.pop('vina_binary', find_executable('vina'))
-        self.wdir = Path(wdir).resolve()
-        self.wdir.mkdir(exist_ok=True)
-        
-        protein = Path(protein).resolve()
-        output_path = self.wdir / f'{protein.stem}.pdbqt'
-        if protein.suffix == '.pdb':
-            tool = kwargs.pop('protein_prep_tool', 'adfr')
-            convert_pdb_to_pdbqt(protein, output_path, tool)
-        elif protein.suffix == '.pdbqt':
-            shutil.copyfile(protein, output_path)
-        else:
-            raise RuntimeError(f"Unsupport protein format: {protein.suffix}")
-        self.protein = protein
-        self.protein_pdbqt = output_path
-            
-        self.config = {
-            'receptor': output_path,
-            'center_x': box_center[0],
-            'center_y': box_center[1],
-            'center_z': box_center[2],
-            'size_x': box_size[0], 
-            'size_y': box_size[1], 
-            'size_z': box_size[2],
-            "num_modes": 20,
-            "min_rmsd": 0.5,
-            "energy_range": 5,
-            "exhaustiveness": 8
-        }
-        self.config.update(kwargs)
-        self.logger = init_logger()
-    
-    def update_box(self, center, box):
-        self.config['center_x'] = center[0]
-        self.config['center_y'] = center[1]
-        self.config['center_z'] = center[2]
-        self.config['size_x'] = box[0]
-        self.config['size_y'] = box[1]
-        self.config['size_z'] = box[2]
+        super().__init__(
+            protein,
+            box_center=box_center,
+            box_size=box_size,
+            ref_mol=ref_mol,
+            wdir=wdir,
+        )
+        self.protein_prep_exec = protein_prep_exec
 
-    def write_config(self):
-        self.config_file = self.wdir / 'config.txt'
-        write_config(self.config, self.config_file)
+        self.config: Dict[str, Any] = dict(self.DEFAULT_DOCKING_SETTINGS)
+        if extra_docking_settings:
+            self.config.update(extra_docking_settings)
 
-    def dock(self, in_sdf: os.PathLike, output_dir: os.PathLike | None = None):
-        self.write_config()
-        stem = Path(in_sdf).stem
-        
-        if output_dir is None:
-            dock_dir = self.wdir / stem
-        else:
-            dock_dir = Path(output_dir)
-        
-        dock_dir.mkdir(exist_ok=True)
+        self._vina = Vina(sf_name=sf_name, cpu=cpu, seed=seed, verbosity=verbosity)
+        self._prepare_receptor()
 
-        in_pdbqt = dock_dir / f'{stem}.pdbqt'
-        out_pdbqt = dock_dir / f'{stem}_out.pdbqt'
-        out_sdf = dock_dir / f'{stem}_out.sdf'
-        convert_sdf_to_pdbqt(in_sdf, in_pdbqt)
-        run_command([self.vina_binary, '--ligand', in_pdbqt, '--out', out_pdbqt, '--config', self.config_file], logger=self.logger)
-        convert_pdbqt_to_sdf(out_pdbqt, out_sdf)
-        self.logger.info(f"Results are written to: {out_sdf}")
-        
-        mols = [m for m in Chem.SDMolSupplier(str(out_sdf), removeHs=False)]
-        for i, m in enumerate(mols):
-            with Chem.SDWriter(str(out_sdf.with_stem(f'{stem}_out_conf{i}'))) as w:
-                w.write(m)
-        return out_sdf
-    
-    def rescore(self, inp: os.PathLike | Chem.Mol):
-        in_pdbqt = tempfile.mkstemp(suffix='.pdbqt')[1]
-        if isinstance(inp, Chem.Mol):
-            convert_mol_to_pdbqt(inp, in_pdbqt)
-        else:
-            convert_sdf_to_pdbqt(inp, in_pdbqt)
-        cmd = [
-            self.vina_binary, '--ligand', in_pdbqt, '--receptor', self.protein_pdbqt, '--score_only', '--autobox'
-        ]
-        return_code, out, err = run_command(cmd)
-        # parse output
-        lines = out.split('\n')
-        energies = {'binding': 0.0, 'inter': 0.0, 'torsion': 0.0}
-        for line in lines:
-            if line.startswith('Estimated Free Energy of Binding'):
-                energies['binding'] = float(line.split()[-3])
-            elif line.startswith('(1) Final Intermolecular Energy'):
-                energies['inter'] = float(line.split()[-2])
-            elif line.startswith('(3) Torsional Free Energy'):
-                energies['torsion'] = float(line.split()[-2])
-        return energies
-    
-    def constr_dock(self, in_smi_or_sdf: str | os.PathLike, ref_sdf: os.PathLike, name: str = "", thresh: float = 5.0):
-        # set up name and result directory
-        if os.path.isfile(in_smi_or_sdf):
-            mol = Chem.SDMolSupplier(in_smi_or_sdf, removeHs=False)[0]
-            name = Path(in_smi_or_sdf).stem if not name else name
-        else:
-            mol = Chem.AddHs(Chem.MolFromSmiles(in_smi_or_sdf))
-            AllChem.EmbedMolecule(mol)
-            AllChem.MMFFOptimizeMolecule(mol)
-            assert name, "Must provide a name"
-        
-        output_dir = self.wdir / name
-        output_dir.mkdir(exist_ok=True)
+    # ------------------------------------------------------------------
+    # Protein preparation
+    # ------------------------------------------------------------------
 
-        # Update box according to reference sdf
-        ref = Chem.SDMolSupplier(ref_sdf, removeHs=False)[0]
-        center, box = compute_box_from_coordinates(ref.GetConformer().GetPositions())
-        self.update_box(center, box)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            in_sdf = os.path.join(tmpdir, f'{name}.sdf')
-            writer = Chem.SDWriter(in_sdf)
-            writer.write(mol)
-            writer.close()
-            out_sdf = self.dock(in_sdf)
-        
-        mols = [m for m in Chem.SDMolSupplier(str(out_sdf), removeHs=False)]
-
-        mapping = OpenFEAtomMapper('lomap', element_change=False, max3d=10.0).run(mols[0], ref, output_dir)
-
-        mapping_heavy_only = {}
-        for k, v in mapping.items():
-            if mols[0].GetAtomWithIdx(k).GetSymbol() == 'H' or ref.GetAtomWithIdx(v).GetSymbol() == 'H':
-                continue
-            mapping_heavy_only[k] = v
-        
-        prb_indices, ref_indices = [], []
-        for k, v in mapping_heavy_only.items():
-            prb_indices.append(k)
-            ref_indices.append(v)
-
-        accepted = []
-        for mol in mols:
-            conf = mol.GetConformer()
-            # compute rmsd
-            rmsd = compute_rmsd(
-                conf.GetPositions()[prb_indices],
-                ref.GetConformer().GetPositions()[ref_indices]
+    def _prepare_receptor(self):
+        """Convert protein to PDBQT (if needed), load into Vina, and
+        pre-compute affinity maps for the configured box."""
+        if self.protein_input.suffix == '.pdbqt':
+            self.protein_pdbqt = self.protein_input
+        elif self.protein_input.suffix == '.pdb':
+            self.protein_pdbqt = self.wdir / f'{self.protein_input.stem}.pdbqt'
+            self.convert_protein_pdb_to_pdbqt(
+                self.protein_input,
+                self.protein_pdbqt,
+                self.protein_prep_exec,
             )
-            # rejected if rmsd > thresh
-            if rmsd > thresh:
-                continue
-            accepted.append(mol)
-            mol.SetDoubleProp("rmsd", rmsd)
-        
-        assert len(accepted) > 0, f"Constrained docking fails because no poses with RMSD < {thresh:.2f} angstrom w.r.t reference"
-        tmp_sdf = output_dir / f'{name}_selected.sdf'
-        writer = Chem.SDWriter(tmp_sdf)
-        for i, mol in enumerate(accepted):
-            writer.write(mol)
-        writer.close()
-        self.logger.info(f"Found {len(accepted)} docked pose with RMSD < {thresh} angstrom w.r.t reference. Results in {tmp_sdf}")
-        
-        # Gather all conformers to a single molecule object
-        out_mol = deepcopy(accepted[0])
-        for m in accepted[1:]:
-            out_mol.AddConformer(m.GetConformer(), assignId=True)
+        else:
+            raise RuntimeError(
+                f"Unsupported protein file format: {self.protein_input.suffix}"
+            )
 
-        self.logger.info("Running optimization")
-        coord_map = {k: ref.GetConformer().GetPositions()[v] for k, v in mapping.items()}
-        assert self.protein.suffix == '.pdb', 'Input protein must be a .pdb file'
-        out_mol, energies = constrained_optimization(out_mol, self.protein, coord_map, constr=True, restr=10)
-        for i, m in enumerate(accepted):
-            m.SetProp("_Name", name)
-            m.ClearComputedProps()
-            m.SetDoubleProp("ff.energy", float(energies[i]))
-            m.GetConformer().SetPositions(out_mol.GetConformer(i).GetPositions())
-            rescore = self.rescore(m)
-            m.SetDoubleProp('vina.score', rescore['binding'])
-            m.SetProp('vina.score.details', str(rescore))
-        accepted.sort(key=lambda m: m.GetDoubleProp('vina.score'))
+        self._vina.set_receptor(str(self.protein_pdbqt))
+        self._vina.compute_vina_maps(center=self.box_center, box_size=self.box_size)
+        logger.info("Receptor loaded and Vina maps computed")
 
-        for i, mol in enumerate(accepted):
-            out_sdf = output_dir / f'{name}_constr_dock_{i}.sdf'
-            writer = Chem.SDWriter(out_sdf)
-            writer.write(mol)
-            writer.close()
-        self.logger.info(f"Results written to: {output_dir}")
+    @staticmethod
+    def convert_protein_pdb_to_pdbqt(
+        protein_pdb: os.PathLike,
+        output_path: os.PathLike,
+        binary: str = 'prepare_receptor',
+    ):
+        """Convert a protein PDB file to PDBQT format.
+
+        Parameters
+        ----------
+        protein_pdb : os.PathLike
+            Input PDB file.
+        output_path : os.PathLike
+            Output PDBQT file.
+        binary : str, optional
+            Conversion tool -- ``'prepare_receptor'`` (ADFR) or ``'obabel'``.
+
+        Raises
+        ------
+        NotImplementedError
+            If *binary* is not a supported tool.
+        """
+        name = os.path.basename(binary)
+        if name == 'prepare_receptor':
+            run_command([binary, '-r', protein_pdb, '-o', output_path,
+                         '-A', 'checkhydrogens'])
+        elif name == 'obabel':
+            run_command([binary, '-ipdb', protein_pdb, '-opdbqt',
+                         '-O', output_path, '-xr'])
+        else:
+            raise NotImplementedError(f'Unsupported protein prep tool: {binary}')
+
+    # ------------------------------------------------------------------
+    # Ligand format conversion utilities
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def convert_rdkit_to_pdbqt(mol: Chem.Mol) -> str:
+        """Convert an RDKit molecule to a PDBQT string via `meeko`.
+
+        Parameters
+        ----------
+        mol : :class:`rdkit.Chem.Mol`
+            Molecule with at least one conformer.
+
+        Returns
+        -------
+        str
+            PDBQT-formatted string.
+
+        Raises
+        ------
+        ValueError
+            If meeko produces an empty PDBQT string.
+        """
+        molsetup = MoleculePreparation(rigid_macrocycles=True)(mol)[0]
+        pdbqt_string = PDBQTWriterLegacy.write_string(molsetup)[0]
+        if not pdbqt_string.strip():
+            raise ValueError("Meeko produced an empty PDBQT string")
+        return pdbqt_string
+
+    @staticmethod
+    def pdbqt_string_to_rdmols(pdbqt_string: str) -> List[Chem.Mol]:
+        """Convert a (possibly multi-pose) PDBQT string to RDKit molecules.
+
+        Parameters
+        ----------
+        pdbqt_string : str
+            PDBQT content, as returned by :meth:`vina.Vina.poses`.
+
+        Returns
+        -------
+        list of :class:`rdkit.Chem.Mol`
+            One molecule per pose.  Failed conversions are silently dropped.
+        """
+        pdbqt_mol = PDBQTMolecule(pdbqt_string, skip_typing=True)
+        mols = RDKitMolCreate.from_pdbqt_mol(pdbqt_mol)
+        return [m for m in mols if m is not None]
+
+    # ------------------------------------------------------------------
+    # Docking / scoring / local optimisation
+    # ------------------------------------------------------------------
+
+    def dock(self, mol: Chem.Mol) -> List[Chem.Mol]:
+        """Run Vina global-search docking.
+
+        Parameters
+        ----------
+        mol : :class:`rdkit.Chem.Mol`
+            Ligand with at least one 3-D conformer.
+
+        Returns
+        -------
+        list of :class:`rdkit.Chem.Mol`
+            Docked poses ranked by Vina score.
+        """
+        logger.info("dock: starting global search")
+        pdbqt_str = self.convert_rdkit_to_pdbqt(mol)
+        self._vina.set_ligand_from_string(pdbqt_str)
+        self._vina.dock(
+            exhaustiveness=self.config['exhaustiveness'],
+            n_poses=self.config['num_modes'],
+            min_rmsd=self.config['min_rmsd'],
+        )
+        poses_pdbqt = self._vina.poses(
+            n_poses=self.config['num_modes'],
+            energy_range=self.config['energy_range'],
+        )
+        mols = self.pdbqt_string_to_rdmols(poses_pdbqt)
+        logger.info("dock: obtained %d poses", len(mols))
+        return mols
+
+    def rescore(self, mol: Chem.Mol) -> float:
+        """Score an existing ligand pose without docking.
+
+        Parameters
+        ----------
+        mol : :class:`rdkit.Chem.Mol`
+            Ligand with a 3-D conformer positioned in the binding site.
+
+        Returns
+        -------
+        float
+            Estimated binding free energy in kcal/mol.
+        """
+        pdbqt_str = self.convert_rdkit_to_pdbqt(mol)
+        self._vina.set_ligand_from_string(pdbqt_str)
+        energy = self._vina.score()
+        return float(energy[0])
+
+    def _vina_optimize(self, mol: Chem.Mol) -> Chem.Mol:
+        """Run Vina local BFGS optimisation on an existing pose.
+
+        The PDBQT round-trip (RDKit -> meeko -> Vina -> meeko -> RDKit) may
+        reorder atoms.  To keep the output atom ordering consistent with the
+        input, a substructure match is used to transfer optimised coordinates
+        back onto a copy of the input molecule.
+
+        Parameters
+        ----------
+        mol : :class:`rdkit.Chem.Mol`
+            Ligand with a 3-D conformer.
+
+        Returns
+        -------
+        :class:`rdkit.Chem.Mol`
+            Molecule with optimised coordinates and the same atom ordering
+            as the input.
+
+        Raises
+        ------
+        RuntimeError
+            If the optimised pose cannot be converted back.
+        """
+        mol_in = Chem.Mol(mol)
+
+        pdbqt_str = self.convert_rdkit_to_pdbqt(mol)
+        self._vina.set_ligand_from_string(pdbqt_str)
+        energy = self._vina.optimize()
+        logger.info("Vina optimize: energy = %.3f kcal/mol", float(energy[0]))
+        with tempfile.NamedTemporaryFile(suffix='.pdbqt', mode='r', delete=False) as f:
+            tmp_path = f.name
+        try:
+            self._vina.write_pose(tmp_path, overwrite=True)
+            with open(tmp_path) as f:
+                pose_pdbqt = f.read()
+        finally:
+            os.unlink(tmp_path)
+        mols = self.pdbqt_string_to_rdmols(pose_pdbqt)
+        if not mols:
+            raise RuntimeError("Failed to convert Vina-optimised pose back to RDKit Mol")
+        mol_out = mols[0]
+
+        match = mol_out.GetSubstructMatch(mol_in)
+        if not match:
+            raise RuntimeError(
+                "Substructure match between input and Vina-optimised mol failed; "
+                "the PDBQT round-trip may have altered the molecular graph"
+            )
+
+        conf_in = mol_in.GetConformer(0)
+        conf_out = mol_out.GetConformer(0)
+        for idx_in, idx_out in enumerate(match):
+            conf_in.SetAtomPosition(idx_in, conf_out.GetAtomPosition(idx_out))
+        return mol_in
+
+    def constr_dock(
+        self,
+        mol: Chem.Mol,
+        ref_mol: Chem.Mol,
+        mapping: Optional[Dict[int, int]] = None,
+        *,
+        run_em: bool = True,
+        constrain: bool = True,
+        restraint_k: float = 10.0,
+    ) -> Chem.Mol:
+        """Constrained docking: embed, Vina optimise, and (optionally)
+        OpenMM energy-minimise a ligand against *ref_mol*.
+
+        Pipeline:
+
+        1. Clear conformers and generate a new one via constrained
+           embedding against *ref_mol*
+           (:func:`~easybfe.docking.embed.constr_embed_with_rdkit`).
+        2. Locally optimise the pose with Vina
+           (:meth:`vina.Vina.optimize`).
+        3. *(optional)* Energy-minimise with the full protein using OpenMM
+           (:func:`~easybfe.docking.embed.constrained_em_with_protein`).
+        4. Compute the heavy-atom RMSD of mapped atoms relative to
+           *ref_mol* and store it, together with the Vina score, as
+           molecule properties.
+
+        Parameters
+        ----------
+        mol : :class:`rdkit.Chem.Mol`
+            Probe ligand.  Existing conformers are cleared.
+        ref_mol : :class:`rdkit.Chem.Mol`
+            Reference molecule with a 3-D conformer.
+        mapping : dict[int, int], optional
+            ``{mol_idx: ref_mol_idx}`` atom mapping.  Auto-generated via
+            :class:`~easybfe.mapping.LomapAtomMapper` when *None*.
+        run_em : bool
+            Whether to run the OpenMM energy-minimisation step with the
+            protein.  Requires that the protein was supplied as a ``.pdb``
+            file.
+        constrain : bool
+            If *True* the mapped heavy atoms are frozen during EM
+            (mass = 0).  If *False* harmonic restraints with
+            *restraint_k* are applied instead.
+        restraint_k : float
+            Force constant in kcal/(mol * A^2) for harmonic restraints.
+            Only used when ``constrain=False``.
+
+        Returns
+        -------
+        :class:`rdkit.Chem.Mol`
+            Optimised ligand with the following molecule properties set:
+
+            * ``vina_score`` -- Vina binding-energy estimate (kcal/mol).
+            * ``rmsd`` -- heavy-atom RMSD of mapped atoms vs *ref_mol*
+              (Angstrom).
+            * ``ff_energy`` -- OpenMM potential energy after EM (kJ/mol),
+              only present when *run_em* is *True*.
+
+        Notes
+        -----
+        If this instance was constructed with a non-``None`` *wdir*
+        (not a temporary directory), the final pose is also written to
+        ``{wdir}/dock/constr_dock/<name>.sdf`` where *name* comes from the
+        probe molecule's ``_Name`` property or the literal ``probe``.
+
+        Raises
+        ------
+        RuntimeError
+            If *run_em* is *True* but the protein was not provided as a
+            ``.pdb`` file.
+        """
+        mol_name = mol.GetProp('_Name') if mol.HasProp('_Name') else 'probe'
+        logger.info("constr_dock [%s]: starting", mol_name)
+
+        # 1. Constrained embedding
+        mol.RemoveAllConformers()
+        mol, mapping = constr_embed_with_rdkit(mol, ref_mol, mapping=mapping)
+        logger.info("constr_dock [%s]: constrained embedding done (%d mapped atoms)",
+                     mol_name, len(mapping))
+
+        # 2. Vina local optimisation
+        mol = self._vina_optimize(mol)
+        logger.info("constr_dock [%s]: Vina local optimisation done", mol_name)
+
+        # 3. Optional OpenMM energy minimisation with protein
+        if run_em:
+            if self.protein_input.suffix != '.pdb':
+                raise RuntimeError(
+                    "OpenMM EM requires the original protein input to be a .pdb file, "
+                    f"got {self.protein_input.suffix}"
+                )
+            heavy_coord_map: Dict[int, np.ndarray] = {}
+            ref_pos = ref_mol.GetConformer().GetPositions()
+            for mol_idx, ref_idx in mapping.items():
+                if mol.GetAtomWithIdx(mol_idx).GetAtomicNum() != 1:
+                    heavy_coord_map[mol_idx] = ref_pos[ref_idx]
+
+            mol, ff_energy = constrained_em_with_protein(
+                mol, self.protein_input, heavy_coord_map,
+                constrain=constrain, restraint_k=restraint_k,
+            )
+            mol.SetDoubleProp('ff_energy', ff_energy)
+            logger.info("constr_dock [%s]: OpenMM EM done (energy=%.2f kJ/mol)",
+                         mol_name, ff_energy)
+
+        # 4. Rescore with Vina
+        vina_score = self.rescore(mol)
+        mol.SetDoubleProp('vina_score', vina_score)
+        logger.info("constr_dock [%s]: Vina rescore = %.3f kcal/mol", mol_name, vina_score)
+
+        # 5. RMSD of mapped heavy atoms
+        heavy_mapping = {k: v for k, v in mapping.items()
+                         if mol.GetAtomWithIdx(k).GetAtomicNum() != 1}
+        prb_idx = list(heavy_mapping.keys())
+        ref_idx = list(heavy_mapping.values())
+        mol_pos = mol.GetConformer().GetPositions()
+        ref_pos = ref_mol.GetConformer().GetPositions()
+        rmsd = float(np.sqrt(np.mean(
+            np.sum((mol_pos[prb_idx] - ref_pos[ref_idx]) ** 2, axis=1)
+        )))
+        mol.SetDoubleProp('rmsd', rmsd)
+        logger.info("constr_dock [%s]: mapped heavy-atom RMSD = %.3f A", mol_name, rmsd)
+
+        if not hasattr(self, "_tmp_wdir"):
+            out_dir = self.wdir / "dock" / "constr_dock"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            safe = "".join(
+                c if c.isalnum() or c in "-_" else "_" for c in mol_name
+            ).strip("_")[:200] or "probe"
+            out_sdf = out_dir / f"{safe}.sdf"
+            with Chem.SDWriter(str(out_sdf)) as writer:
+                writer.write(mol)
+            logger.info("constr_dock [%s]: wrote %s", mol_name, out_sdf)
+
+        return mol

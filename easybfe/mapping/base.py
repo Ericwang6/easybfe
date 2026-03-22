@@ -106,7 +106,7 @@ class LigandRbfeAtomMapper(abc.ABC):
                 parent_a = atom_a.GetNeighbors()[0]
                 parent_b = atom_b.GetNeighbors()[0]
                 if parent_b.GetIdx() != mapping.get(parent_a.GetIdx(), None):
-                    to_pop.append(parent_a.GetIdx())
+                    to_pop.append(k)
         
         for k in to_pop:
             mapping.pop(k)
