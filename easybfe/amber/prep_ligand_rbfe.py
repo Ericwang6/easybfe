@@ -505,7 +505,7 @@ def setup_ligand_rbfe(
     protein: Protein | None,
     leg_configs: dict[str, AmberFepSimulationConfig],
     output_dir: os.PathLike,
-    reuse_mapping: bool = True
+    reuse_mapping: bool = False
 ):
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(exist_ok=True)
