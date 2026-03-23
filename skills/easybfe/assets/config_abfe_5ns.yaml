@@ -1,0 +1,279 @@
+# Configuration file for setting up an ABFE simulation (AmberAbfeConfig).
+ligand_base: ./ligands
+ligand_batch:
+  - jmc_23
+  - ejm_31
+
+protein: ../tyk2/tyk2_pdbfixer.pdb
+
+output_base: ./abfe
+
+# BoreschRestraintGeneratorConfig (easybfe.config.amber.abfe): restraint placement for the complex leg.
+# Empty {} uses defaults (algorithm rxrx, rst_wts, options).
+boresch: {}
+
+# Solvent-phase FEP setup (AmberFepSimulationConfig). Same field meanings as "complex" and "restraint" below.
+solvent:
+  # Parallelism hint: <=0 means derive from num_lambdas (see AmberFepSimulationConfig.validate_nproc).
+  num_procs: -1
+  # Periodic box geometry (SetupConfig): cube | dodecahedron | octahedron.
+  box_shape: cube
+  # Solvent padding around the solute (Angstrom).
+  buffer: 20.0
+  # Add counter-ions to neutralize the system.
+  neutralize: true
+  # Additional ionic strength (molar) for NaCl-like salt.
+  ionic_strength: 0.15
+  # Hydrogen mass repartitioning for larger MD timestep.
+  do_hmr: true
+  # Target hydrogen mass (amu) when do_hmr is true.
+  hydrogen_mass: 3.024
+  # Water model name; with default FF shorthand, resolved via SetupConfig validators.
+  water_model: tip3p
+  # OpenMM/Amber force field XML list (short names like ff14sb are expanded in SetupConfig).
+  protein_ff:
+  - amber14-all.xml
+  water_ff:
+  - amber14/tip3p.xml
+  # Ordered MD stages (AmberStepConfig): type em | heat | pres | prod | prod_nvt.
+  workflow:
+  - # Energy minimization; cntrl is AmberCntrlSettings (easybfe.config.amber.basic).
+    type: em
+    name: 01.em
+    # Amber executable: pmemd, pmemd.cuda, pmemd.MPI, pmemd.cuda.MPI.
+    exec: pmemd.cuda
+    # Replica-exchange MD (lambda exchange); typically on final production stage.
+    use_remd: false
+    # use MPI for parallelization across multiple lambdas. Has to be false for type='em'
+    use_mpi: false
+    cntrl:
+      maxcyc: 2000
+      # Trajectory/energy output stride in steps (ofreq; may map to ntwx etc. in mdin build).
+      ofreq: 100
+  # Equilibration: heating from 0 to 298.15K
+  - type: heat
+    name: 02.heat
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 12500 # number of steps, total simulation time is nstlim * dt
+      dt: 0.002 # time step in ps
+      ofreq: 1250 # frequency to dump energies in mden/mdout, dump trajectory and write restart file
+  # Equilibration: pressure coupling to 1.01325 bar
+  - type: pres
+    name: 03.pres
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 12500
+      dt: 0.002
+      ofreq: 1250
+  # Pre-production: normal short NPT simulation (without restraints) to decorrelate the system
+  - type: prod
+    name: 04.pre_prod
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 125000
+      dt: 0.004
+      ofreq: 12500
+  # Production with REMD across lambda windows; numexchg = exchange attempts per run segment.
+  - type: prod
+    name: 05.prod
+    exec: pmemd.cuda
+    use_remd: true
+    use_mpi: true
+    cntrl:
+      nstlim: 125 # number of steps after each exchange, total simulation time is nstlim * dt * numexchg when use_remd is true
+      dt: 0.004
+      ofreq: 12500
+      numexchg: 10000 # number of exchange attempts
+  # Options for charge-changing FEP settings.
+  use_charge_change: false
+  use_settle_for_alchemical_water: true
+  # Alchemical lambda values; if set, num_lambdas is taken as len(lambdas)
+  lambdas:
+  - 0.0
+  - 0.06666666666666667
+  - 0.13333333333333333
+  - 0.2
+  - 0.26666666666666666
+  - 0.3333333333333333
+  - 0.4
+  - 0.4666666666666667
+  - 0.5333333333333333
+  - 0.6
+  - 0.6666666666666666
+  - 0.7333333333333333
+  - 0.8
+  - 0.8666666666666667
+  - 0.9333333333333333
+  - 1.0
+  # Used to build default lambdas when lambdas is omitted; overridden when lambdas is given.
+  num_lambdas: 16
+
+# Complex-phase FEP: same AmberFepSimulationConfig schema as solvent
+complex:
+  num_procs: -1
+  box_shape: dodecahedron
+  buffer: 15.0
+  neutralize: true
+  ionic_strength: 0.15
+  do_hmr: true
+  hydrogen_mass: 3.024
+  water_model: tip3p
+  protein_ff:
+  - amber14-all.xml
+  water_ff:
+  - amber14/tip3p.xml
+  workflow:
+  - type: em
+    name: 01.em
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: false
+    cntrl:
+      maxcyc: 2000
+      ofreq: 100
+  - type: heat
+    name: 02.heat
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 12500
+      dt: 0.002
+      ofreq: 1250
+  - type: pres
+    name: 03.pres
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 12500
+      dt: 0.002
+      ofreq: 1250
+  - type: prod
+    name: 04.pre_prod
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 125000
+      dt: 0.004
+      ofreq: 12500
+  - type: prod
+    name: 05.prod
+    exec: pmemd.cuda
+    use_remd: true
+    use_mpi: true
+    cntrl:
+      nstlim: 125
+      dt: 0.004
+      ofreq: 12500
+      numexchg: 10000
+  use_charge_change: false
+  use_settle_for_alchemical_water: true
+  lambdas:
+  - 0.0
+  - 0.06666666666666667
+  - 0.13333333333333333
+  - 0.2
+  - 0.26666666666666666
+  - 0.3333333333333333
+  - 0.4
+  - 0.4666666666666667
+  - 0.5333333333333333
+  - 0.6
+  - 0.6666666666666666
+  - 0.7333333333333333
+  - 0.8
+  - 0.8666666666666667
+  - 0.9333333333333333
+  - 1.0
+  num_lambdas: 16
+
+# Restraint leg (ligand in complex with restraints): same AmberFepSimulationConfig schema as complex.
+# This example uses a smaller numexchg (5000) on the final REMD stage than solvent/complex.
+restraint:
+  num_procs: -1
+  box_shape: dodecahedron
+  buffer: 15.0
+  neutralize: true
+  ionic_strength: 0.15
+  do_hmr: true
+  hydrogen_mass: 3.024
+  water_model: tip3p
+  protein_ff:
+  - amber14-all.xml
+  water_ff:
+  - amber14/tip3p.xml
+  workflow:
+  - type: em
+    name: 01.em
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: false
+    cntrl:
+      maxcyc: 2000
+      ofreq: 100
+  - type: heat
+    name: 02.heat
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 12500
+      dt: 0.002
+      ofreq: 1250
+  - type: pres
+    name: 03.pres
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 12500
+      dt: 0.002
+      ofreq: 1250
+  - type: prod
+    name: 04.pre_prod
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 125000
+      dt: 0.004
+      ofreq: 12500
+  - type: prod
+    name: 05.prod
+    exec: pmemd.cuda
+    use_remd: true
+    use_mpi: true
+    cntrl:
+      nstlim: 125
+      dt: 0.004
+      ofreq: 12500
+      numexchg: 5000
+  use_charge_change: false
+  use_settle_for_alchemical_water: true
+  lambdas:
+  - 0.0
+  - 0.06666666666666667
+  - 0.13333333333333333
+  - 0.2
+  - 0.26666666666666666
+  - 0.3333333333333333
+  - 0.4
+  - 0.4666666666666667
+  - 0.5333333333333333
+  - 0.6
+  - 0.6666666666666666
+  - 0.7333333333333333
+  - 0.8
+  - 0.8666666666666667
+  - 0.9333333333333333
+  - 1.0
+  num_lambdas: 16
