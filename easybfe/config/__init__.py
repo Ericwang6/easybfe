@@ -5,6 +5,8 @@ Manage all pydantic models
 import json
 from pathlib import Path
 from typing import Type, Any, Mapping, TypeVar
+
+import yaml
 from pydantic import BaseModel
 
 from .amber.basic import (
@@ -28,13 +30,19 @@ from .analysis import PlainMDAnalysisConfig
 
 
 def read_file(file_path, key=None):
-    suffix = Path(file_path).suffix
+    path = Path(file_path)
+    suffix = path.suffix.lower()
     data = None
-    if suffix == '.json':
-        with open(file_path) as f:
+    if suffix == ".json":
+        with open(path) as f:
             data = json.load(f)
+    elif suffix in (".yaml", ".yml"):
+        with open(path) as f:
+            data = yaml.safe_load(f)
     else:
-        raise NotImplementedError("Not supported format")
+        raise NotImplementedError(
+            f"Unsupported config format {path.suffix!r}; use .json, .yaml, or .yml"
+        )
     return data[key] if key is not None else data
         
 

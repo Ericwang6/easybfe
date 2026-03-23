@@ -7,7 +7,8 @@ from .simulation import AmberFepSimulationConfig
 
 class BoreschRestraintGeneratorConfig(BaseModel):
     algorithm: str = 'rxrx'
-    rst_wts: tuple[float, float, float, float, float, float] = Field(default=(10.0, 10.0, 10.0, 10.0, 10.0, 10.0))
+    rst_wts: tuple[float, float, float, float, float, float] = Field(
+        default=(10.0, 10.0, 10.0, 10.0, 10.0, 10.0))
     options: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -17,6 +18,8 @@ class AmberAbfeConfig(BaseModel):
     ligand: Optional[Path] = None
     ligand_batch: Optional[list[Path]] = None
     output_dir: Optional[Path] = None
+    ligand_base: Optional[Path] = None
+    output_base: Optional[Path] = None
     boresch: BoreschRestraintGeneratorConfig
     complex: AmberFepSimulationConfig
     solvent: AmberFepSimulationConfig

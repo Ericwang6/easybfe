@@ -12,7 +12,7 @@ def abfe():
     "config",
     type=click.Path(exists=True, path_type=Path),
     required=True,
-    help="Path to JSON config file (AmberAbfeConfig).",
+    help="Path to JSON or YAML config file (AmberAbfeConfig).",
 )
 @click.option(
     "--ligand",
@@ -36,10 +36,28 @@ def abfe():
     help="Override config: output directory.",
 )
 @click.option(
+    "--ligand-base",
+    "-I",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Override config: ligand_base (parent directory for ligand or ligand_batch paths).",
+)
+@click.option(
     "--ligand-batch",
+    "-L",
     type=click.Path(exists=True, path_type=Path),
     default=None,
     help="Override config: file listing ligand directories (one per line). Mutually exclusive with --ligand.",
+)
+@click.option(
+    "--output-base",
+    "-O",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=(
+        "Override config: output_base (required for batch/ligand_batch; "
+        "single-ligand writes under output_base/{ligand.name})."
+    ),
 )
 @click.option(
     "--nprocs",
@@ -48,7 +66,7 @@ def abfe():
     default=None,
     help="Number of processes for batch runs. Default: auto.",
 )
-def setup(config: Path, ligand: Path | None, protein: Path | None, output: Path | None, ligand_batch: Path | None, nprocs: int | None) -> None:
+def setup(config: Path, ligand: Path | None, protein: Path | None, output: Path | None, ligand_base: Path | None, ligand_batch: Path | None, output_base: Path | None, nprocs: int | None) -> None:
     """Run ABFE setup from a config file. CLI options override config values."""
 
     from ..config import read_file
@@ -61,7 +79,10 @@ def setup(config: Path, ligand: Path | None, protein: Path | None, output: Path 
 
     cfg_dict = read_file(str(config))
     if not isinstance(cfg_dict, dict):
-        raise click.BadParameter("Config file must contain a JSON object", param_hint="config")
+        raise click.BadParameter(
+            "Config file must contain a mapping (object) at the root",
+            param_hint="config",
+        )
 
     overrides = {}
     if ligand is not None:
@@ -71,11 +92,15 @@ def setup(config: Path, ligand: Path | None, protein: Path | None, output: Path 
         overrides["protein"] = protein
     if output is not None:
         overrides["output_dir"] = output
+    if ligand_base is not None:
+        overrides["ligand_base"] = ligand_base
     if ligand_batch is not None:
         with open(ligand_batch) as f:
             paths = [Path(line.strip()) for line in f if line.strip()]
         overrides["ligand_batch"] = paths
         overrides["ligand"] = None
+    if output_base is not None:
+        overrides["output_base"] = output_base
 
     # Apply overrides (including None to clear ligand vs ligand_batch)
     for k, v in overrides.items():

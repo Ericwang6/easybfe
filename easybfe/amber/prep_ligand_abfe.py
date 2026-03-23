@@ -187,6 +187,14 @@ def setup_ligand_abfe(
     (output_dir / 'boresch.dat').write_text(str(boresch_fe))
 
 
+def _resolve_ligand_directory(ligand_base: Path | None, component: os.PathLike) -> Path:
+    """Resolve a ligand directory under optional ``ligand_base`` or as an absolute path."""
+    comp = Path(component)
+    if ligand_base is not None:
+        return (Path(ligand_base).expanduser().resolve() / comp).resolve()
+    return comp.expanduser().resolve()
+
+
 def _setup_ligand_abfe_one(
     ligand_path: Path,
     protein: Optional[Protein],
@@ -211,31 +219,51 @@ def setup_ligand_abfe_from_config(
 ) -> None:
     """Run setup_ligand_abfe from an :class:`AmberAbfeConfig`.
 
-    If :attr:`AmberAbfeConfig.ligand_batch` is set, runs one setup per ligand in
-    parallel; otherwise uses :attr:`AmberAbfeConfig.ligand` and writes directly
-    to :attr:`AmberAbfeConfig.output_dir`.
+    **Ligand directories**
+
+    If :attr:`~AmberAbfeConfig.ligand_base` is set, ligand paths are resolved as
+    ``ligand_base / relative_path``; otherwise they are treated as full paths.
+
+    **Output**
+
+    Batch mode requires :attr:`~AmberAbfeConfig.output_base`; each run writes under
+    ``output_base / ligand_stem``. Single-ligand mode uses
+    ``output_base / ligand.name`` when ``output_base`` is set, otherwise
+    :attr:`~AmberAbfeConfig.output_dir` (required in that case).
     """
     assert config.protein is not None, "AmberAbfeConfig.protein must be set"
-    assert config.output_dir is not None, "AmberAbfeConfig.output_dir must be set"
 
     leg_configs = {
         "complex": config.complex,
         "solvent": config.solvent,
         "restraint": config.restraint,
     }
-    base_out = Path(config.output_dir)
-    base_out.mkdir(exist_ok=True)
     protein = Protein.from_pdb(config.protein, name=config.protein.stem)
+    lig_base = Path(config.ligand_base).expanduser().resolve() if config.ligand_base is not None else None
 
     if config.ligand_batch is not None and config.ligand is not None:
         raise ValueError(
             "AmberAbfeConfig must set either ligand or ligand_batch, not both"
         )
 
-    if config.ligand_batch is not None:
+    use_batch = config.ligand_batch is not None
+
+    if use_batch:
+        if config.output_base is None:
+            raise ValueError(
+                "AmberAbfeConfig.output_base is required for batch mode (non-empty ligand_batch)"
+            )
+        out_base = Path(config.output_base).expanduser().resolve()
+        out_base.mkdir(parents=True, exist_ok=True)
         nprocs = num_procs if num_procs is not None else -1
         args_list = [
-            (path, protein, leg_configs, config.boresch, base_out / path.stem)
+            (
+                _resolve_ligand_directory(lig_base, path),
+                protein,
+                leg_configs,
+                config.boresch,
+                out_base / Path(path).stem,
+            )
             for path in config.ligand_batch
         ]
         run_func_parallel(
@@ -245,14 +273,32 @@ def setup_ligand_abfe_from_config(
             unpack_args=True,
             desc="setup_ligand_abfe",
         )
-    else:
-        if config.ligand is None:
-            raise ValueError("AmberAbfeConfig must set either ligand or ligand_batch")
-        ligand = Ligand.from_directory(config.ligand)
-        setup_ligand_abfe(
-            ligand=ligand,
-            protein=protein,
-            leg_configs=leg_configs,
-            restraints=config.boresch,
-            output_dir=base_out,
+        return
+
+    if config.ligand is None:
+        raise ValueError("AmberAbfeConfig must set either ligand or ligand_batch")
+
+    ligand_dir = _resolve_ligand_directory(lig_base, config.ligand)
+
+    if config.output_base is not None:
+        run_out = (
+            Path(config.output_base).expanduser().resolve()
+            / Path(config.ligand).name
         )
+    elif config.output_dir is not None:
+        run_out = Path(config.output_dir).expanduser().resolve()
+    else:
+        raise ValueError(
+            "Set output_base or output_dir for single-ligand ABFE setup "
+            "(output_dir is required when output_base is not set)"
+        )
+
+    run_out.mkdir(parents=True, exist_ok=True)
+    ligand = Ligand.from_directory(ligand_dir)
+    setup_ligand_abfe(
+        ligand=ligand,
+        protein=protein,
+        leg_configs=leg_configs,
+        restraints=config.boresch,
+        output_dir=run_out,
+    )

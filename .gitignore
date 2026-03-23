@@ -185,5 +185,7 @@ workspace/
 
 examples/rbfe/ligands
 examples/rbfe/rbfe
+examples/abfe/ligands
+examples/abfe/abfe
 
 *.legacy

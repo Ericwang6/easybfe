@@ -58,7 +58,7 @@ def rbfe():
 )
 @click.option(
     "--protein",
-    "-P",
+    "-p",
     type=click.Path(exists=True, path_type=Path),
     default=None,
     help="Override config: protein PDB path.",
@@ -86,7 +86,7 @@ def rbfe():
 )
 @click.option(
     "--ligand-pairs",
-    "-p",
+    "-L",
     type=click.Path(exists=True, path_type=Path),
     default=None,
     help=(
@@ -121,7 +121,7 @@ def setup(
     output: Path | None,
     output_base: Path | None,
 ) -> None:
-    """Run RBFE setup from a JSON config file. CLI options override config values."""
+    """Run RBFE setup from a JSON or YAML config file. CLI options override config values."""
 
     from ..config import read_file
     from ..config.amber.rbfe import AmberLigandRbfeConfig
@@ -129,7 +129,10 @@ def setup(
 
     cfg_dict = read_file(str(config))
     if not isinstance(cfg_dict, dict):
-        raise click.BadParameter("Config file must contain a JSON object", param_hint="config")
+        raise click.BadParameter(
+            "Config file must contain a mapping (object) at the root",
+            param_hint="config",
+        )
 
     overrides = {}
     if liganda is not None:
