@@ -3,10 +3,15 @@ import logging
 import shutil
 import tarfile
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
+import easybfe.amber.prep_ligand_rbfe as prep_ligand_rbfe
 from easybfe.core.ligand import LigandLoader
 from easybfe.core.protein import Protein
 from easybfe.config import AmberFepSimulationConfig
+from easybfe.config.amber.rbfe import AmberLigandRbfeConfig
 from easybfe.config.amber.simulation import default_fep_workflow
 from easybfe.amber.prep_ligand_rbfe import setup_ligand_rbfe
 from easybfe.analysis.rbfe import analyze_rbfe, analyze_rbfe_dg_network
@@ -176,3 +181,91 @@ def test_analyze_rbfe_dg_network_writes_dg_csv(tmp_path: Path):
     (batch / "X~Y").mkdir()
     out2 = analyze_rbfe_dg_network(batch, bias=0.0)
     assert len(out2) == 3
+
+
+def test_setup_ligand_rbfe_from_config_network_mode(tmp_path: Path, monkeypatch):
+    lig_base = tmp_path / "ligands"
+    lig_base.mkdir()
+    protein = tmp_path / "protein.pdb"
+    protein.write_text("HEADER\n")
+    output_base = tmp_path / "rbfe"
+    captured = {}
+
+    class DummyGenerator:
+        def run(self, ligands):
+            captured["ligand_names"] = [lig.name for lig in ligands]
+            return [("ejm_44", "ejm_31")]
+
+    monkeypatch.setattr(
+        prep_ligand_rbfe.Protein, "from_pdb", lambda *args, **kwargs: SimpleNamespace(name="protein")
+    )
+    monkeypatch.setattr(
+        prep_ligand_rbfe.Ligand, "from_directory", lambda p: SimpleNamespace(name=Path(p).name)
+    )
+    monkeypatch.setattr(prep_ligand_rbfe, "load_network_generator", lambda *args, **kwargs: DummyGenerator())
+    monkeypatch.setattr(
+        prep_ligand_rbfe,
+        "run_func_parallel",
+        lambda func, args_list, nprocs, desc: captured.update({"args_list": args_list, "nprocs": nprocs, "desc": desc}),
+    )
+
+    cfg = AmberLigandRbfeConfig.model_validate(
+        {
+            "protein": protein,
+            "ligand_base": lig_base,
+            "ligand_list": ["ejm_44", "ejm_31"],
+            "network": {"algorithm": "custom", "options": {"edges": [["ejm_44", "ejm_31"]]}},
+            "output_base": output_base,
+            "ligandA": "should_be_ignored",
+            "ligandB": "should_be_ignored",
+        }
+    )
+    prep_ligand_rbfe.setup_ligand_rbfe_from_config(cfg, num_procs=2)
+    args = captured["args_list"]
+    assert len(args) == 1
+    lig_a_dir, lig_b_dir, _, _, _, out_dir = args[0]
+    assert lig_a_dir == (lig_base / "ejm_44").resolve()
+    assert lig_b_dir == (lig_base / "ejm_31").resolve()
+    assert out_dir == (output_base / "ejm_44~ejm_31").resolve()
+    assert captured["ligand_names"] == ["ejm_44", "ejm_31"]
+    assert captured["nprocs"] == 2
+    assert captured["desc"] == "setup_ligand_rbfe"
+
+
+def test_setup_ligand_rbfe_from_config_pair_mode(tmp_path: Path, monkeypatch):
+    lig_base = tmp_path / "ligands"
+    lig_base.mkdir()
+    protein = tmp_path / "protein.pdb"
+    protein.write_text("HEADER\n")
+    output_base = tmp_path / "rbfe"
+    captured = {}
+
+    monkeypatch.setattr(
+        prep_ligand_rbfe.Protein, "from_pdb", lambda *args, **kwargs: SimpleNamespace(name="protein")
+    )
+    monkeypatch.setattr(
+        prep_ligand_rbfe, "_setup_ligand_rbfe_one", lambda job: captured.update({"job": job})
+    )
+
+    cfg = AmberLigandRbfeConfig.model_validate(
+        {
+            "protein": protein,
+            "ligand_base": lig_base,
+            "ligandA": "ejm_44",
+            "ligandB": "ejm_31",
+            "output_base": output_base,
+            "ligand_list": None,
+        }
+    )
+    prep_ligand_rbfe.setup_ligand_rbfe_from_config(cfg)
+    lig_a_dir, lig_b_dir, _, _, _, out_dir = captured["job"]
+    assert lig_a_dir == (lig_base / "ejm_44").resolve()
+    assert lig_b_dir == (lig_base / "ejm_31").resolve()
+    assert out_dir == (output_base / "ejm_44~ejm_31").resolve()
+
+
+def test_rbfe_config_requires_valid_input_mode(tmp_path: Path):
+    protein = tmp_path / "protein.pdb"
+    protein.write_text("HEADER\n")
+    with pytest.raises(ValidationError):
+        AmberLigandRbfeConfig.model_validate({"protein": protein})

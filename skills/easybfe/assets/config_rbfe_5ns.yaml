@@ -3,15 +3,21 @@
 # Batch mode (AmberLigandRbfeConfig.ligand_pairs): one RBFE job per [A, B] pair.
 # With ligand_base, the input ligands are directories under ligand_base / ligandA and ligand_base / ligandB
 # in each pair.
-ligand_pairs:
-  - ["ejm_44", "ejm_31"]
-  - ["ejm_44", "jmc_30"]
+ligand_list:
+  - "ejm_44"
+  - "ejm_31"
+  - "jmc_30"
 ligand_base: ./ligands
-# Required for ligand_pairs: each pair writes under output_base / "{ligandA.name}~{ligandB.name}".
-output_base: ./rbfe
-# Receptor structure (PDB) for the complex leg.
-protein: ../tyk2/tyk2_pdbfixer.pdb
+network:
+  algorithm: custom
+  options:
+    edges:
+      - ["ejm_44", "ejm_31"]
+      - ["ejm_44", "jmc_30"]
+      - ["ejm_31", "jmc_30"]
 
+output_base: ./rbfe
+protein: ../tyk2/tyk2_pdbfixer.pdb
 # AtomMappingConfig: mapper for ligand A <-> B topology (easybfe.config.amber.rbfe).
 atom_mapping:
   # Mapper backend (e.g. lomap, kartograf); passed to the mapping pipeline.

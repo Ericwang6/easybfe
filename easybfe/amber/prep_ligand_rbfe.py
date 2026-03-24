@@ -20,6 +20,7 @@ from ..smff.utils import OpenmmXML
 from ..core import Ligand, Protein
 from ..mapping import load_mapper
 from ..config.amber.rbfe import AmberLigandRbfeConfig, AtomMappingConfig
+from ..network import load_network_generator
 
 
 logger = logging.getLogger(__name__)
@@ -577,17 +578,15 @@ def setup_ligand_rbfe_from_config(
 
     **Ligand directories**
 
-    If :attr:`~AmberLigandRbfeConfig.ligand_base` is set, single-pair mode uses
-    ``ligand_base / ligandA`` and ``ligand_base / ligandB``; batch mode (non-empty
-    :attr:`~AmberLigandRbfeConfig.ligand_pairs`) uses ``ligand_base / pair[0]`` and
-    ``ligand_base / pair[1]`` for each pair. If ``ligand_base`` is not set,
-    :attr:`~AmberLigandRbfeConfig.ligandA` / ``ligandB`` (or each pair entry) are
-    treated as full ligand directory paths.
+    In network mode (`ligand_list`), each ligand entry is resolved as
+    ``ligand_base / ligand`` when ligand_base is set, otherwise as a direct path.
+    In single-pair mode (`ligandA` and `ligandB`), each ligand follows the same
+    resolution rule.
 
     **Output**
 
-    Batch mode requires :attr:`~AmberLigandRbfeConfig.output_base`; each run writes
-    under ``output_base / "<pair0>~<pair1>"``. Single-pair mode uses
+    Network mode requires :attr:`~AmberLigandRbfeConfig.output_base`; each generated
+    edge writes under ``output_base / "<ligA>~<ligB>"``. Single-pair mode uses
     ``output_base / "{ligandA.name}~{ligandB.name}"`` when ``output_base`` is set,
     otherwise :attr:`~AmberLigandRbfeConfig.output_dir` (required in that case).
     """
@@ -602,30 +601,42 @@ def setup_ligand_rbfe_from_config(
 
     protein = Protein.from_pdb(config.protein, name=config.protein.stem)
 
-    use_pairs = config.ligand_pairs is not None and len(config.ligand_pairs) > 0
+    use_network = config.ligand_list is not None and len(config.ligand_list) > 0
     lig_base = Path(config.ligand_base).expanduser().resolve() if config.ligand_base is not None else None
 
-    if use_pairs:
-        if config.output_base is None:
-            raise ValueError(
-                "AmberLigandRbfeConfig.output_base is required for batch mode (non-empty ligand_pairs)"
-            )
+    if use_network:
         if config.ligandA is not None or config.ligandB is not None:
-            logger.info("ligand_pairs batch mode: ignoring ligandA and ligandB for ligand paths")
+            logger.info("ligand_list mode: ignoring ligandA and ligandB")
+        if config.output_base is None:
+            raise ValueError("AmberLigandRbfeConfig.output_base is required when ligand_list is set")
+
+        ligand_dirs = [_resolve_ligand_directory(lig_base, lig) for lig in config.ligand_list]
+        ligands = [Ligand.from_directory(lig_dir) for lig_dir in ligand_dirs]
+        ligand_dir_by_name = {lig.name: lig_dir for lig, lig_dir in zip(ligands, ligand_dirs)}
+        if len(ligand_dir_by_name) != len(ligands):
+            raise ValueError("Ligand names must be unique for network generation")
+        generator = load_network_generator(config.network.algorithm, **config.network.options)
+        edges = generator.run(ligands)
+        if not edges:
+            raise ValueError("Network generator returned no edges")
+
         out_base = Path(config.output_base).expanduser().resolve()
         out_base.mkdir(parents=True, exist_ok=True)
         nprocs = num_procs if num_procs is not None else -1
-        args_list = [
-            (
-                _resolve_ligand_directory(lig_base, p0),
-                _resolve_ligand_directory(lig_base, p1),
-                config.atom_mapping,
-                protein,
-                leg_configs,
-                out_base / _pair_subdir_name(p0, p1),
+        args_list = []
+        for lig_a_name, lig_b_name in edges:
+            if lig_a_name not in ligand_dir_by_name or lig_b_name not in ligand_dir_by_name:
+                raise ValueError(f"Network edge ({lig_a_name}, {lig_b_name}) is not in ligand_list")
+            args_list.append(
+                (
+                    ligand_dir_by_name[lig_a_name],
+                    ligand_dir_by_name[lig_b_name],
+                    config.atom_mapping,
+                    protein,
+                    leg_configs,
+                    out_base / _pair_subdir_name(lig_a_name, lig_b_name),
+                )
             )
-            for p0, p1 in config.ligand_pairs
-        ]
         run_func_parallel(
             _setup_ligand_rbfe_one,
             args_list,

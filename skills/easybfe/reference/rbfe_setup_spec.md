@@ -7,19 +7,20 @@ See [assets/config_rbfe_5ns.yaml](../assets/config_rbfe_5ns.yaml) for a complete
 ## Top-Level Fields
 
 
-| Field          | Type                     | Required | Description                                                                    |
-| -------------- | ------------------------ | -------- | ------------------------------------------------------------------------------ |
-| `protein`      | path                     | yes      | Receptor PDB file                                                              |
-| `ligandA`      | path                     | no       | Ligand A directory (mutually exclusive with `ligand_pairs`)                    |
-| `ligandB`      | path                     | no       | Ligand B directory (mutually exclusive with `ligand_pairs`)                    |
-| `ligand_pairs` | list of `[pathA, pathB]` | no       | Batch mode: list of ligand-pair tuples                                         |
-| `ligand_base`  | path                     | no       | Parent directory; ligand paths are resolved relative to this                   |
-| `output_dir`   | path                     | no       | Output directory (single-pair mode)                                            |
-| `output_base`  | path                     | no       | Base output directory (batch mode; each pair writes to `output_base/{A}~{B}/`) |
-| `atom_mapping` | object                   | no       | Atom mapping settings (see below)                                              |
-| `solvent`      | object                   | no       | Solvent-leg FEP simulation config                                              |
-| `complex`      | object                   | no       | Complex-leg FEP simulation config                                              |
-| `gas`          | object                   | no       | Optional gas-phase leg                                                         |
+| Field | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| `protein` | path | yes | Receptor PDB file |
+| `ligandA` | path | no | Single-pair mode ligand A directory |
+| `ligandB` | path | no | Single-pair mode ligand B directory |
+| `ligand_list` | list of paths | no | Network mode ligand directories |
+| `network` | object | no | Network-mode edge generation (`algorithm`, `options`) |
+| `ligand_base` | path | no | Parent directory used to resolve `ligandA`/`ligandB`/`ligand_list` entries |
+| `output_dir` | path | no | Output directory for single-pair mode |
+| `output_base` | path | no | Output base for network mode, or parent for single-pair output naming |
+| `atom_mapping` | object | no | Atom mapping settings (see below) |
+| `solvent` | object | no | Solvent-leg FEP simulation config |
+| `complex` | object | no | Complex-leg FEP simulation config |
+| `gas` | object | no | Optional gas-phase leg |
 
 
 ### Input Modes
@@ -33,18 +34,36 @@ protein: ./protein.pdb
 output_dir: ./rbfe/ejm_44~ejm_31
 ```
 
-**Batch** — set `ligand_pairs` with `ligand_base` and `output_base`:
-
-For `ligand_pairs`, quote each entry with double quotes so YAML parses it as a string and easybfe can read it correctly.
+**Network** — set `ligand_list` with `network` and `output_base`:
 
 ```yaml
-ligand_pairs:
-  - ["ejm_44", "ejm_31"]
-  - ["ejm_44", "jmc_30"]
+ligand_list:
+  - "ejm_44"
+  - "ejm_31"
+  - "jmc_30"
 ligand_base: ./ligands
+network:
+  algorithm: custom
+  options:
+    edges:
+      - ["ejm_44", "ejm_31"]
+      - ["ejm_44", "jmc_30"]
 output_base: ./rbfe
 protein: ./protein.pdb
 ```
+
+## `network` — Network Config
+
+`network` is used when `ligand_list` is set.
+
+```yaml
+network:
+  algorithm: star
+  options:
+    center: ejm_44
+```
+
+See [rbfe_network_algorithms.md](rbfe_network_algorithms.md) for algorithm examples (`custom`, `star`, `wheel`, `bistar`, and optional OpenFE algorithms).
 
 ## `atom_mapping` — Atom Mapping Config
 

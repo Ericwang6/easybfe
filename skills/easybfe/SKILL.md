@@ -223,9 +223,9 @@ easybfe rbfe setup CONFIG [OPTIONS]
 | `--ligandA` | `-a` | Override: ligand A directory/SDF |
 | `--ligandB` | `-b` | Override: ligand B directory/SDF |
 | `--ligand-base` | `-I` | Override: parent directory for ligand paths |
-| `--ligand-pairs` | `-L` | Override: text file of ligand pairs (two paths per line, `#` comments) |
+| `--ligand-list` | `-L` | Override: text file of ligand paths (one path per line, `#` comments) |
 | `--output` | `-o` | Override: output directory (single pair) |
-| `--output-base` | `-O` | Override: base output dir (batch, writes `{A}~{B}/`) |
+| `--output-base` | `-O` | Override: base output dir (network mode writes `{A}~{B}/` per edge) |
 
 Config schema: `AmberLigandRbfeConfig`.
 
@@ -238,7 +238,7 @@ Config schema: `AmberLigandRbfeConfig`.
 easybfe rbfe setup config.yaml -a ligands/ejm_44 -b ligands/ejm_31 -p protein.pdb -o output/ejm_44~ejm_31
 ```
 
-**Batch (pairs in config or via `--ligand-pairs`):**
+**Network mode (`ligand_list` + `network`):**
 
 ```bash
 easybfe rbfe setup config.yaml -O ./rbfe_output
@@ -262,6 +262,7 @@ When reporting back to the user, include a concise, structured summary:
 - **Perturbations** — How many RBFE perturbations (pairs) were set up? For batch workflows, state whether every ligand that should be in the study appears in at least one pair (full coverage vs partial / user-specified subgraph).
 - **Output layout** — Paths for: (1) parameterized ligand parent directory (`ligand_base`, usually the same path given to `ligand pargen` as `--output-base` / `-O`), (2) RBFE output directory (`output_dir` or `output_base` with one subdir per pair).
 - **Tree** — A short ASCII tree showing ligand dirs and RBFE output with `solvent/`, `complex/`, and `gas/` only when the gas leg was configured.
+- **Network algorithms** — See [reference/rbfe_network_algorithms.md](reference/rbfe_network_algorithms.md) for example `network` blocks.
 
 ### `easybfe rbfe analyze`
 

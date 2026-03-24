@@ -12,6 +12,7 @@ from __future__ import annotations
 import abc
 from collections import Counter
 from typing import Any, TYPE_CHECKING
+from pathlib import Path
 
 from .registry import NETWORK_GENERATOR_REGISTRY
 
@@ -66,6 +67,46 @@ def _check_edges(nodes: set[str], edges: list[tuple[str, str]]) -> None:
         node_in_edges.add(dst)
     for node in nodes:
         assert node in node_in_edges, f"{node} not in edges"
+
+
+def _read_ligand_pairs_file(path: Path) -> list[tuple[str, str]]:
+    """Parse a file of ligand pairs: one pair per line, two fields separated by whitespace.
+
+    Empty lines and lines whose first non-whitespace character is ``#`` are skipped.
+
+    Parameters
+    ----------
+    path : Path
+        Path to the pairs file.
+
+    Returns
+    -------
+    list[tuple[Path, Path]]
+        One ``(ligand_a, ligand_b)`` entry per non-comment data line.
+
+    Raises
+    ------
+    ValueError
+        If a data line does not contain exactly two fields, or no pairs were found.
+    """
+    pairs: list[tuple[str, str]] = []
+    text = path.read_text()
+    for lineno, raw in enumerate(text.splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) != 2:
+            raise ValueError(
+                f"{path}: line {lineno}: expected exactly two whitespace-separated "
+                f"ligand path tokens, got {len(parts)}: {raw!r}"    
+            )
+        pairs.append((parts[0], parts[1]))
+    if not pairs:
+        raise ValueError(
+            f"{path}: no ligand pairs found (file empty or only blanks/comments)"
+        )
+    return pairs
 
 
 class LigandNetworkGenerator(abc.ABC):
@@ -131,12 +172,14 @@ class BiStarNetworkGenerator(LigandNetworkGenerator):
 class CustomNetworkGenerator(LigandNetworkGenerator):
     """Use a user-provided edge list directly."""
 
-    def __init__(self, edges: list[tuple[str, str]]):
-        self._edges = edges
+    def __init__(self, edges: str | Path | list[tuple[str, str]]):
+        if isinstance(edges, str) or isinstance(edges, Path):
+            self._edges = _read_ligand_pairs_file(edges)
+        else:
+            self._edges = edges
 
     def run(self, ligands: list["Ligand"]) -> list[tuple[str, str]]:
         names = _check_unique_names(ligands)
-        _check_edges(names, self._edges)
         return self._edges
 
 

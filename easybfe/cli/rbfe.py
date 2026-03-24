@@ -3,8 +3,8 @@ from pathlib import Path
 import rich_click as click
 
 
-def _read_ligand_pairs_file(path: Path) -> list[tuple[Path, Path]]:
-    """Parse a file of ligand pairs: one pair per line, two fields separated by whitespace.
+def _read_ligand_list_file(path: Path) -> list[Path]:
+    """Parse a file of ligand paths: one path per line.
 
     Empty lines and lines whose first non-whitespace character is ``#`` are skipped.
 
@@ -15,34 +15,34 @@ def _read_ligand_pairs_file(path: Path) -> list[tuple[Path, Path]]:
 
     Returns
     -------
-    list[tuple[Path, Path]]
-        One ``(ligand_a, ligand_b)`` entry per non-comment data line.
+    list[Path]
+        One ligand path entry per non-comment data line.
 
     Raises
     ------
     click.BadParameter
-        If a data line does not contain exactly two fields, or no pairs were found.
+        If a data line does not contain exactly one field, or no ligand paths were found.
     """
-    pairs: list[tuple[Path, Path]] = []
+    ligands: list[Path] = []
     text = path.read_text()
     for lineno, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
         parts = line.split()
-        if len(parts) != 2:
+        if len(parts) != 1:
             raise click.BadParameter(
-                f"{path}: line {lineno}: expected exactly two whitespace-separated "
+                f"{path}: line {lineno}: expected exactly one whitespace-separated "
                 f"ligand path tokens, got {len(parts)}: {raw!r}",
-                param_hint="ligand_pairs",
+                param_hint="ligand_list",
             )
-        pairs.append((Path(parts[0]), Path(parts[1])))
-    if not pairs:
+        ligands.append(Path(parts[0]))
+    if not ligands:
         raise click.BadParameter(
-            f"{path}: no ligand pairs found (file empty or only blanks/comments)",
-            param_hint="ligand_pairs",
+            f"{path}: no ligand paths found (file empty or only blanks/comments)",
+            param_hint="ligand_list",
         )
-    return pairs
+    return ligands
 
 
 @click.group()
@@ -82,16 +82,16 @@ def rbfe():
     "-I",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Override config: ligand_base (parent directory for ligandA/ligandB or pair paths).",
+    help="Override config: ligand_base (parent directory for ligandA/ligandB or ligand_list paths).",
 )
 @click.option(
-    "--ligand-pairs",
+    "--ligand-list",
     "-L",
     type=click.Path(exists=True, path_type=Path),
     default=None,
     help=(
-        "Override config: ligand_pairs from a text file (one pair per line: "
-        "two paths separated by whitespace; ``#`` starts a comment line)."
+        "Override config: ligand_list from a text file (one ligand path per line; "
+        "``#`` starts a comment line)."
     ),
 )
 @click.option(
@@ -107,7 +107,7 @@ def rbfe():
     type=click.Path(path_type=Path),
     default=None,
     help=(
-        "Override config: output_base (required for batch/ligand_pairs; "
+        "Override config: output_base (required for ligand_list network mode; "
         "single-pair writes under output_base/{ligandA.name}~{ligandB.name})."
     ),
 )
@@ -117,7 +117,7 @@ def setup(
     liganda: Path | None,
     ligandb: Path | None,
     ligand_base: Path | None,
-    ligand_pairs: Path | None,
+    ligand_list: Path | None,
     output: Path | None,
     output_base: Path | None,
 ) -> None:
@@ -135,14 +135,16 @@ def setup(
         )
 
     overrides = {}
-    if liganda is not None:
-        overrides["ligandA"] = liganda
-    if ligandb is not None:
-        overrides["ligandB"] = ligandb
     if ligand_base is not None:
         overrides["ligand_base"] = ligand_base
-    if ligand_pairs is not None:
-        overrides["ligand_pairs"] = _read_ligand_pairs_file(ligand_pairs)
+    if ligand_list is not None:
+        overrides["ligand_list"] = _read_ligand_list_file(ligand_list)
+        overrides["ligandA"] = None
+        overrides["ligandB"] = None
+    elif liganda is not None or ligandb is not None:
+        overrides["ligand_list"] = None
+        overrides["ligandA"] = liganda
+        overrides["ligandB"] = ligandb
     if protein is not None:
         overrides["protein"] = protein
     if output is not None:
