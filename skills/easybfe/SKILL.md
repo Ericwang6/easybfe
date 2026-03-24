@@ -24,13 +24,13 @@ Top-level command groups: `abfe`, `rbfe`, `ligand`, `protein`, `md`.
 You can run helpers to have a better and detailed understanding of the functionalities:
 
 ```
-easybfe COMMAND -h
+easybfe COMMAND --help
 ```
 
 or
 
 ```
-easybfe COMMAND SUBCOMMAND -h
+easybfe COMMAND SUBCOMMAND --help
 ```
 
 ## End-to-End Workflow
@@ -86,19 +86,33 @@ At least one of `--output` or `--output-base` must be provided.
 **Batch from SDF (most common):**
 
 ```bash
-easybfe ligand pargen ligands.sdf -f gaff2 -c gas -O ./ligands
+easybfe ligand pargen ligands.sdf -f gaff2 -O ./ligands
 ```
 
 **Single ligand:**
 
 ```bash
-easybfe ligand pargen mol.sdf -f gaff2 -c bcc -o ./ligands/mol
+easybfe ligand pargen mol.sdf -f gaff2 -o ./ligands/mol
 ```
 
 **Multiple input files:**
 
 ```bash
-easybfe ligand pargen a.sdf b.sdf c.sdf -f gaff2 -c gas -O ./ligands
+easybfe ligand pargen a.sdf b.sdf c.sdf -f gaff2 -O ./ligands
+```
+
+**Use different force field**
+
+```bash
+easybfe ligand pargen ligands.sdf -f openff-2.1.0 -O ./ligands
+```
+
+**Use different charge model**
+
+The program will use `bcc` as the default charge model. Always use `bcc` unless the user explicitly instructed you to use `gas` or `resp`.
+
+```bash
+easybfe ligand pargen ligands.sdf -c resp -O ./ligands
 ```
 
 ---
