@@ -1,0 +1,16 @@
+jmc_23	O=C(Nc1ccnc(NC(=O)[C@H]2C[C@H]2F)c1)c1c(Cl)cccc1Cl
+ejm_47	O=C(Nc1ccnc(NC(=O)C2CCC2)c1)c1c(Cl)cccc1Cl
+ejm_49	O=C(Nc1cc(NC(=O)c2c(Cl)cccc2Cl)ccn1)c1ccccc1
+ejm_31	CC(=O)Nc1cc(NC(=O)c2c(Cl)cccc2Cl)ccn1
+ejm_45	O=C(CC1CC1)Nc1cc(NC(=O)c2c(Cl)cccc2Cl)ccn1
+ejm_44	CC(C)(C)C(=O)Nc1cc(NC(=O)c2c(Cl)cccc2Cl)ccn1
+ejm_43	CC(C)C(=O)Nc1cc(NC(=O)c2c(Cl)cccc2Cl)ccn1
+ejm_50	O=C(CO)Nc1cc(NC(=O)c2c(Cl)cccc2Cl)ccn1
+ejm_42	CCC(=O)Nc1cc(NC(=O)c2c(Cl)cccc2Cl)ccn1
+ejm_55	COC(=O)Nc1cc(NC(=O)c2c(Cl)cccc2Cl)ccn1
+ejm_48	O=C(Nc1ccnc(NC(=O)C2CCCC2)c1)c1c(Cl)cccc1Cl
+ejm_54	CCNC(=O)Nc1cc(NC(=O)c2c(Cl)cccc2Cl)ccn1
+jmc_28	C[C@@H]1C[C@@H]1C(=O)Nc1cc(NC(=O)c2c(Cl)cccc2Cl)ccn1
+jmc_27	O=C(Nc1ccnc(NC(=O)[C@H]2C[C@H]2Cl)c1)c1c(Cl)cccc1Cl
+jmc_30	N#C[C@@H]1C[C@@H]1C(=O)Nc1cc(NC(=O)c2c(Cl)cccc2Cl)ccn1
+ejm_46	O=C(Nc1ccnc(NC(=O)C2CC2)c1)c1c(Cl)cccc1Cl
