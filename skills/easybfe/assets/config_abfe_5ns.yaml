@@ -1,8 +1,8 @@
 # Configuration file for setting up an ABFE simulation (AmberAbfeConfig).
 ligand_base: ./ligands
 ligand_batch:
-  - jmc_23
-  - ejm_31
+  - "jmc_23"
+  - "ejm_31"
 
 protein: ../tyk2/tyk2_pdbfixer.pdb
 

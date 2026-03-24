@@ -35,10 +35,12 @@ output_dir: ./rbfe/ejm_44~ejm_31
 
 **Batch** — set `ligand_pairs` with `ligand_base` and `output_base`:
 
+For `ligand_pairs`, quote each entry with double quotes so YAML parses it as a string and easybfe can read it correctly.
+
 ```yaml
 ligand_pairs:
-  - [ejm_44, ejm_31]
-  - [ejm_44, jmc_30]
+  - ["ejm_44", "ejm_31"]
+  - ["ejm_44", "jmc_30"]
 ligand_base: ./ligands
 output_base: ./rbfe
 protein: ./protein.pdb

@@ -138,7 +138,7 @@ class AmberPlainMDConfig(BaseModel):
 class AmberFepSimulationConfig(AmberSimulationConfig):
 
     workflow: list[AmberStepConfig] = Field(default_factory=default_fep_workflow)
-    use_charge_change: bool = True 
+    use_charge_change: bool = False
     use_settle_for_alchemical_water: bool = True
     add_restraint_for_alchem_water: bool = True
     charge_change_method: Literal['dummy_ion', 'coalchem_water'] = 'dummy_ion'

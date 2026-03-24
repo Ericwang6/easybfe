@@ -4,8 +4,8 @@
 # With ligand_base, the input ligands are directories under ligand_base / ligandA and ligand_base / ligandB
 # in each pair.
 ligand_pairs:
-  - [ejm_44, ejm_31]
-  - [ejm_44, jmc_30]
+  - ["ejm_44", "ejm_31"]
+  - ["ejm_44", "jmc_30"]
 ligand_base: ./ligands
 # Required for ligand_pairs: each pair writes under output_base / "{ligandA.name}~{ligandB.name}".
 output_base: ./rbfe

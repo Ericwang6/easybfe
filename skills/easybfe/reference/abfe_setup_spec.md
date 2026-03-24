@@ -33,11 +33,13 @@ output_dir: ./abfe/jmc_23
 
 **Batch** — set `ligand_batch` (list) with `ligand_base` and `output_base`:
 
+For `ligand_batch`, quote each entry with double quotes so YAML parses it as a string and easybfe can read it correctly.
+
 ```yaml
 ligand_base: ./ligands
 ligand_batch:
-  - jmc_23
-  - ejm_31
+  - "jmc_23"
+  - "ejm_31"
 protein: ./protein.pdb
 output_base: ./abfe
 ```
@@ -88,7 +90,7 @@ All three legs share the `AmberFepSimulationConfig` schema (inherits `SetupConfi
 | --------------------------------- | ----------- | --------------------------------------------------------------------------- |
 | `lambdas`                         | `null`      | Explicit lambda schedule (list of floats 0.0–1.0). Overrides `num_lambdas`. |
 | `num_lambdas`                     | `16`        | Number of evenly spaced lambdas (used only when `lambdas` is null)          |
-| `use_charge_change`               | `true`      | Enable charge-changing FEP corrections                                      |
+| `use_charge_change`               | `false`     | Enable charge-changing FEP corrections                                      |
 | `charge_change_method`            | `dummy_ion` | Method: `dummy_ion` or `coalchem_water`                                     |
 | `use_settle_for_alchemical_water` | `true`      | SETTLE constraints on alchemical water                                      |
 | `add_restraint_for_alchem_water`  | `true`      | Restraints on alchemical water                                              |

@@ -160,6 +160,23 @@ easybfe abfe setup config.yaml -O ./abfe_output
 **Config file spec:**
 - You should use [assets/config_abfe_5ns.yaml](assets/config_abfe_5ns.yaml) as a template to build up the configuration file and modify the file according to user's specifications. Refer to [reference/abfe_setup_spec.md](reference/abfe_setup_spec.md) for full field reference and modification examples.
 
+**Validate the setup**
+
+After `abfe setup` finishes, confirm each ABFE run directory (single ligand: `output_dir`; batch: each subdirectory under `output_base`) is usable:
+
+- **Leg directories** — `solvent/`, `complex/`, and `restraint/` must all exist.
+- **Boresch file** — `boresch.dat` must exist at the same level as those three directories (ABFE run root).
+- **Launch scripts** — each of `solvent/`, `complex/`, and `restraint/` must contain a `run.sh` file.
+
+**Structured summary after setup**
+
+When reporting back to the user, include a concise, structured summary:
+
+- **Ligands** — How many distinct ligands are set up for ABFE (single vs batch)?
+- **Ligand parameterization** — Ligand force field and charge model from `ligand pargen` (typically `-f` and `-c`); ABFE setup assumes these are already baked into each parameterized ligand directory.
+- **Protein and solvent** — Protein force field (`protein_ff`) and water model (`water_ff` / `water_model`) from the setup config (usually the same across `solvent`, `complex`, and `restraint` blocks).
+- **Output layout** — Absolute or workspace-relative paths for: (1) parameterized ligand directories, (2) prepared ABFE run directory or `output_base` with per-ligand subdirs.
+- **Tree** — A short ASCII tree (a few levels) showing `ligands/` (or equivalent) and `abfe/` (or `output_base`/`output_dir`) with `solvent/`, `complex/`, `restraint/`, and `boresch.dat`.
 
 ### `easybfe abfe analyze`
 
@@ -220,6 +237,25 @@ easybfe rbfe setup config.yaml -a ligands/ejm_44 -b ligands/ejm_31 -p protein.pd
 ```bash
 easybfe rbfe setup config.yaml -O ./rbfe_output
 ```
+
+**Validate the setup**
+
+After `rbfe setup` finishes, confirm each perturbation directory (single pair: `output_dir`; batch: each `{ligandA}~{ligandB}/` under `output_base`) is usable:
+
+- **Required legs** — `solvent/` and `complex/` must exist.
+- **Gas leg** — If and only if the config defines a `gas` key (gas-phase leg), `gas/` must also exist; do not expect `gas/` when `gas` was not set.
+- **Launch scripts** — every present leg directory (`solvent/`, `complex/`, and `gas/` if applicable) must contain a `run.sh` file.
+
+**Structured summary after setup**
+
+When reporting back to the user, include a concise, structured summary:
+
+- **Ligands** — How many parameterized ligand directories are involved? List or count unique ligand names if helpful.
+- **Ligand parameterization** — Ligand force field and charge model from `ligand pargen` (typically `-f` and `-c`) for the directories under `ligand_base`.
+- **Protein and solvent** — Protein force field (`protein_ff`) and water model (`water_ff` / `water_model`) from the RBFE config (`solvent` / `complex` / optional `gas` blocks).
+- **Perturbations** — How many RBFE perturbations (pairs) were set up? For batch workflows, state whether every ligand that should be in the study appears in at least one pair (full coverage vs partial / user-specified subgraph).
+- **Output layout** — Paths for: (1) parameterized ligand parent directory (`ligand_base`, usually the same path given to `ligand pargen` as `--output-base` / `-O`), (2) RBFE output directory (`output_dir` or `output_base` with one subdir per pair).
+- **Tree** — A short ASCII tree showing ligand dirs and RBFE output with `solvent/`, `complex/`, and `gas/` only when the gas leg was configured.
 
 ### `easybfe rbfe analyze`
 
