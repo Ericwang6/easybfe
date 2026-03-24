@@ -1,8 +1,15 @@
-import os
 import json
+import logging
+import os
 from pathlib import Path
+
 import numpy as np
+import pandas as pd
+
 from .mbar import run_mbar, plot_convergence
+from .mle import maximum_likelihood_estimator
+
+logger = logging.getLogger(__name__)
 
 
 def analyze_rbfe(directory: os.PathLike, prod_prefix: str = '05.prod', temperature: float = 298.15, force_run: bool = True):
@@ -60,4 +67,102 @@ def analyze_rbfe(directory: os.PathLike, prod_prefix: str = '05.prod', temperatu
 
     return json_data
 
-    
+
+def analyze_rbfe_dg_network(
+    directory: os.PathLike,
+    *,
+    bias: float = 0.0,
+    result_filename: str = "result.json",
+    dg_csv_name: str = "dg.csv",
+) -> pd.DataFrame:
+    """Aggregate pairwise RBFE results under ``directory`` and estimate per-ligand dG via MLE.
+
+    Each immediate subdirectory whose name matches ``*~*`` is treated as one edge
+    (ligand A ``~`` ligand B). Directories without ``result.json`` are skipped.
+    Expected keys when present (from :func:`analyze_rbfe`): ``ddg_total``,
+    ``ddg_total_std``.
+
+    Parameters
+    ----------
+    directory : os.PathLike
+        Parent directory containing edge subdirectories (e.g. batch output base).
+    bias : float, optional
+        Added to all estimated dG values (passed to :func:`maximum_likelihood_estimator`).
+    result_filename : str, optional
+        JSON file name inside each edge directory. Default: ``result.json``.
+    dg_csv_name : str, optional
+        Written under ``directory``. Default: ``dg.csv``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``ligand``, ``dG``, ``dG_std`` (same as MLE output).
+
+    Raises
+    ------
+    ValueError
+        If no ``*~*`` subdirectories exist under ``directory``, or none of them contain
+        a readable ``result.json`` with the required keys.
+    """
+    root = Path(directory)
+    edge_dirs = sorted(p for p in root.glob("*~*") if p.is_dir())
+    if not edge_dirs:
+        raise ValueError(
+            f"No subdirectories matching *~* under {root!s} (expected one folder per edge)."
+        )
+
+    rows: list[dict[str, object]] = []
+    for sub in edge_dirs:
+        name = sub.name
+        if "~" not in name:
+            continue
+        ligand_a, ligand_b = name.split("~", 1)
+        result_path = sub / result_filename
+        if not result_path.is_file():
+            logger.debug("Skipping %s: missing %s", sub, result_filename)
+            continue
+        with result_path.open("r") as f:
+            data = json.load(f)
+        try:
+            ddg = float(data["ddg_total"])
+            ddg_std = float(data["ddg_total_std"])
+        except KeyError as e:
+            raise ValueError(
+                f"{result_path} must contain ddg_total and ddg_total_std (from analyze_rbfe)."
+            ) from e
+        rows.append(
+            {
+                "ligandA_name": ligand_a,
+                "ligandB_name": ligand_b,
+                "ddG.total": ddg,
+                "ddG_std.total": ddg_std,
+            }
+        )
+
+    n_scanned = len(edge_dirs)
+    n_with_result = len(rows)
+    unique_ligands = set()
+    for row in rows:
+        unique_ligands.add(row["ligandA_name"])
+        unique_ligands.add(row["ligandB_name"])
+    logger.info(
+        "RBFE dg-network under %s: %d perturbation(s) with %s out of %d *~* director(ies); "
+        "%d unique ligand(s).",
+        root,
+        n_with_result,
+        result_filename,
+        n_scanned,
+        len(unique_ligands),
+    )
+
+    if not rows:
+        raise ValueError(
+            f"No {result_filename} found under any *~* subdirectory of {root!s} "
+            "(nothing to aggregate)."
+        )
+
+    df_edges = pd.DataFrame(rows)
+    dg_df = maximum_likelihood_estimator(df_edges, bias=bias)
+    dg_df.to_csv(root / dg_csv_name, index=False)
+    return dg_df
+

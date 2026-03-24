@@ -1,5 +1,6 @@
-import shutil
+import json
 import logging
+import shutil
 import tarfile
 from pathlib import Path
 
@@ -8,7 +9,7 @@ from easybfe.core.protein import Protein
 from easybfe.config import AmberFepSimulationConfig
 from easybfe.config.amber.simulation import default_fep_workflow
 from easybfe.amber.prep_ligand_rbfe import setup_ligand_rbfe
-from easybfe.analysis.rbfe import analyze_rbfe
+from easybfe.analysis.rbfe import analyze_rbfe, analyze_rbfe_dg_network
 from easybfe.smff import load_parametrizer
 
 
@@ -150,3 +151,28 @@ def test_analyze_rbfe_with_extracted_archive(tmp_path: Path):
     assert (wdir / "result.json").exists()
     assert (wdir / "total_convergence.csv").exists()
     assert (wdir / "total_convergence.png").exists()
+
+
+def test_analyze_rbfe_dg_network_writes_dg_csv(tmp_path: Path):
+    batch = tmp_path / "batch"
+    batch.mkdir()
+    for sub, ddg, std in [
+        ("A~B", 1.0, 0.1),
+        ("B~C", 0.5, 0.1),
+        ("A~C", 1.5, 0.1),
+    ]:
+        d = batch / sub
+        d.mkdir()
+        (d / "result.json").write_text(
+            json.dumps({"ddg_total": ddg, "ddg_total_std": std})
+        )
+
+    out = analyze_rbfe_dg_network(batch, bias=0.0)
+    assert (batch / "dg.csv").is_file()
+    assert set(out.columns) == {"ligand", "dG", "dG_std"}
+    assert len(out) == 3
+
+    # Missing result.json is skipped; MLE still runs on remaining edges.
+    (batch / "X~Y").mkdir()
+    out2 = analyze_rbfe_dg_network(batch, bias=0.0)
+    assert len(out2) == 3

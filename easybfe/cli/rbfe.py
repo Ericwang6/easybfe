@@ -186,14 +186,37 @@ def setup(
     default=False,
     help="Re-run MBAR and overwrite result.json even if it exists.",
 )
+@click.option(
+    "--dg",
+    is_flag=True,
+    default=False,
+    help=(
+        "Aggregate pairwise results: scan subdirectories *~* for result.json, "
+        "run maximum-likelihood dG estimation, write dg.csv in DIRECTORY "
+        "(ignores --prod-prefix / --temperature / --force)."
+    ),
+)
+@click.option(
+    "--dg-bias",
+    type=float,
+    default=0.0,
+    show_default=True,
+    help="Constant added to all estimated dG values when using --dg.",
+)
 def analyze(
     directory: Path,
     prod_prefix: str,
     temperature: float,
     force_run: bool,
+    dg: bool,
+    dg_bias: float,
 ) -> None:
     """Run RBFE analysis (MBAR) and write result.json and convergence plots."""
 
-    from ..analysis.rbfe import analyze_rbfe
+    from ..analysis.rbfe import analyze_rbfe, analyze_rbfe_dg_network
+
+    if dg:
+        analyze_rbfe_dg_network(directory, bias=dg_bias)
+        return
 
     analyze_rbfe(directory, prod_prefix=prod_prefix, temperature=temperature, force_run=force_run)
