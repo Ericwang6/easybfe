@@ -113,3 +113,18 @@ def test_vina_constr_dock_no_em(vina_docking, tyk2_mols):
     assert not result.HasProp('ff_energy')
     assert math.isfinite(result.GetDoubleProp('vina_score'))
     assert math.isfinite(result.GetDoubleProp('rmsd'))
+
+
+def test_vina_constr_dock_output_sdf(vina_docking, tyk2_mols):
+    from copy import deepcopy
+    if OUT_DIR.is_dir():
+        shutil.rmtree(OUT_DIR)
+    OUT_DIR.mkdir(parents=True)
+    mol = deepcopy(tyk2_mols[1])
+    ref_mol = tyk2_mols[0]
+    out_path = OUT_DIR / "constr_written.sdf"
+    result = vina_docking.constr_dock(mol, ref_mol, run_em=False, output_sdf=out_path)
+    assert out_path.is_file()
+    written = next(m for m in Chem.SDMolSupplier(str(out_path), removeHs=False) if m is not None)
+    assert written.GetNumConformers() > 0
+    assert result.GetDoubleProp("vina_score") == written.GetDoubleProp("vina_score")

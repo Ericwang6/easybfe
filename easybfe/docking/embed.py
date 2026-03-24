@@ -24,6 +24,25 @@ def _ndarray_to_quantity(ndarray: np.ndarray):
     return unit.Quantity(value, unit=unit.nanometers)
 
 
+def _scale_nonbonded_epsilon(system: mm.System, context: mm.Context, factor: float) -> None:
+    """Scale Lennard-Jones epsilon in every :class:`openmm.NonbondedForce` by *factor*.
+
+    Per-particle and exception epsilons are scaled; charges and sigma are unchanged.
+    Changes are pushed to *context* via :meth:`NonbondedForce.updateParametersInContext`.
+    """
+    for fi in range(system.getNumForces()):
+        force = system.getForce(fi)
+        if not isinstance(force, mm.NonbondedForce):
+            continue
+        for i in range(force.getNumParticles()):
+            q, sig, eps = force.getParticleParameters(i)
+            force.setParticleParameters(i, q, sig, eps * factor)
+        for j in range(force.getNumExceptions()):
+            p1, p2, charge_prod, sig, eps = force.getExceptionParameters(j)
+            force.setExceptionParameters(j, p1, p2, charge_prod, sig, eps * factor)
+        force.updateParametersInContext(context)
+
+
 def constr_embed_with_rdkit(
     mol: Chem.Mol,
     ref_mol: Chem.Mol,
@@ -66,7 +85,11 @@ def constr_embed_with_rdkit(
 
     if mapping is None:
         logger.info("%s -> %s: computing atom mapping via LomapAtomMapper", mol_name, ref_name)
-        mapper = LomapAtomMapper(max3d=1000.0, threed=False)
+        mapper = LomapAtomMapper(
+            max3d=1000.0, threed=False,
+            allow_element_change=False, allow_map_hydrogen_to_non_hydrogen=False,
+            allow_hybridization_change=False
+        )
         lig_a = Ligand(
             name=mol_name,
             smiles=Chem.MolToSmiles(mol),
@@ -85,7 +108,7 @@ def constr_embed_with_rdkit(
         logger.info("%s -> %s: using provided atom mapping (%d pairs)", mol_name, ref_name, len(mapping))
 
     heavy_mapped = {k: v for k, v in mapping.items()
-                    if mol.GetAtomWithIdx(k).GetAtomicNum() != 1}
+                    if mol.GetAtomWithIdx(k).GetAtomicNum() != 1 and ref_mol.GetAtomWithIdx(v).GetAtomicNum() != 1}
     logger.info("%s -> %s: mapping has %d mapped atoms (%d heavy atom, %d hydrogen)",
                 mol_name, ref_name, len(mapping), len(heavy_mapped), len(mapping) - len(heavy_mapped))
 
@@ -200,10 +223,10 @@ def constrained_em_with_protein(
     mapped_ligand_global = []
     global_to_target_nm = {}
     for i, atom in enumerate(ligand_residue.atoms()):
-        if i in coord_map and atom.element.symbol != 'H':
-            mapped_ligand_global.append(atom.index)
+        if i in coord_map:
+            if atom.element.symbol != 'H':
+                mapped_ligand_global.append(atom.index)
             global_to_target_nm[atom.index] = np.asarray(coord_map[i], dtype=float) / 10
-
     if constrain:
         for idx in frozen_indices + mapped_ligand_global:
             system.setParticleMass(idx, 0.0 * unit.amu)
@@ -231,6 +254,10 @@ def constrained_em_with_protein(
     for global_idx, target_nm in global_to_target_nm.items():
         pos[global_idx] = target_nm
     context.setPositions(pos)
+    # Two-stage EM: softer vdW (half epsilon) then full LJ to ease clashes.
+    _scale_nonbonded_epsilon(system, context, 0.5)
+    mm.LocalEnergyMinimizer.minimize(context)
+    _scale_nonbonded_epsilon(system, context, 2.0)
     mm.LocalEnergyMinimizer.minimize(context)
     state = context.getState(getPositions=True, getEnergy=True)
     min_positions = state.getPositions(asNumpy=True)._value

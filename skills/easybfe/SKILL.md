@@ -115,6 +115,12 @@ The program will use `bcc` as the default charge model. Always use `bcc` unless 
 easybfe ligand pargen ligands.sdf -c resp -O ./ligands
 ```
 
+### Constrained docking reference
+
+For constrained pose generation with `easybfe ligand cdock` (reference-guided embedding, Vina optimization, and optional OpenMM minimization), see:
+
+- [reference/constrained_docking.md](reference/constrained_docking.md)
+
 ---
 
 ## ABFE Commands

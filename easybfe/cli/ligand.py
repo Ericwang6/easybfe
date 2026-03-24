@@ -1,5 +1,8 @@
 """Ligand-related CLI commands (e.g. parameterization)."""
 import json
+import os
+import tempfile
+import warnings
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -165,22 +168,12 @@ def pargen(
     )
 
 
-def _first_mol_from_sdf(path: Path):
-    """Return the first molecule in an SDF, or raise UsageError."""
-    from rdkit import Chem
-
-    suppl = Chem.SDMolSupplier(str(path), removeHs=False)
-    for mol in suppl:
-        if mol is not None:
-            return mol
-    raise click.UsageError(f"No molecule found in {path}")
-
-
 @ligand.command("cdock")
 @click.argument(
     "probe",
     type=click.Path(exists=True, path_type=Path),
     required=True,
+    help="Probe ligand file (SDF etc.); all records are docked against the reference.",
 )
 @click.option(
     "--ref",
@@ -201,13 +194,18 @@ def _first_mol_from_sdf(path: Path):
 @click.option(
     "--output",
     "-o",
-    "output",
+    "output_sdf",
     type=click.Path(path_type=Path),
     default=None,
-    help=(
-        "Working directory for docking (e.g. receptor PDBQT). "
-        "If set, the constrained-dock pose is also written under <output>/dock/constr_dock/."
-    ),
+    help="Output SDF path when the probe file contains a single ligand.",
+)
+@click.option(
+    "--output-dir",
+    "-O",
+    "output_dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Directory for pose SDFs as <dir>/<name>.sdf (required for multiple probes).",
 )
 @click.option(
     "--box-center",
@@ -282,7 +280,8 @@ def cdock(
     probe: Path,
     ref_path: Path,
     protein: Path,
-    output: Path | None,
+    output_sdf: Path | None,
+    output_dir: Path | None,
     box_center: tuple[float, float, float] | None,
     box_size: tuple[float, float, float] | None,
     no_em: bool,
@@ -296,14 +295,37 @@ def cdock(
     verbosity: int,
 ) -> None:
     """Constrained local docking: embed probe onto reference, Vina optimise, optional OpenMM EM."""
+    from ..core.ligand import LigandLoader
     from ..docking.vina import VinaDocking
 
     if (box_center is None) != (box_size is None):
         raise click.UsageError("Pass both --box-center and --box-size, or neither.")
 
-    ref_mol = _first_mol_from_sdf(ref_path)
-    probe_mol = _first_mol_from_sdf(probe)
-    probe_mol = deepcopy(probe_mol)
+    loader = LigandLoader()
+    ref_ligands = loader.load(ref_path, only_first=True, name_from_stem=True)
+    if not ref_ligands:
+        raise click.UsageError(f"No molecule found in {ref_path}")
+    ref_mol = ref_ligands[0].get_rdmol()
+
+    probe_ligands = loader.load(probe, only_first=False, name_from_stem=True)
+    if not probe_ligands:
+        raise click.UsageError(f"No molecule found in {probe}")
+
+    n_probe = len(probe_ligands)
+    if output_sdf is None and output_dir is None:
+        raise click.UsageError("Provide --output (-o) or --output-dir (-O).")
+    if n_probe > 1 and output_dir is None:
+        raise click.UsageError("Multiple probe ligands require --output-dir (-O).")
+    if output_sdf is not None and n_probe > 1:
+        raise click.UsageError(
+            "--output (-o) applies to a single probe only; use --output-dir (-O) for multiple."
+        )
+    if output_sdf is not None and output_dir is not None:
+        warnings.warn(
+            "Both --output and --output-dir were set; writing under --output-dir and ignoring --output.",
+            UserWarning,
+            stacklevel=1,
+        )
 
     mapping: dict[int, int] | None = None
     if mapping_json is not None:
@@ -321,34 +343,58 @@ def cdock(
     else:
         vina_kw = {"ref_mol": ref_mol}
 
-    docking = VinaDocking(
-        protein,
-        wdir=output,
-        protein_prep_exec=protein_prep_exec,
-        sf_name=sf_name,
-        cpu=cpu,
-        seed=seed,
-        verbosity=verbosity,
-        **vina_kw,
-    )
+    tmp_ctx: tempfile.TemporaryDirectory[str] | None = None
+    if output_dir is not None:
+        wdir = output_dir.resolve() / ".tmp"
+        wdir.mkdir(parents=True, exist_ok=True)
+    else:
+        tmp_ctx = tempfile.TemporaryDirectory(
+            prefix="easybfe_cdock_",
+            dir="/tmp" if os.path.isdir("/tmp") else None,
+        )
+        wdir = Path(tmp_ctx.name)
 
-    result = docking.constr_dock(
-        probe_mol,
-        ref_mol,
-        mapping=mapping,
-        run_em=not no_em,
-        constrain=not harmonic_restraints,
-        restraint_k=restraint_k,
-    )
+    try:
+        docking = VinaDocking(
+            protein,
+            wdir=wdir,
+            protein_prep_exec=protein_prep_exec,
+            sf_name=sf_name,
+            cpu=cpu,
+            seed=seed,
+            verbosity=verbosity,
+            **vina_kw,
+        )
 
-    score = result.GetDoubleProp("vina_score")
-    rmsd = result.GetDoubleProp("rmsd")
-    click.echo(f"vina_score: {score:.4f} kcal/mol")
-    click.echo(f"rmsd: {rmsd:.4f} Angstrom")
-    if result.HasProp("ff_energy"):
-        click.echo(f"ff_energy: {result.GetDoubleProp('ff_energy'):.4f} kJ/mol")
-    if output is not None:
-        name = result.GetProp("_Name") if result.HasProp("_Name") else "probe"
-        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in name).strip("_")[:200] or "probe"
-        sdf_path = output.resolve() / "dock" / "constr_dock" / f"{safe}.sdf"
-        click.echo(f"pose_sdf: {sdf_path}")
+        multi = n_probe > 1
+        for probe_ligand in probe_ligands:
+            probe_mol = deepcopy(probe_ligand.get_rdmol())
+            if multi:
+                click.echo(f"[probe] {probe_ligand.name}")
+
+            if output_dir is not None:
+                pose_path = output_dir.resolve() / f"{probe_ligand.name}.sdf"
+            else:
+                assert output_sdf is not None
+                pose_path = output_sdf.resolve()
+
+            result = docking.constr_dock(
+                probe_mol,
+                ref_mol,
+                mapping=mapping,
+                run_em=not no_em,
+                constrain=not harmonic_restraints,
+                restraint_k=restraint_k,
+                output_sdf=pose_path,
+            )
+
+            score = result.GetDoubleProp("vina_score")
+            rmsd = result.GetDoubleProp("rmsd")
+            click.echo(f"vina_score: {score:.4f} kcal/mol")
+            click.echo(f"rmsd: {rmsd:.4f} Angstrom")
+            if result.HasProp("ff_energy"):
+                click.echo(f"ff_energy: {result.GetDoubleProp('ff_energy'):.4f} kJ/mol")
+            click.echo(f"pose_sdf: {pose_path}")
+    finally:
+        if tmp_ctx is not None:
+            tmp_ctx.cleanup()

@@ -188,4 +188,6 @@ examples/rbfe/rbfe
 examples/abfe/ligands
 examples/abfe/abfe
 
+agent_test/
+
 *.legacy

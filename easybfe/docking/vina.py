@@ -326,6 +326,7 @@ class VinaDocking(BaseDocking):
         run_em: bool = True,
         constrain: bool = True,
         restraint_k: float = 10.0,
+        output_sdf: Optional[os.PathLike] = None,
     ) -> Chem.Mol:
         """Constrained docking: embed, Vina optimise, and (optionally)
         OpenMM energy-minimise a ligand against *ref_mol*.
@@ -363,6 +364,9 @@ class VinaDocking(BaseDocking):
         restraint_k : float
             Force constant in kcal/(mol * A^2) for harmonic restraints.
             Only used when ``constrain=False``.
+        output_sdf : os.PathLike, optional
+            If set, write the final pose to this SDF path (parent directories
+            are created as needed).  If *None*, no file is written.
 
         Returns
         -------
@@ -375,13 +379,6 @@ class VinaDocking(BaseDocking):
             * ``ff_energy`` -- OpenMM potential energy after EM (kJ/mol),
               only present when *run_em* is *True*.
 
-        Notes
-        -----
-        If this instance was constructed with a non-``None`` *wdir*
-        (not a temporary directory), the final pose is also written to
-        ``{wdir}/dock/constr_dock/<name>.sdf`` where *name* comes from the
-        probe molecule's ``_Name`` property or the literal ``probe``.
-
         Raises
         ------
         RuntimeError
@@ -393,6 +390,7 @@ class VinaDocking(BaseDocking):
 
         # 1. Constrained embedding
         mol.RemoveAllConformers()
+        mol = Chem.AddHs(Chem.RemoveHs(mol))
         mol, mapping = constr_embed_with_rdkit(mol, ref_mol, mapping=mapping)
         logger.info("constr_dock [%s]: constrained embedding done (%d mapped atoms)",
                      mol_name, len(mapping))
@@ -408,14 +406,15 @@ class VinaDocking(BaseDocking):
                     "OpenMM EM requires the original protein input to be a .pdb file, "
                     f"got {self.protein_input.suffix}"
                 )
-            heavy_coord_map: Dict[int, np.ndarray] = {}
+            coord_map: Dict[int, np.ndarray] = {}
             ref_pos = ref_mol.GetConformer().GetPositions()
             for mol_idx, ref_idx in mapping.items():
-                if mol.GetAtomWithIdx(mol_idx).GetAtomicNum() != 1:
-                    heavy_coord_map[mol_idx] = ref_pos[ref_idx]
+                coord_map[mol_idx] = ref_pos[ref_idx]
+                # if mol.GetAtomWithIdx(mol_idx).GetAtomicNum() != 1:
+                    # heavy_coord_map[mol_idx] = ref_pos[ref_idx]
 
             mol, ff_energy = constrained_em_with_protein(
-                mol, self.protein_input, heavy_coord_map,
+                mol, self.protein_input, coord_map,
                 constrain=constrain, restraint_k=restraint_k,
             )
             mol.SetDoubleProp('ff_energy', ff_energy)
@@ -440,15 +439,11 @@ class VinaDocking(BaseDocking):
         mol.SetDoubleProp('rmsd', rmsd)
         logger.info("constr_dock [%s]: mapped heavy-atom RMSD = %.3f A", mol_name, rmsd)
 
-        if not hasattr(self, "_tmp_wdir"):
-            out_dir = self.wdir / "dock" / "constr_dock"
-            out_dir.mkdir(parents=True, exist_ok=True)
-            safe = "".join(
-                c if c.isalnum() or c in "-_" else "_" for c in mol_name
-            ).strip("_")[:200] or "probe"
-            out_sdf = out_dir / f"{safe}.sdf"
-            with Chem.SDWriter(str(out_sdf)) as writer:
+        if output_sdf is not None:
+            out_path = Path(output_sdf).resolve()
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with Chem.SDWriter(str(out_path)) as writer:
                 writer.write(mol)
-            logger.info("constr_dock [%s]: wrote %s", mol_name, out_sdf)
+            logger.info("constr_dock [%s]: wrote %s", mol_name, out_path)
 
         return mol
