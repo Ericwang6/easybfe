@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0", "setuptools_scm[toml]>=7.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "easybfe"
+dynamic = ["version"]
+description = "An open-source software to prepare and analyze binding free energy calculations"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+  { name = "Yingze (Eric) Wang", email = "ericwangyz@berkeley.edu" }
+]
+keywords = [
+  "Drug Discovery",
+  "Molecular Dynamics",
+  "Free Energy Calculation",
+  "FEP",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Natural Language :: English",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+Source = "https://github.com/Ericwang6/easybfe"
+
+[project.scripts]
+easybfe = "easybfe.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["easybfe*"]
+exclude = ["tests*", "examples*", "docs*", "doc*"]
+
+[tool.setuptools_scm]
+write_to = "easybfe/_version.py"

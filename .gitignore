@@ -68,8 +68,9 @@ instance/
 # Scrapy stuff:
 .scrapy
 
-# Sphinx documentation
-docs/_build/
+# Sphinx documentation (underscore-prefixed dirs under doc/: ignore build only;
+# _static/ and _templates/ are kept via .gitkeep, like SmileyLlama docs/.)
+doc/_build/
 
 # PyBuilder
 target/
