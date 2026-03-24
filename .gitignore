@@ -190,4 +190,6 @@ examples/abfe/abfe
 
 agent_test/
 
+# Legacy files
 *.legacy
+legacy/
