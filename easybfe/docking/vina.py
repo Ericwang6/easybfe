@@ -207,8 +207,17 @@ class VinaDocking(BaseDocking):
             One molecule per pose.  Failed conversions are silently dropped.
         """
         pdbqt_mol = PDBQTMolecule(pdbqt_string, skip_typing=True)
-        mols = RDKitMolCreate.from_pdbqt_mol(pdbqt_mol)
-        return [m for m in mols if m is not None]
+        raw = RDKitMolCreate.from_pdbqt_mol(pdbqt_mol)
+        out: List[Chem.Mol] = []
+        for m in raw:
+            if m is None:
+                continue
+            for cid in range(m.GetNumConformers()):
+                single = Chem.Mol(m)
+                single.RemoveAllConformers()
+                single.AddConformer(Chem.Conformer(m.GetConformer(cid)), assignId=True)
+                out.append(single)
+        return out
 
     # ------------------------------------------------------------------
     # Docking / scoring / local optimisation

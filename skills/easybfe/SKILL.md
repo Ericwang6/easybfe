@@ -7,7 +7,7 @@ description: Set up and analyze ABFE (absolute) and RBFE (relative) binding free
 
 ## Background
 
-**ABFE (Absolute Binding Free Energy)**: computes the absolute binding affinity of a single ligand to a protein. The thermodynamic cycle has three legs — *solvent* (ligand decoupled in water), *complex* (ligand decoupled in the protein binding site), and *restraint* (Boresch orientational restraints turned on/off in the complex). The binding free energy is: ΔG_bind = ΔG_complex − ΔG_solvent + ΔG_restraint.
+**ABFE (Absolute Binding Free Energy)**: computes the absolute binding affinity of a single ligand to a protein. The thermodynamic cycle has three legs — *solvent* (ligand decoupled in water), *complex* (ligand decoupled in the protein binding site), and *restraint* (Boresch orientational restraints turned on/off in the complex). The binding free energy is: ΔG_bind = ΔG_complex − ΔG_solvent + ΔG_restraint + ΔG_boresh.
 
 **RBFE (Relative Binding Free Energy)**: computes the *difference* in binding affinity between two ligands (A → B) via an alchemical mutation. The thermodynamic cycle has two legs — *solvent* (A→B in water) and *complex* (A→B in protein). The relative free energy is: ΔΔG = ΔG_complex − ΔG_solvent.
 
