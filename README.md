@@ -20,27 +20,8 @@ Use the `environment.yml` to install the dependencies:
 
 ```bash
 cd easybfe
-conda env create -f environment.yml
+conda env create -f environment.yml -n "easybfe"
 ```
-
-Or you can install the following dependencies with conda and `conda-forge` channel:
-
-+ python >=3.10,<3.13
-+ setuptools_scm
-+ numpy
-+ pandas
-+ matplotlib
-+ scipy
-+ rdkit
-+ ambertools
-+ acpype
-+ openmm >= 8.2.0
-+ openmmtools
-+ openmmforcefields
-+ openff-toolkit
-+ [alchemlyb](https://github.com/alchemistry/alchemlyb)
-+ [lomap2](https://github.com/OpenFreeEnergy/Lomap)
-+ [kartograf](https://github.com/OpenFreeEnergy/kartograf)
 
 ### Step 2
 
@@ -48,14 +29,37 @@ Run the following command to install EasyBFE:
 ```bash
 conda activate easybfe
 cd easybfe
-pip install .
+pip install -e .
 ```
 
-## Usage
+## Example usage
 
-+ [Command Line Interface (CLI)](docs/cli.md)
-+ Python API
-+ Web GUI
+```bash
+# Prepare protein, if necessary
+easybfe protein prep tyk2_protein.pdb -o tyk2_protein_fixed.pdb
+# Run constrained docking to get poses, if necessary
+easybfe ligand cdock ligands.smi -p tyk2_protein_fixed.pdb -r reference.sdf -O ./ligands
+# Paramterize the ligand
+easybfe ligand pargen ./ligands/*.sdf -f gaff2 -c bcc -O ./ligands
+# Prepare config.yaml
+...
+# Setup simulation
+easybfe rbfe setup config.yaml -O ./rbfe
+# Run FEP simulation with HPC enviornment
+# Example:
+for dir in rbfe/*~*/{complex,solvent}
+do 
+  cd $dir
+  sbatch run.sh -A ... -p ... --gres=gpu:A100:4 ...
+  cd -
+done
+# Analyze
+for dir in rbfe/*
+do
+  easybfe rbfe analyze $dir
+done
+easybfe rbfe analyze rbfe/ --dg
+```
 
 ## Developing Notes
 
