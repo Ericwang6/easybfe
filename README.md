@@ -29,6 +29,7 @@ Run the following command to install EasyBFE:
 ```bash
 conda activate easybfe
 cd easybfe
+git checkout new
 pip install -e .
 ```
 
