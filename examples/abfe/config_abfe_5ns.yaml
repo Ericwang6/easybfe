@@ -1,4 +1,7 @@
 # Configuration file for setting up an ABFE simulation (AmberAbfeConfig).
+# ligand_base: parent directory whose subdirectories are individual ligand runs (one folder per compound).
+# ligand_batch: names of those subdirectories to include in this ABFE workflow (each entry is a ligand id).
+# For each name in ligand_batch, inputs are taken from <ligand_base>/<ligand_name>/.
 ligand_base: ./ligands
 ligand_batch:
   - jmc_23
