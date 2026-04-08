@@ -30,7 +30,6 @@ Install EasyBFE in editable mode:
 ```bash
 conda activate easybfe
 cd easybfe
-git checkout new
 pip install -e .
 ```
 
