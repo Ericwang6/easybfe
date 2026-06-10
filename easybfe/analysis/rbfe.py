@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .mbar import run_mbar, plot_convergence
+from .mbar import run_mbar, save_convergence_plots, annotate_convergence_to_conv_df
 from .mle import maximum_likelihood_estimator
 
 logger = logging.getLogger(__name__)
@@ -49,18 +49,26 @@ def analyze_rbfe(directory: os.PathLike, prod_prefix: str = '05.prod', temperatu
             fw_err = fw + '_Error'
             conv_df[fw_err] = np.sqrt(results[leg1].convergence[fw_err].values ** 2 + results[leg2].convergence[fw_err].values ** 2)
 
-        conv_df.to_csv(wdir / f"{name}_convergence.csv", index=None)
-        conv_ax = plot_convergence(conv_df)
-        conv_ax.set_ylabel(r"$\Delta\Delta G$ (kcal/mol)")
-        suffix = f' ({name.capitalize()}) ' if name != 'total' else ''
-        conv_ax.set_title(
-            f"RBFE Convergence: {wdir.name}{suffix}",
-            fontsize=14,
-            fontweight="semibold",
-            pad=12,
+        conv_df["Block_Average"] = (
+            results[leg1].convergence["Block_Average"]
+            - results[leg2].convergence["Block_Average"]
         )
-        conv_ax.figure.tight_layout(rect=(0, 0, 1, 0.97))
-        conv_ax.figure.savefig(str(wdir / f"{name}_convergence.png"), dpi=300)
+        conv_df["Block_Average_Error"] = np.sqrt(
+            results[leg1].convergence["Block_Average_Error"].values ** 2
+            + results[leg2].convergence["Block_Average_Error"].values ** 2
+        )
+
+        conv_df.to_csv(wdir / f"{name}_convergence.csv", index=None)
+        suffix = f' ({name.capitalize()}) ' if name != 'total' else ''
+        annotate_convergence_to_conv_df(conv_df)
+        save_convergence_plots(
+            conv_df,
+            wdir / f"{name}_convergence.png",
+            wdir / f"{name}_block_average.png",
+            title=f"RBFE Convergence: {wdir.name}{suffix}",
+            ylabel=r"$\Delta\Delta G$ (kcal/mol)",
+            block_average_title=f"RBFE Block Average: {wdir.name}{suffix}",
+        )
 
     with (wdir / "result.json").open("w") as f:
         json.dump(json_data, f, indent=4)

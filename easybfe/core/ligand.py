@@ -99,7 +99,8 @@ class Ligand(BaseModel):
         else:
             mol_from_block = Chem.MolFromMolBlock(self.mol_block)
             smi_from_block = Chem.MolToSmiles(Chem.RemoveHs(mol_from_block))
-            assert smi_from_block == self.smiles, 'SMILES and mol block does not refer to the same molecule'
+            if smi_from_block != self.smiles:
+                warnings.warn(f'SMILES and mol block does not refer to the same molecule, {smi_from_block} != {self.smiles}')
             mol_block_lines = [line.strip('\n') for line in self.mol_block.split('\n')]
             if mol_block_lines[0] != self.name:
                 logger.debug(f"Set mol_block name to {self.name}")

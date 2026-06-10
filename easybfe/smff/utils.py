@@ -14,6 +14,52 @@ from rdkit import Chem
 logger = logging.getLogger(__name__)
 
 
+def remove_spurious_sulfur_hydrogens(mol: "Chem.Mol") -> "Chem.Mol":
+    """Drop S–H on sulfonyl/sulfone centers (≥2 O neighbors) before acpype/GAFF."""
+    rw = Chem.RWMol(mol)
+    remove_idxs: list[int] = []
+    for atom in rw.GetAtoms():
+        if atom.GetAtomicNum() != 16:
+            continue
+        neighbors = list(atom.GetNeighbors())
+        n_o = sum(1 for n in neighbors if n.GetAtomicNum() == 8)
+        h_neighbors = [n for n in neighbors if n.GetAtomicNum() == 1]
+        if n_o >= 2 and h_neighbors:
+            remove_idxs.extend(h.GetIdx() for h in h_neighbors)
+    if not remove_idxs:
+        return mol
+    for idx in sorted(set(remove_idxs), reverse=True):
+        rw.RemoveAtom(idx)
+    out = rw.GetMol()
+    Chem.SanitizeMol(out)
+    logger.info(
+        "Removed %d spurious H on sulfur (sulfonyl/sulfone, >=2 O neighbors)",
+        len(set(remove_idxs)),
+    )
+    return out
+
+
+def strip_spurious_sulfur_h_from_amber(struct: parmed.Structure) -> parmed.Structure:
+    """Remove S–H added by antechamber/acpype on sulfonyl/sulfone centers."""
+    stripped = 0
+    for atom in struct.atoms:
+        if atom.atomic_number != 16:
+            continue
+        partners = list(atom.bond_partners)
+        n_o = sum(1 for p in partners if p.atomic_number == 8)
+        h_atoms = [p for p in partners if p.atomic_number == 1]
+        if n_o >= 2 and h_atoms:
+            for h in h_atoms:
+                struct.strip(f"@{h.name}")
+                stripped += 1
+    if stripped:
+        logger.info(
+            "Removed %d spurious S–H atom(s) from Amber topology after acpype",
+            stripped,
+        )
+    return struct
+
+
 def read_molecule_from_file(input: os.PathLike):
     """
     Load a molecule from file using RDKit.

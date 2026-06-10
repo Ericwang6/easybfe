@@ -2,8 +2,7 @@ import os
 import json
 from pathlib import Path
 import numpy as np
-from .mbar import run_mbar
-from alchemlyb.visualisation.convergence import plot_convergence
+from .mbar import run_mbar, save_convergence_plots, annotate_convergence_to_conv_df
 
 
 def analyze_abfe(directory: os.PathLike, prod_prefix: str = '05.prod', temperature: float = 298.15, force_run: bool = False):
@@ -34,18 +33,29 @@ def analyze_abfe(directory: os.PathLike, prod_prefix: str = '05.prod', temperatu
             results['solvent'].convergence[fw_err].values ** 2 + \
             results['restraint'].convergence[fw_err].values ** 2
         )
-    
-    conv_df.to_csv(wdir / "convergence.csv", index=None)
-    conv_ax = plot_convergence(conv_df)
-    conv_ax.set_ylabel("$\Delta G$ (kcal/mol)")
-    conv_ax.set_title(
-        f"ABFE Convergence: {wdir.name.capitalize()}",
-        fontsize=14,
-        fontweight="semibold",
-        pad=12,
+
+    conv_df["Block_Average"] = (
+        -results['complex'].convergence["Block_Average"]
+        + results['solvent'].convergence["Block_Average"]
+        + results['restraint'].convergence["Block_Average"]
+        + boresch
     )
-    conv_ax.figure.tight_layout(rect=(0, 0, 1, 0.97))
-    conv_ax.figure.savefig(str(wdir /"convergence.png"), dpi=300)
+    conv_df["Block_Average_Error"] = np.sqrt(
+        results['complex'].convergence["Block_Average_Error"].values ** 2
+        + results['solvent'].convergence["Block_Average_Error"].values ** 2
+        + results['restraint'].convergence["Block_Average_Error"].values ** 2
+    )
+
+    conv_df.to_csv(wdir / "convergence.csv", index=None)
+    annotate_convergence_to_conv_df(conv_df)
+    save_convergence_plots(
+        conv_df,
+        wdir / "convergence.png",
+        wdir / "block_average.png",
+        title=f"ABFE Convergence: {wdir.name.capitalize()}",
+        ylabel=r"$\Delta G$ (kcal/mol)",
+        block_average_title=f"ABFE Block Average: {wdir.name.capitalize()}",
+    )
 
     res = {
         "complex": results["complex"].dg,
