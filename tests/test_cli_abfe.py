@@ -136,3 +136,13 @@ def test_abfe_analyze_cli_with_options():
         ["abfe", "analyze", str(test_dir), "--prod-prefix", "05.prod", "--temperature", "298.15"],
     )
     assert result.exit_code == 0
+
+
+def test_abfe_analyze_cli_defaults_to_current_directory():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        current = Path.cwd()
+        (current / "result.json").write_text(json.dumps({"total": -1.0}))
+        result = runner.invoke(main, ["abfe", "analyze"])
+
+    assert result.exit_code == 0, (result.output or str(result.exception))

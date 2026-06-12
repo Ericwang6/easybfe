@@ -14,6 +14,7 @@ from rdkit.Chem import AllChem, Draw
 import MDAnalysis as mda
 from MDAnalysis.analysis.dihedrals import Dihedral
 from MDAnalysis.analysis import align
+from MDAnalysis.lib.distances import capped_distance
 from MDAnalysis.transformations import wrap, unwrap, center_in_box
 try:
     from MDAnalysis.guesser.tables import SYMB2Z
@@ -96,6 +97,94 @@ def compute_rmsd_naive(u: mda.Universe, ligand_str: str, save_path: os.PathLike 
     return data
 
 
+def _nearest_water_residues(
+    water_atoms: mda.AtomGroup,
+    target_atoms: mda.AtomGroup,
+    count: int,
+    box: Optional[np.ndarray],
+    initial_cutoff: float = 5.0,
+) -> mda.AtomGroup:
+    """Select complete water residues with the smallest atom-atom distance to a target."""
+    if count <= 0:
+        return water_atoms[:0]
+    if target_atoms.n_atoms == 0:
+        raise ValueError("include_water_selection selected no atoms")
+
+    cutoff = initial_cutoff
+    residue_distances: dict[int, float] = {}
+    while len(residue_distances) < count:
+        pairs, distances = capped_distance(
+            target_atoms.positions,
+            water_atoms.positions,
+            max_cutoff=cutoff,
+            box=box,
+            return_distances=True,
+        )
+        residue_distances.clear()
+        if pairs.size:
+            water_resindices = water_atoms.resindices[pairs[:, 1]]
+            for resindex, distance in zip(water_resindices, distances):
+                residue_distances[resindex] = min(
+                    residue_distances.get(int(resindex), np.inf),
+                    float(distance),
+                )
+
+        if len(residue_distances) >= count:
+            break
+        cutoff *= 1.5
+        if cutoff > 1000:
+            raise RuntimeError(f"Could not find {count} water residues near the requested selection")
+
+    selected_resindices = [
+        resindex
+        for resindex, _ in sorted(residue_distances.items(), key=lambda item: item[1])[:count]
+    ]
+    selected = water_atoms.universe.atoms[:0]
+    for resindex in selected_resindices:
+        selected += water_atoms.universe.residues[resindex].atoms
+    return selected
+
+
+def _count_nearby_water_residues(
+    water_atoms: mda.AtomGroup,
+    target_atoms: mda.AtomGroup,
+    box: Optional[np.ndarray],
+    cutoff: float = 5.0,
+) -> int:
+    if target_atoms.n_atoms == 0:
+        raise ValueError("include_water_selection selected no atoms")
+    pairs = capped_distance(
+        target_atoms.positions,
+        water_atoms.positions,
+        max_cutoff=cutoff,
+        box=box,
+        return_distances=False,
+    )
+    if not pairs.size:
+        return 0
+    return len(np.unique(water_atoms.resindices[pairs[:, 1]]))
+
+
+def _remove_water_conect_records(pdb_path: os.PathLike, water_atom_serials: set[int]) -> None:
+    """Remove CONECT records that involve any retained water atom."""
+    if not water_atom_serials:
+        return
+
+    path = Path(pdb_path)
+    filtered_lines = []
+    for line in path.read_text().splitlines(keepends=True):
+        if line.startswith("CONECT"):
+            serials = {
+                int(line[index:index + 5])
+                for index in range(6, len(line), 5)
+                if line[index:index + 5].strip()
+            }
+            if serials & water_atom_serials:
+                continue
+        filtered_lines.append(line)
+    path.write_text("".join(filtered_lines))
+
+
 def post_process_trajectory(
     in_top: os.PathLike,
     in_trj: os.PathLike,
@@ -110,7 +199,9 @@ def post_process_trajectory(
     center_selection: str = 'protein',
     output_selection: str = 'protein or resname MOL',
     align_selection: str = 'backbone',
-    remove_tmp: str = True
+    remove_tmp: str = True,
+    include_water_selection: Optional[str] = None,
+    water_distance: float = 5.0,
 ):
     """
     Post process MD trajectory
@@ -143,6 +234,13 @@ def post_process_trajectory(
         Selection string for centering. Default is 'protein'
     output_selection : str, optional
         Selection string for output. Default is 'protein or resname MOL'
+    include_water_selection : str, optional
+        If provided, count water residues within ``water_distance`` of this selection in
+        the first frame. In every frame, retain that many complete water residues
+        nearest to the selection in addition to ``output_selection``.
+    water_distance : float, optional
+        Distance cutoff in Angstrom used to determine the number of retained waters
+        from the first frame. Default is 5.0.
     align_selection : str, optional
         Selection string for alignment. Default is 'backbone'
     remove_tmp : bool, optional
@@ -154,7 +252,7 @@ def post_process_trajectory(
         True if successful
     """
 
-    u = mda.Universe(in_top, in_trj, topology_format=in_top_format, format=in_trj_format, to_guess=('types', 'masses', 'bonds'))
+    u = mda.Universe(in_top, in_trj, topology_format=in_top_format, format=in_trj_format)
     if process_pbc:
         transformations = [
             center_in_box(u.select_atoms(center_selection)),
@@ -171,15 +269,80 @@ def post_process_trajectory(
     tmp_trj = str(wdir / f'{stem}_tmp{Path(out_trj).suffix}')
     
     selection = u.select_atoms(output_selection)
-    with mda.Writer(tmp_trj, n_atoms=selection.n_atoms) as W:
+    target_atoms = None
+    water_atoms = None
+    water_count = 0
+    if include_water_selection is not None:
+        target_atoms = u.select_atoms(include_water_selection)
+        base_resindices = set(selection.resindices)
+        water_atoms = u.select_atoms("water")
+        if base_resindices:
+            water_atoms = water_atoms[
+                ~np.isin(water_atoms.resindices, np.fromiter(base_resindices, dtype=int))
+            ]
+        u.trajectory[0]
+        water_count = _count_nearby_water_residues(
+            water_atoms,
+            target_atoms,
+            u.trajectory.ts.dimensions,
+            cutoff=water_distance,
+        )
+        desc += f' + {water_count} nearest waters'
+
+    first_output_indices = None
+    output_n_atoms = selection.n_atoms
+    if include_water_selection is not None and water_count:
+        first_waters = _nearest_water_residues(
+            water_atoms,
+            target_atoms,
+            water_count,
+            u.trajectory.ts.dimensions,
+            initial_cutoff=water_distance,
+        )
+        output_n_atoms += first_waters.n_atoms
+
+    with mda.Writer(tmp_trj, n_atoms=output_n_atoms) as W:
         for i, ts in tqdm(enumerate(u.trajectory), total=len(u.trajectory), desc=desc):
-            W.write(selection)
+            output_atoms = selection
+            if include_water_selection is not None and water_count:
+                selected_waters = _nearest_water_residues(
+                    water_atoms,
+                    target_atoms,
+                    water_count,
+                    ts.dimensions,
+                    initial_cutoff=water_distance,
+                )
+                output_atoms = selection + selected_waters
+            if output_atoms.n_atoms != output_n_atoms:
+                raise RuntimeError(
+                    f"Selected {output_atoms.n_atoms} atoms, expected {output_n_atoms}; "
+                    "water residues may have inconsistent atom counts"
+                )
+            W.write(output_atoms)
             if i == 0:
-                selection.write(out_pdb)
+                output_atoms.write(out_pdb)
+                water_indices = set(output_atoms.select_atoms("water").indices)
+                water_serials = {
+                    index + 1
+                    for index, atom in enumerate(output_atoms)
+                    if atom.index in water_indices
+                }
+                _remove_water_conect_records(out_pdb, water_serials)
+                first_output_indices = output_atoms.indices.copy()
     
     if do_alignment:
         if ref:
-            atoms = mda.Universe(in_top, ref, topology_format=in_top_format, format=ref_format, to_guess=('types', 'masses', 'bonds')).select_atoms(output_selection)
+            ref_universe = mda.Universe(
+                in_top,
+                ref,
+                topology_format=in_top_format,
+                format=ref_format,
+            )
+            atoms = (
+                ref_universe.atoms[first_output_indices]
+                if include_water_selection is not None
+                else ref_universe.select_atoms(output_selection)
+            )
             ref_pdb = str(wdir / f'{stem}_ref.pdb')
             atoms.write(ref_pdb)
             u_ref = mda.Universe(out_pdb, ref_pdb)
@@ -262,7 +425,7 @@ def compute_rmsd(
         coords_ref = atoms.positions.copy()[heavy_mask]
     else:
         u_ref = mda.Universe(top, ref, topology_format=top_format, format=ref_format, to_guess=('types', 'masses', 'bonds')) 
-        atoms_ref = u.select_atoms(selection)
+        atoms_ref = u_ref.select_atoms(selection)
         u_ref.trajectory[0]
         coords_ref = atoms_ref.positions.copy()[heavy_mask]
 
@@ -278,10 +441,18 @@ def compute_rmsd(
     # calculate rmsd
     if use_symmetry_correction:
         atom_indices_map = {atoms.indices[i]: i for i in range(atoms.n_atoms)}
-        bonds = np.array([[atom_indices_map[b[0]], atom_indices_map[b[1]]] for b in atoms.bonds.indices]).T
+        bonds = np.array(
+            [
+                [atom_indices_map[b[0]], atom_indices_map[b[1]]]
+                for b in atoms.bonds.indices
+                if b[0] in atom_indices_map and b[1] in atom_indices_map
+            ],
+            dtype=np.int32,
+        ).reshape(-1, 2).T
         adj = np.zeros((atoms.n_atoms, atoms.n_atoms), dtype=np.int32)
-        adj[bonds[0], bonds[1]] = 1
-        adj[bonds[1], bonds[0]] = 1
+        if bonds.size:
+            adj[bonds[0], bonds[1]] = 1
+            adj[bonds[1], bonds[0]] = 1
         atomic_nums = atomic_nums[heavy_mask]
         adj = adj[heavy_mask][:, heavy_mask]
         rmsd_list = spyrmsd.rmsd.symmrmsd(coords_ref, coords, atomic_nums, atomic_nums, adj, adj)

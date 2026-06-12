@@ -163,8 +163,9 @@ def setup(
 @click.argument(
     "directory",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
-    required=True,
-    help="RBFE output directory (contains complex/, solvent/, and optional gas/).",
+    required=False,
+    default=Path("."),
+    help="RBFE output directory. Default: current directory.",
 )
 @click.option(
     "--prod-prefix",

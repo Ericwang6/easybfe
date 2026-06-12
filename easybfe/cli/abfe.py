@@ -114,8 +114,9 @@ def setup(config: Path, ligand: Path | None, protein: Path | None, output: Path 
 @click.argument(
     "directory",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
-    required=True,
-    help="ABFE output directory (contains complex/, solvent/, restraint/, boresch.dat).",
+    required=False,
+    default=Path("."),
+    help="ABFE output directory. Default: current directory.",
 )
 @click.option(
     "--prod-prefix",
@@ -150,4 +151,3 @@ def analyze(
     from ..analysis.abfe import analyze_abfe
 
     analyze_abfe(directory, prod_prefix=prod_prefix, temperature=temperature, force_run=force_run)
-

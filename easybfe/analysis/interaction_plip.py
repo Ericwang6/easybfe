@@ -178,11 +178,11 @@ def analyze_interactions_for_trajectory(
         u.atoms.write(f_pdb)
         pdbs.append(f_pdb)
     
-    df = analyze_multiple_frames(pdbs, out_csv, use_mpi, **kwargs)
-
-    if remove_tmp:
-        for p in pdbs:
-            os.remove(p)
+    try:
+        df = analyze_multiple_frames(pdbs, out_csv, use_mpi, **kwargs)
+    finally:
+        if remove_tmp:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     return df
     
@@ -194,7 +194,8 @@ INTERACT_COLOR_MAP = {
     "pi_stack": "C2",
     "salt_bridge": "C3",
     "pi_cation_interaction": "C4",
-    "halogen_bond": "C5"
+    "halogen_bond": "C5",
+    "water_bridge": "C6",
 }
 
 
@@ -239,7 +240,13 @@ def plot_interactions(
         if skip_hydrophobic and interact == 'hydrophobic_interaction':
             continue
         label = interact[:-12] if interact.endswith('interaction') else interact
-        ax.bar(ind, newdf[interact], label=label, bottom=bottom, color=INTERACT_COLOR_MAP[interact])
+        ax.bar(
+            ind,
+            newdf[interact],
+            label=label,
+            bottom=bottom,
+            color=INTERACT_COLOR_MAP.get(interact, "C7"),
+        )
         bottom += newdf[interact]
         for x, y, value in zip(ind, bottom, newdf[interact]):
             if value > 0:
@@ -255,4 +262,3 @@ def plot_interactions(
     if save_path:
         ax.figure.savefig(save_path, **kwargs)
     return ax
-
