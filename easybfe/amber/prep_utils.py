@@ -3,10 +3,14 @@ from __future__ import annotations
 __all__ = [
     'FF_XMLS', 'create_alchemical_ions', 'sanitize_water', 'compute_net_charge_from_openmm_system',
     'hydrogen_mass_repartition', 'computeBoxVectorsWithPadding', 'shiftToBoxCenter', 'shiftPositions',
-    'fix_excess_charge', 'set_alchemical_water_restraints', 'generate_amber_mask'
+    'fix_excess_charge', 'set_alchemical_water_restraints', 'generate_amber_mask',
+    'assign_block_chains_and_resids', 'write_pdb_with_conect'
 ]
 
+import os
 import math
+import string
+from collections import defaultdict
 from typing import Union, Dict, List, Tuple, Optional, Any, Literal
 import logging
 import numpy as np
@@ -252,6 +256,188 @@ def sanitize_water(struct: parmed.Structure, specical_water_resname: str = 'ALW'
             to_del.append(i)
     for item in reversed(to_del):
         struct.angles.pop(item)
+
+
+def _first_unused_chain(used: set, preferred: Tuple[str, ...] = ()) -> str:
+    """Return the first chain identifier that is not already in ``used``.
+
+    Parameters
+    ----------
+    used : set
+        Chain identifiers that are already taken.
+    preferred : tuple of str, optional
+        Identifiers to try first, in order. The first one not present in
+        ``used`` is returned. Default is an empty tuple.
+
+    Returns
+    -------
+    str
+        An available single-character chain identifier.
+
+    Raises
+    ------
+    RuntimeError
+        If no single-character identifier is available.
+    """
+    for c in preferred:
+        if c not in used:
+            return c
+    for c in string.ascii_uppercase + string.ascii_lowercase + string.digits:
+        if c not in used:
+            return c
+    raise RuntimeError("No available single-character chain identifier")
+
+
+def assign_block_chains_and_resids(
+    struct: parmed.Structure,
+    n_ligand_res: int,
+    n_protein_res: int,
+    protein_chain_ids: Optional[set] = None,
+    water_preferred: Tuple[str, ...] = ('X', 'Y'),
+) -> Dict[str, str]:
+    r"""Assign chain identifiers and residue numbers to each structural block.
+
+    The :class:`parmed.Structure` produced by :func:`parmed.openmm.load_topology`
+    keeps residues in the order they were added to the OpenMM ``Modeller``:
+    ligand first, then protein, then the solvent (water and ions) added by
+    OpenMM. This routine relabels the blocks so the output topology carries a
+    clean, consistent definition:
+
+    1. Protein residues keep the chain identifiers and residue numbers inherited
+       from the input PDB (they are left untouched).
+    2. The ligand block gets a single chain identifier that is not used by the
+       protein, and its residues are numbered starting from 1.
+    3. The OpenMM-added solvent block gets the first available chain identifier
+       from ``water_preferred`` (typically ``X``, otherwise ``Y``), and its
+       residues are numbered starting from 1.
+
+    Atom ``number`` attributes are also set to a contiguous ``1..N`` sequence so
+    that the structure can be written with ``renumber=False`` while keeping atom
+    serial numbers aligned with :func:`write_pdb_with_conect`.
+
+    Parameters
+    ----------
+    struct : :class:`parmed.Structure`
+        The structure to relabel in place.
+    n_ligand_res : int
+        Number of residues that belong to the ligand block (the first residues).
+    n_protein_res : int
+        Number of residues that belong to the protein block (immediately after
+        the ligand block).
+    protein_chain_ids : set, optional
+        Chain identifiers already used by the protein. The ligand and solvent
+        chains are chosen to avoid these. When None, it is inferred from the
+        protein block. Default is None.
+    water_preferred : tuple of str, optional
+        Preferred chain identifiers for the OpenMM-added solvent, in order.
+        Default is ``('X', 'Y')``.
+
+    Returns
+    -------
+    dict
+        Mapping with keys ``'ligand_chain'`` and ``'water_chain'`` reporting the
+        chain identifiers that were assigned.
+    """
+    residues = struct.residues
+    solvent_start = n_ligand_res + n_protein_res
+
+    if protein_chain_ids is None:
+        protein_chain_ids = {
+            residues[i].chain for i in range(n_ligand_res, solvent_start)
+        }
+    used = set(protein_chain_ids)
+
+    ligand_chain = _first_unused_chain(used) if n_ligand_res > 0 else ''
+    if ligand_chain:
+        used.add(ligand_chain)
+    water_chain = _first_unused_chain(used, preferred=water_preferred)
+
+    # Ligand block: unique chain, residue numbers from 1.
+    for i in range(n_ligand_res):
+        residues[i].chain = ligand_chain
+        residues[i].number = i + 1
+
+    # Protein block is intentionally left untouched (inherited chain/number).
+
+    # Solvent block: dedicated chain, residue numbers from 1.
+    for j, res in enumerate(residues[solvent_start:]):
+        res.chain = water_chain
+        res.number = j + 1
+
+    # Contiguous atom serials so renumber=False keeps them aligned with CONECT.
+    for idx, atom in enumerate(struct.atoms):
+        atom.number = idx + 1
+
+    return {'ligand_chain': ligand_chain, 'water_chain': water_chain}
+
+
+def write_pdb_with_conect(
+    struct: parmed.Structure,
+    path: os.PathLike,
+    water_resnames: Tuple[str, ...] = ('WAT', 'HOH'),
+):
+    r"""Write a PDB file that preserves numbering and carries CONECT records.
+
+    ParmEd's PDB writer does not emit ``CONECT`` records, and its default
+    ``renumber=True`` discards the original chain/residue numbering. This helper
+    writes the structure with ``renumber=False`` (so the chain identifiers and
+    residue/atom numbers set on ``struct`` are honored) and then appends a
+    ``CONECT`` record for every bond in the structure.
+
+    Water connectivity is special-cased: AMBER stores three bonds per water
+    (two O-H plus an H-H bond used to flag SETTLE, see :func:`sanitize_water`),
+    but only the two physical O-H bonds are written to the PDB.
+
+    Parameters
+    ----------
+    struct : :class:`parmed.Structure`
+        The structure to write. Atom ``number`` attributes must be a contiguous
+        ``1..N`` sequence (see :func:`assign_block_chains_and_resids`) so the
+        emitted serial numbers match the ``CONECT`` references.
+    path : os.PathLike
+        Destination PDB path.
+    water_resnames : tuple of str, optional
+        Residue names treated as water for the H-H bond exclusion. Default is
+        ``('WAT', 'HOH')``.
+    """
+    path = str(path)
+    struct.save(path, overwrite=True, renumber=False)
+
+    water_set = set(water_resnames)
+    adjacency: Dict[int, List[int]] = defaultdict(list)
+    for bond in struct.bonds:
+        a1, a2 = bond.atom1, bond.atom2
+        is_water_pair = (a1.residue.name in water_set) and (a2.residue.name in water_set)
+        if is_water_pair and a1.atomic_number == 1 and a2.atomic_number == 1:
+            # Skip the AMBER-only H-H bond; keep only the O-H water bonds.
+            continue
+        s1, s2 = a1.idx + 1, a2.idx + 1
+        adjacency[s1].append(s2)
+        adjacency[s2].append(s1)
+
+    conect_lines: List[str] = []
+    for serial in sorted(adjacency):
+        partners = sorted(adjacency[serial])
+        for k in range(0, len(partners), 4):
+            chunk = partners[k:k + 4]
+            conect_lines.append('CONECT' + f'{serial:>5d}' + ''.join(f'{p:>5d}' for p in chunk))
+
+    with open(path) as f:
+        lines = f.read().splitlines()
+
+    out: List[str] = []
+    inserted = False
+    for line in lines:
+        if (not inserted) and line.strip() == 'END':
+            out.extend(conect_lines)
+            inserted = True
+        out.append(line)
+    if not inserted:
+        out.extend(conect_lines)
+        out.append('END')
+
+    with open(path, 'w') as f:
+        f.write('\n'.join(out) + '\n')
 
 
 def compute_net_charge_from_openmm_system(system: mm.System):

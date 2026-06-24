@@ -42,10 +42,17 @@ def setup_plain_md(
     # setup systems
     modeller = app.Modeller(app.Topology(), [])
 
+    # Track residue-block sizes so the output topology can be relabeled per block
+    # (ligand first, then protein, then OpenMM-added solvent).
+    n_ligand_res = 0
+    n_protein_res = 0
+    protein_chain_ids: set = set()
+
     ligand = ligand if isinstance(ligand, Ligand) or (ligand is None) else Ligand.from_directory(ligand)
     if ligand:
         ligand_pdb = ligand.to_openmm()
         modeller.add(ligand_pdb.topology, ligand_pdb.positions)
+        n_ligand_res = ligand_pdb.topology.getNumResidues()
         ligand_dir = wdir / 'ligand'
         ligand.dump(ligand_dir)
         ffs.append(str(ligand_dir / f'{ligand.name}.xml'))
@@ -54,12 +61,14 @@ def setup_plain_md(
     if protein:
         protein_pdb = protein.to_openmm()
         modeller.add(protein_pdb.topology, protein_pdb.positions)
+        n_protein_res = protein_pdb.topology.getNumResidues()
+        protein_chain_ids = {c.id for c in protein_pdb.topology.chains()}
         Path(wdir / f'protein.pdb').write_text(protein.pdb_string)
     
     ff = app.ForceField(*ffs)
     
     buffer = config.buffer / 10 * unit.nanometers
-    box_vectors = computeBoxVectorsWithPadding(modeller.positions, buffer)
+    box_vectors = computeBoxVectorsWithPadding(modeller.positions, buffer, config.box_shape)
     modeller.positions = shiftToBoxCenter(modeller.positions, box_vectors)
     modeller.topology.setPeriodicBoxVectors(box_vectors)
     if not config.gas_phase:
@@ -79,11 +88,27 @@ def setup_plain_md(
     # HMR
     if config.do_hmr:
         hydrogen_mass_repartition(parmed_struct, config.hydrogen_mass, config.do_hmr_water)
-    
+
+    # Relabel chains/residue numbers per block so the protein keeps its input PDB
+    # numbering, the ligand gets a dedicated chain (residue 1), and the
+    # OpenMM-added solvent gets chain X/Y numbered from 1.
+    chain_info = assign_block_chains_and_resids(
+        parmed_struct,
+        n_ligand_res=n_ligand_res,
+        n_protein_res=n_protein_res,
+        protein_chain_ids=protein_chain_ids,
+    )
+    logger.info(
+        "Assigned ligand chain '%s' and solvent chain '%s'",
+        chain_info['ligand_chain'], chain_info['water_chain'],
+    )
+
     # output
     parmed_struct.save(str(wdir / f'{basename}.inpcrd'), overwrite=True)
     parmed_struct.save(str(wdir / f'{basename}.prmtop'), overwrite=True)
-    parmed_struct.save(str(wdir / f'{basename}.pdb'), overwrite=True)
+    # The PDB keeps the original numbering and carries CONECT records for all
+    # bonds (water keeps only its two O-H bonds, not the AMBER SETTLE H-H bond).
+    write_pdb_with_conect(parmed_struct, wdir / f'{basename}.pdb')
 
     # setup workflow
     steps = []
