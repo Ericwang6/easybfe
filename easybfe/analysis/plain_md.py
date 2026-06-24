@@ -23,7 +23,11 @@ from ..gbsa import GBSARunner
 logger = logging.getLogger(__name__)
 
 
-def _load_positions(topology: Path, trajectory: Path) -> np.ndarray:
+def _load_positions(
+    topology: Path,
+    trajectory: Path,
+    selection: Optional[str] = None,
+) -> np.ndarray:
     """
     Load all frames from a trajectory into a NumPy array.
 
@@ -33,6 +37,9 @@ def _load_positions(topology: Path, trajectory: Path) -> np.ndarray:
         Path to topology file (e.g., processed PDB).
     trajectory : Path
         Path to trajectory file (e.g., processed XTC).
+    selection : str, optional
+        Atom selection to load. When None, all atoms are loaded. Used, for example, to
+        drop solvent (``'not water'``) before GBSA. Default is None.
 
     Returns
     -------
@@ -40,12 +47,34 @@ def _load_positions(topology: Path, trajectory: Path) -> np.ndarray:
         Array of positions with shape (n_frames, n_atoms, 3) in Angstrom.
     """
     universe = mda.Universe(str(topology), str(trajectory))
+    atoms = universe.select_atoms(selection) if selection else universe.atoms
     frames: list[np.ndarray] = []
     for ts in universe.trajectory:
-        frames.append(ts.positions.copy())
+        frames.append(atoms.positions.copy())
     if not frames:
         raise ValueError(f"No frames found in trajectory: {trajectory}")
     return np.asarray(frames, dtype=np.float64)
+
+
+def _cleanup_offset_files(directory: Path) -> None:
+    """
+    Remove MDAnalysis offset files generated during analysis.
+
+    MDAnalysis writes hidden trajectory-offset caches (``.*_offsets.npz``) and their
+    lock files (``.*.lock``) next to the trajectories it reads. This deletes any such
+    ``.*.npz`` and ``.*.lock`` file directly under ``directory``.
+
+    Parameters
+    ----------
+    directory : Path
+        Directory to scan for offset/lock files (the production stage directory).
+    """
+    for pattern in (".*.npz", ".*.lock"):
+        for path in directory.glob(pattern):
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Could not remove temporary file %s", path)
 
 
 def run_plain_md_analysis_workflow(
@@ -104,13 +133,28 @@ def run_plain_md_analysis_workflow(
         ana_config = config
         prod_stage = prefix
 
+    # Reference structure for alignment / RMSD. When use_starting_structure_as_ref is
+    # True, reference the initial built structure (<basename>.inpcrd); otherwise fall
+    # back to the first frame of the production trajectory.
+    # Reference for alignment, water counting, and RMSD. When use_starting_structure_as_ref
+    # is True, reference the initial built structure (<basename>.inpcrd, read with the
+    # full-system <basename>.pdb topology); otherwise fall back to the first production
+    # frame.
+    starting_top = directory / f'{basename}.pdb'
+    starting_crd = directory / f'{basename}.inpcrd'
+    align_ref: Optional[str] = None
+    ref_top: Optional[str] = None
+    if ana_config.use_starting_structure_as_ref:
+        align_ref = str(starting_crd)
+        ref_top = str(starting_top)
+
     # Process PBC and do alignment
     post_process_trajectory(
         in_top=str(directory / f'{basename}.pdb'),
         in_trj=str(directory / prod_stage / f'{prod_stage}.mdcrd'),
         out_pdb=str(directory / prod_stage / 'prod_processed.pdb'),
         out_trj=str(directory / prod_stage / 'prod_processed.xtc'),
-        ref=None,
+        ref=align_ref,
         process_pbc=ana_config.process_pbc,
         do_alignment=ana_config.do_alignment,
         in_top_format=None,
@@ -119,17 +163,21 @@ def run_plain_md_analysis_workflow(
         center_selection=ana_config.center_selection,
         output_selection=ana_config.output_selection,
         align_selection=ana_config.align_selection,
-        remove_tmp=ana_config.remove_tmp
+        remove_tmp=ana_config.remove_tmp,
+        include_water_selection=ana_config.include_water_selection,
+        water_distance=ana_config.water_distance,
     )
-    
-    # Compute & plot RMSD
+
+    # Compute & plot RMSD. compute_rmsd reads the starting-structure reference with its
+    # own (full-system) topology, so the rmsd_selection must match in both.
     rmsd_data = compute_rmsd(
         top=str(directory / prod_stage / 'prod_processed.pdb'),
         trj=str(directory / prod_stage / 'prod_processed.xtc'),
-        ref='',
+        ref=align_ref or '',
         selection=ana_config.rmsd_selection,
         use_symmetry_correction=ana_config.use_symmetry_correction,
         heavy_atoms_only=ana_config.heavy_atoms_only,
+        ref_top=ref_top,
         save_path=str(directory / prod_stage / 'prod_rmsd.txt')
     )
     
@@ -162,7 +210,7 @@ def run_plain_md_analysis_workflow(
         plt.close(ax.figure)
 
     # GBSA binding free energy calculation
-    if ana_config.do_gbsa:
+    def _run_gbsa() -> None:
         protein_pdb_path = Path(directory / 'protein.pdb')
         if not protein_pdb_path.is_file():
             logger.warning(
@@ -204,7 +252,11 @@ def run_plain_md_analysis_workflow(
                 )
                 return
 
-            all_positions = _load_positions(topology=top_path, trajectory=trj_path)
+            # GBSA is computed on the dry complex; drop any retained waters regardless of
+            # whether post-processing kept nearby waters in the trajectory.
+            all_positions = _load_positions(
+                topology=top_path, trajectory=trj_path, selection='not water'
+            )
 
             n_ligand_atoms = ligand.to_openmm().topology.getNumAtoms()
             if n_ligand_atoms <= 0:
@@ -233,3 +285,10 @@ def run_plain_md_analysis_workflow(
             logger.info("GBSA calculation finished; wrote %d frames to %s", len(energies), out_path)
         except Exception:
             logger.exception("GBSA calculation failed for directory %s", directory)
+
+    if ana_config.do_gbsa:
+        _run_gbsa()
+
+    # Remove MDAnalysis offset/lock caches generated during analysis.
+    if ana_config.remove_tmp:
+        _cleanup_offset_files(directory / prod_stage)

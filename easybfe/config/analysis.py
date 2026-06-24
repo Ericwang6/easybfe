@@ -20,11 +20,25 @@ class PlainMDAnalysisConfig(BaseModel):
     )
     process_pbc: bool = Field(
         default=False,
-        description='Whether to process periodic boundary conditions with MDAnalysis'
+        description=(
+            'Whether to process periodic boundary conditions with MDAnalysis. Default is '
+            'False: AMBER never breaks bonds, so molecules stay intact without wrapping, '
+            'and retained waters are shifted into the image of ``include_water_selection`` '
+            'on a per-residue basis for correct visualization. When True, the trajectory is '
+            'additionally centered on ``center_selection`` and wrapped into the unit cell.'
+        )
     )
     do_alignment: bool = Field(
         default=True,
         description='Whether to align trajectory to reference structure'
+    )
+    use_starting_structure_as_ref: bool = Field(
+        default=True,
+        description=(
+            'Reference structure used for trajectory alignment and RMSD. If ``True``, '
+            'use the initial built structure (``<basename>.inpcrd``, i.e. the very '
+            'starting point). If ``False``, use the first frame of the production run.'
+        )
     )
     center_selection: str = Field(
         default='',
@@ -38,7 +52,27 @@ class PlainMDAnalysisConfig(BaseModel):
         default='',
         description='Selection string for alignment reference.'
     )
-    
+
+    # Water retention options
+    include_water_selection: Optional[str] = Field(
+        default=None,
+        description=(
+            'If set, count water residues within ``water_distance`` of this selection in '
+            'the starting frame, then retain that many nearest complete water residues in '
+            'every output frame (in addition to ``output_selection``). ``None`` disables '
+            'water retention. The starting frame follows ``use_starting_structure_as_ref``: '
+            'the initial built structure (``<basename>.inpcrd``) when ``True``, otherwise '
+            'the first production frame.'
+        )
+    )
+    water_distance: float = Field(
+        default=5.0,
+        description=(
+            'Distance cutoff (Angstrom) used to count retained water residues from the '
+            'starting frame when ``include_water_selection`` is set.'
+        )
+    )
+
     # RMSD computation options
     rmsd_selection: str = Field(
         default='',
