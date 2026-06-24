@@ -68,7 +68,11 @@ def setup_plain_md(
     ff = app.ForceField(*ffs)
     
     buffer = config.buffer / 10 * unit.nanometers
-    box_vectors = computeBoxVectorsWithPadding(modeller.positions, buffer, config.box_shape)
+    box_vectors = computeBoxVectorsWithPadding(
+        modeller.positions,
+        buffer,
+        config.box_shape,
+    )
     modeller.positions = shiftToBoxCenter(modeller.positions, box_vectors)
     modeller.topology.setPeriodicBoxVectors(box_vectors)
     if not config.gas_phase:

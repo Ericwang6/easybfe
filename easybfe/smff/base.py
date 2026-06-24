@@ -14,6 +14,7 @@ import traceback
 import warnings
 from collections import defaultdict
 from pathlib import Path
+import multiprocessing as mp
 
 import openmm as mm
 import openmm.app as app
@@ -98,7 +99,7 @@ class SmallMoleculeForceField(abc.ABC):
     """
     
     def __init__(self, forcefield: str = '', charge_method: str = '', raise_errors: bool = True,
-                 *args, resp_engine: str = '', nproc_resp: int = 4, keep_cache: bool = False,
+                 *args, resp_engine: str = '', nproc_resp: int = -1, keep_cache: bool = False,
                  **kwargs):
         """Initialize the force field parameterizer."""
         self.forcefield = forcefield
@@ -106,7 +107,7 @@ class SmallMoleculeForceField(abc.ABC):
         self._raise_errors = raise_errors
         self.keep_cache = keep_cache
         self.resp_engine = resp_engine if resp_engine else ('qchem' if self._is_resp else '')
-        self.nproc_resp = nproc_resp
+        self.nproc_resp = nproc_resp if nproc_resp > 0 else mp.cpu_count() - 2
         if self._is_resp and self.resp_engine != 'qchem':
             raise ValueError(
                 f"Unsupported resp_engine={self.resp_engine!r}; only 'qchem' is supported"
