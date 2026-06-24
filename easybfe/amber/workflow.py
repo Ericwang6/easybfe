@@ -50,7 +50,8 @@ class Step:
             'inf': self.wdir / f'{self.name}.info',
             'x': self.wdir / f'{self.name}.mdcrd',
             'e': self.wdir / f'{self.name}.mden',
-            'l': self.wdir / f'{self.name}.log',
+            # 'l': self.wdir / f'{self.name}.log',
+            'l': Path(os.devnull)
         }
 
     def set_prmtop(self, prmtop: os.PathLike):

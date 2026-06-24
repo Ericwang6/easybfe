@@ -68,7 +68,7 @@ class AmberCntrlSettings(AmberNamelist):
     ofreq: int = Field(default=1000, exclude=True)
     efreq: Optional[int] = Field(default=None, exclude=True)
     ntpr: Optional[int] = None # freq to dump energies in mdout
-    ntwe: Optional[int] = None # freq to dump energies in mden
+    ntwe: int = 0              # freq to dump energies in mden
     ntwr: Optional[int] = None # freq to write restart file
     ntwx: Optional[int] = None # freq to write trajectory file
     iwrap: int = 0   # 1 - process PBC when dump trajectories; 0 - don't process PBC
@@ -153,11 +153,11 @@ class AmberCntrlSettings(AmberNamelist):
             for attr in attrs:
                 assert getattr(self, attr) is not None, f'"{attr}" or "ofreq" must be explicitly set'
         if self.efreq is None:
-            attrs = ['ntpr', 'ntwe']
+            attrs = ['ntpr']
             for attr in attrs:
                 assert getattr(self, attr) is not None, f'"{attr}" or "efreq" must be explicitly set'
         self.ntpr = self.efreq if self.ntpr is None else self.ntpr
-        self.ntwe = self.efreq if self.ntwe is None else self.ntwe
+        # self.ntwe = self.efreq if self.ntwe is None else self.ntwe
         self.ntwr = self.ofreq if self.ntwr is None else self.ntwr
         self.ntwx = self.ofreq if self.ntwx is None else self.ntwx
         return self
@@ -165,10 +165,10 @@ class AmberCntrlSettings(AmberNamelist):
     @model_validator(mode='after')
     def validate_fep(self) -> AmberCntrlSettings:
         if self.icfe:
-            self.bar_intervall = min([self.ntwe, self.ntpr, self.nstlim]) if self.bar_intervall is None else self.bar_intervall
+            self.bar_intervall = min([self.ntpr, self.nstlim]) if self.bar_intervall is None else self.bar_intervall
             # We have to ensure that the BAR result is output every time after it is calculated
             self.ntpr = self.bar_intervall
-            self.ntwe = self.bar_intervall
+            # self.ntwe = self.bar_intervall
 
             if self.mbar_states is None:
                 self.mbar_states = len(self.mbar_lambda) 
