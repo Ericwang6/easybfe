@@ -69,14 +69,36 @@ def test_post_process_trajectory_includes_nearest_waters(tmp_path: Path):
     processed = mda.Universe(output_pdb, output_dcd)
     assert processed.atoms.n_atoms == 4
     assert len(processed.residues) == 2
-    np.testing.assert_allclose(processed.trajectory[0].positions[1], [9.0, 0.0, 0.0], atol=1e-3)
-    np.testing.assert_allclose(processed.trajectory[1].positions[1], [8.5, 0.0, 0.0], atol=1e-3)
+    # With process_pbc=False the nearest water is shifted into the image of the target
+    # (MOL at x=0.5). The frame-0 water oxygen has raw coordinate x=9.0 (min image
+    # distance 1.5 to MOL); it is translated by -box (x -> -1.0) to stay adjacent. The
+    # frame-1 nearest water oxygen at x=8.5 (min image distance 2.0) is moved to x=-1.5.
+    np.testing.assert_allclose(processed.trajectory[0].positions[1], [-1.0, 0.0, 0.0], atol=1e-3)
+    np.testing.assert_allclose(processed.trajectory[1].positions[1], [-1.5, 0.0, 0.0], atol=1e-3)
+
+    # The dumped (no minimum image convention) water-target distance must equal the
+    # minimum image distance, i.e. stay within the retention cutoff.
+    for frame_index in range(len(processed.trajectory)):
+        processed.trajectory[frame_index]
+        mol_pos = processed.select_atoms("resname MOL").positions[0]
+        water_o = processed.select_atoms("resname WAT").positions[0]
+        raw_distance = np.linalg.norm(water_o - mol_pos)
+        assert raw_distance <= 2.0 + 1e-3
+    # Output serials: 1 = MOL carbon, 2 = water O, 3/4 = water H. Retained-water CONECT
+    # records must stay within the water residue (only the regenerated O-H bonds); no
+    # bond may link a water to the solute or to an atom outside the water residue.
     water_serials = {2, 3, 4}
+    conect: dict[int, list[int]] = {}
     for line in output_pdb.read_text().splitlines():
         if line.startswith("CONECT"):
-            serials = {
+            serials = [
                 int(line[index:index + 5])
-                for index in range(6, len(line), 5)
+                for index in range(6, len(line.rstrip()), 5)
                 if line[index:index + 5].strip()
-            }
-            assert not serials & water_serials
+            ]
+            if serials:
+                conect[serials[0]] = serials[1:]
+    for serial in water_serials:
+        for partner in conect.get(serial, []):
+            assert partner in water_serials
+    assert not set(conect.get(1, [])) & water_serials
