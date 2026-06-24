@@ -169,6 +169,7 @@ slurm*.out
 _test*
 tests/data/_*
 *_fixed.pdb
+tests/select_rep_output/
 
 # trash
 .trash/
@@ -188,9 +189,15 @@ examples/rbfe/ligands
 examples/rbfe/rbfe
 examples/abfe/ligands
 examples/abfe/abfe
+examples/cdock/
 
 agent_test/
 
 # Legacy files
 *.legacy
 legacy/
+playground/
+amber-manuals
+examples/gid4/
+.*.npz
+.*.lock
