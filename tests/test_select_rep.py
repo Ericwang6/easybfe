@@ -9,7 +9,7 @@ matplotlib.use("Agg")
 
 from rdkit import Chem
 
-from easybfe.amber.select_rep import (
+from easybfe.boresch import (
     find_rotatable_torsions,
     circular_mean,
     compute_frame_deviations,
@@ -131,12 +131,17 @@ class TestSelectRepresentativeFrame:
         assert deviations[rep_frame] == pytest.approx(np.min(deviations))
 
         torsions = result["torsions"]
-        means = result["means"]
+        reference = result["reference"]
         assert torsions.shape[0] == n_frames
         assert torsions.shape[1] == len(result["torsion_atoms"])
-        assert means.shape[0] == len(result["torsion_atoms"])
+        assert reference.shape[0] == len(result["torsion_atoms"])
         assert np.all(torsions >= -math.pi - 1e-6)
         assert np.all(torsions <= math.pi + 1e-6)
+
+        # The reference is the per-torsion median, i.e. an actually observed
+        # value of that torsion across the trajectory frames (no averaging).
+        for k in range(torsions.shape[1]):
+            assert np.any(np.isclose(torsions[:, k], reference[k]))
 
     def test_writes_outputs(self):
         OUTPUT_DIR.mkdir(exist_ok=True)

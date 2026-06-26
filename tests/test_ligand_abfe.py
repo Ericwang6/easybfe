@@ -8,7 +8,7 @@ from easybfe.core.protein import Protein
 from easybfe.config import AmberFepSimulationConfig
 from easybfe.config.amber.simulation import default_fep_workflow
 from easybfe.amber.prep_ligand_abfe import setup_ligand_abfe
-from easybfe.amber.boresch import RxRxBoreschRestraintsFinder
+from easybfe.boresch import RxRxBoreschRestraintsFinder
 from easybfe.analysis.abfe import analyze_abfe
 from easybfe.smff import load_parametrizer
 

@@ -184,7 +184,7 @@ Amber workflow
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: easybfe.amber.boresch
+.. automodule:: easybfe.boresch
    :members:
    :undoc-members:
    :show-inheritance:
