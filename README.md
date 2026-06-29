@@ -94,6 +94,75 @@ do
 done
 ```
 
+### ABFE (one-line pipeline)
+
+The separate `setup` / submit / `analyze` workflow above gives you full control:
+each leg (`solvent`, `complex`, `restraint`) is an independent directory, so you
+can distribute them across different nodes for additional parallelization. When
+you instead want a fully automated, hands-off run for a single protein-ligand
+system, use `easybfe abfe pipeline`, which chains every step together —
+parameterization, Boresch restraint search, leg setup, running, and analysis —
+behind one command (example: `examples/abfe-pipeline/`).
+
+```bash
+# Go from a fixed protein PDB + a raw ligand SDF straight to result.json
+easybfe abfe pipeline config_5ns.yaml -p ./9qdz_fixed_dry.pdb -l ./1508.sdf -o ./run
+```
+
+This single command writes everything under `<ABFE-DIR>` (here `./run`):
+
+```
+run/ligand/       parameterized ligand
+run/boresch-md/   plain protein-ligand MD + representative structure
+run/abfe/         solvent/ complex/ restraint/ + boresch.dat + result.json
+run/abfe.log      master log
+```
+
+Things the pipeline highlights (see `examples/abfe-pipeline/config_5ns.yaml`):
+
+- **MD-based Boresch restraints.** Setting
+
+```yaml
+boresch:
+  algorithm: rxrx-md
+```
+
+  runs a short plain protein-ligand MD (configured under `boresch_md:`) and
+  selects the Boresch anchor atoms and a representative frame from the
+  trajectory, rather than picking restraints from a single static pose.
+
+- **Early stopping after equilibration.** The pipeline runs the pre-production
+  stages first and estimates the ABFE from the second-to-last stage
+  (`04.pre_prod`). If that estimate is weaker than `early_stop_threshold`
+  (kcal/mol), the ligand is treated as a weak/non-binder and the expensive final
+  production stage (`05.prod`) is skipped to save compute:
+
+```yaml
+# Skip 05.prod when the 04.pre_prod estimate is greater than -8.0 kcal/mol.
+early_stop_threshold: -8.0
+```
+
+- **One line from PDB + SDF to result.** The `pipeline` command takes a fixed
+  protein PDB (`-p`), a raw ligand SDF (`-l`), and a config, and produces
+  `run/abfe/result.json` with the decomposed and total ΔG, for example:
+
+```json
+{
+    "complex": 28.46,
+    "solvent": 16.23,
+    "restraint": -3.90,
+    "boresch": 7.61,
+    "total": -8.53,
+    "total_std": 0.15
+}
+```
+
+On an HPC system you typically wrap this in a single Slurm script (see
+`examples/abfe-pipeline/abfe.slurm`) and submit one job per ligand. Reach for the
+separate setup/submit/analyze workflow above when you need to spread the
+`solvent`, `complex`, and `restraint` legs across multiple nodes; reach for
+`pipeline` when you want the whole thing automated end to end in one place.
+
 ## Developing Notes
 
 If you want to contribute to development or have questions, please open an issue or contact Yingze (Eric) Wang: ericwangyz@berkeley.edu
