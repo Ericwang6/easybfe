@@ -183,23 +183,74 @@ def create_groupfile_from_steps(steps: List[Step], dirname: os.PathLike | None =
     return cmd
 
 
-def create_script_for_workflows(workflows: List[Workflow], wdir: os.PathLike, nprocs: int = -1):
-    for wf in workflows:
-        wf.create()
-    step_names = tuple([name for name in workflows[0].steps])
-    for wf in workflows[1:]:
-        this_wf_steps = tuple([name for name in wf.steps])
-        if this_wf_steps != step_names:
-            warnings.warn(f"Not same workflow {step_names} != {this_wf_steps}")
-    
-    wdir = Path(wdir).expanduser().resolve()
-    wdir.mkdir(exist_ok=True)
+# ----------------------------------------------------------------------------
+# CUDA MPS helpers injected into every generated leg script.
+#
+# Multiple alchemical ranks share a small number of GPUs (``--gpu-bind=none`` +
+# ``mpirun -np <ranks>``). Routing them through an NVIDIA MPS daemon lets the
+# ranks overlap on each GPU, which speeds up the multi-rank ``pmemd.cuda.MPI``
+# stages. The block is self-contained: it reuses an externally started daemon
+# when ``CUDA_MPS_PIPE_DIRECTORY`` is already exported, starts its own daemon
+# when ``nvidia-cuda-mps-control`` is available, and is a no-op (with a clear
+# log message) otherwise. Set ``EASYBFE_DISABLE_MPS=1`` to skip MPS entirely
+# (used for A/B speed comparisons).
+# ----------------------------------------------------------------------------
+_MPS_FUNCS = r'''
+EASYBFE_MPS_STARTED=0
+maybe_start_mps() {
+  if [ "${EASYBFE_DISABLE_MPS:-0}" = "1" ]; then
+    echo "CUDA MPS: disabled (EASYBFE_DISABLE_MPS=1)"
+    return 0
+  fi
+  if [ -n "${CUDA_MPS_PIPE_DIRECTORY:-}" ] && [ -d "${CUDA_MPS_PIPE_DIRECTORY}" ]; then
+    echo "CUDA MPS: reused (external daemon at ${CUDA_MPS_PIPE_DIRECTORY})"
+    return 0
+  fi
+  if command -v nvidia-cuda-mps-control >/dev/null 2>&1; then
+    export CUDA_MPS_PIPE_DIRECTORY=$(mktemp -d "/tmp/nvidia-mps-pipe-${USER}-$$-XXXXXX")
+    export CUDA_MPS_LOG_DIRECTORY=$(mktemp -d "/tmp/nvidia-mps-log-${USER}-$$-XXXXXX")
+    nvidia-cuda-mps-control -d && sleep 5
+    EASYBFE_MPS_STARTED=1
+    echo "CUDA MPS: enabled (started daemon at ${CUDA_MPS_PIPE_DIRECTORY})"
+  else
+    echo "CUDA MPS: unavailable (nvidia-cuda-mps-control not found)"
+  fi
+  return 0
+}
+maybe_stop_mps() {
+  if [ "${EASYBFE_MPS_STARTED}" = "1" ]; then
+    echo quit | nvidia-cuda-mps-control >/dev/null 2>&1 || true
+    rm -rf "${CUDA_MPS_PIPE_DIRECTORY}" "${CUDA_MPS_LOG_DIRECTORY}" 2>/dev/null || true
+    EASYBFE_MPS_STARTED=0
+    echo "CUDA MPS: stopped"
+  fi
+}
+'''
 
-    if nprocs < 0:
-        nprocs = len(workflows)
-    else:
-        nprocs = max(1, nprocs // len(workflows)) * len(workflows)
-    
+
+def _build_leg_script(
+    workflows: List[Workflow],
+    wdir: Path,
+    nprocs: int,
+    step_names: tuple,
+    tag_prefix: str = "",
+) -> str:
+    """Build a leg run script body for a subset of workflow stages.
+
+    Parameters
+    ----------
+    workflows : list of Workflow
+        Per-lambda workflows (all sharing the same stage names).
+    wdir : pathlib.Path
+        Leg directory the script is written to / executed from.
+    nprocs : int
+        Total MPI ranks for the grouped ``pmemd.cuda.MPI`` stages.
+    step_names : tuple of str
+        Stage names to run in this script (a subset of the full workflow).
+    tag_prefix : str, optional
+        Prefix for the run/done/error/killed tag files (e.g. ``"preprod."``).
+        Empty string uses the default ``running.tag`` / ``done.tag`` names.
+    """
     afunc = '''
 run_step_seq() {
   local step_dir="$1"
@@ -212,7 +263,7 @@ run_step_seq() {
   local rc=$?
 
   if [ $rc -ne 0 ]; then
-    mv "$WDIR/running.tag" "$WDIR/error.tag"
+    mv "$WDIR/$RUNNING_TAG" "$WDIR/$ERROR_TAG"
     echo "Error occurs in $name (exit code $rc)"
     cd "$WDIR"
     return $rc
@@ -224,37 +275,48 @@ run_step_seq() {
     cleanup_func = '''
 cleanup() {
     echo "[`date`] Caught termination signal. Cleaning up..."
-    if [ -f $WDIR/running.tag ]; then mv $WDIR/running.tag $WDIR/killed.tag; fi
+    maybe_stop_mps
+    if [ -f $WDIR/$RUNNING_TAG ]; then mv $WDIR/$RUNNING_TAG $WDIR/$KILLED_TAG; fi
     echo "[`date`] Cleanup done."
-    exit 2 
+    exit 2
 }
 trap cleanup TERM INT HUP
 '''
+
+    tag_vars = (
+        f'RUNNING_TAG="{tag_prefix}running.tag"\n'
+        f'DONE_TAG="{tag_prefix}done.tag"\n'
+        f'ERROR_TAG="{tag_prefix}error.tag"\n'
+        f'KILLED_TAG="{tag_prefix}killed.tag"'
+    )
 
     script_lines = [
         RUN_SH_SHEBANG,
         "",
         'WDIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"',
+        tag_vars,
+        _MPS_FUNCS,
         afunc,
         cleanup_func,
         r'start=$(date +%s)',
         (
-            'if [ -f running.tag ]; then\n'
-            '  echo "Found running.tag: a run may still be in progress. Skip this run."\n'
-            '  echo "Delete running.tag to force rerun."\n'
+            'if [ -f $RUNNING_TAG ]; then\n'
+            '  echo "Found $RUNNING_TAG: a run may still be in progress. Skip this run."\n'
+            '  echo "Delete $RUNNING_TAG to force rerun."\n'
             '  exit 0\n'
             'fi\n'
-            'if [ -f done.tag ]; then\n'
-            '  echo "Found done.tag: previous run has finished. Skip this run."\n'
-            '  echo "Delete done.tag to force rerun."\n'
+            'if [ -f $DONE_TAG ]; then\n'
+            '  echo "Found $DONE_TAG: previous run has finished. Skip this run."\n'
+            '  echo "Delete $DONE_TAG to force rerun."\n'
             '  exit 0\n'
             'fi\n'
-            'if [ -f error.tag ]; then\n'
-            '  echo "Found error.tag: previous run ended with error. Skip this run."\n'
-            '  echo "Delete error.tag to force rerun."\n'
+            'if [ -f $ERROR_TAG ]; then\n'
+            '  echo "Found $ERROR_TAG: previous run ended with error. Skip this run."\n'
+            '  echo "Delete $ERROR_TAG to force rerun."\n'
             '  exit 0\n'
             'fi\n'
-            'touch running.tag'
+            'touch $RUNNING_TAG\n'
+            'maybe_start_mps'
         ),
     ]
     for name in step_names:
@@ -262,23 +324,24 @@ trap cleanup TERM INT HUP
         pmemd_exec = cfg.exec if cfg.exec.endswith('.MPI') else f'{cfg.exec}.MPI'
         script_lines.append(f'\necho "Running {name}"')
         if cfg.use_mpi:
-            create_groupfile_from_steps([wf.steps[name] for wf in workflows], wdir, wdir / f'{name}.groupfile')
             cmd = f"mpirun -np {nprocs} {pmemd_exec} -ng {len(workflows)} -groupfile {name}.groupfile"
             cmd += f' -rem 3 -remlog {name}.log' if cfg.use_remd else ''
             script_lines.append(cmd)
             script_lines.append((
                 'if [ $? -ne 0 ]; then\n'
-                '  mv running.tag error.tag && echo "Error occurs!"\n'
+                '  mv $RUNNING_TAG $ERROR_TAG && echo "Error occurs!"\n'
+                '  maybe_stop_mps\n'
                 '  exit 1\n'
                 'fi\n'
             ))
         else:
             for n in range(len(workflows)):
-                script_lines.append(f'run_step_seq {os.path.relpath(workflows[n].steps[name].wdir, wdir)} {name} || exit 1')
-    
+                script_lines.append(f'run_step_seq {os.path.relpath(workflows[n].steps[name].wdir, wdir)} {name} || {{ maybe_stop_mps; exit 1; }}')
+
     script_lines += [
         '\n',
-        'mv running.tag done.tag\n',
+        'maybe_stop_mps\n',
+        'mv $RUNNING_TAG $DONE_TAG\n',
         r"end=$(date +%s)",
         "duration=$((end - start))\n",
         'hours=$(( duration / 3600 ))',
@@ -286,8 +349,62 @@ trap cleanup TERM INT HUP
         'seconds=$(( duration % 60 ))\n',
         r'echo "Execution time: ${hours} h ${minutes} min ${seconds} sec"'
     ]
+    return "\n".join(script_lines)
+
+
+def create_script_for_workflows(workflows: List[Workflow], wdir: os.PathLike, nprocs: int = -1):
+    """Generate the leg run scripts for a set of per-lambda workflows.
+
+    Three scripts are written into ``wdir``:
+
+    - ``run.sh`` runs every workflow stage and writes ``done.tag`` (the default
+      single-phase behavior).
+    - ``run.preprod.sh`` runs all stages except the last (the "pre-production"
+      stages) and writes ``preprod.done.tag``. Only emitted when the workflow
+      has more than one stage.
+    - ``run.prod.sh`` runs only the final stage and writes ``done.tag``; it is
+      meant to follow ``run.preprod.sh`` (the production stage reads the
+      restart of the previous stage).
+
+    Each script detects and uses CUDA MPS when available (see :data:`_MPS_FUNCS`).
+    """
+    for wf in workflows:
+        wf.create()
+    step_names = tuple([name for name in workflows[0].steps])
+    for wf in workflows[1:]:
+        this_wf_steps = tuple([name for name in wf.steps])
+        if this_wf_steps != step_names:
+            warnings.warn(f"Not same workflow {step_names} != {this_wf_steps}")
+
+    wdir = Path(wdir).expanduser().resolve()
+    wdir.mkdir(exist_ok=True)
+
+    if nprocs < 0:
+        nprocs = len(workflows)
+    else:
+        nprocs = max(1, nprocs // len(workflows)) * len(workflows)
+
+    # Pre-create the per-stage groupfiles once (shared by every generated script).
+    for name in step_names:
+        if workflows[0].steps[name].config.use_mpi:
+            create_groupfile_from_steps([wf.steps[name] for wf in workflows], wdir, wdir / f'{name}.groupfile')
+
+    # Full single-phase script.
     run_sh = wdir / "run.sh"
-    with open(run_sh, "w") as f:
-        f.write("\n".join(script_lines))
+    run_sh.write_text(_build_leg_script(workflows, wdir, nprocs, step_names, tag_prefix=""))
     _make_executable(run_sh)
+
+    # Two-phase scripts for early-stop orchestration (pre-production then production).
+    if len(step_names) > 1:
+        preprod_sh = wdir / "run.preprod.sh"
+        preprod_sh.write_text(
+            _build_leg_script(workflows, wdir, nprocs, step_names[:-1], tag_prefix="preprod.")
+        )
+        _make_executable(preprod_sh)
+
+        prod_sh = wdir / "run.prod.sh"
+        prod_sh.write_text(
+            _build_leg_script(workflows, wdir, nprocs, step_names[-1:], tag_prefix="")
+        )
+        _make_executable(prod_sh)
 

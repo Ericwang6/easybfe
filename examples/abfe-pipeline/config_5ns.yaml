@@ -1,0 +1,349 @@
+# Early stop: run pre-production stages first and estimate the ABFE from the
+# second-to-last stage (04.pre_prod). If that estimate is greater than this
+# threshold (kcal/mol), the ligand is treated as a weak/non-binder and the
+# final production stage (05.prod) is skipped to save compute.
+early_stop_threshold: -8.0
+
+# Ligand parametrization settings.
+ligand_param:
+  forcefield: gaff2
+  charge_method: bcc
+
+# MD-based Boresch restraint search.
+boresch:
+  algorithm: rxrx-md
+
+# Plain protein+ligand MD that drives the Boresch finder (single GPU).
+# Protocol (mirrors examples/gid4/config_md_1ns.yaml): minimization
+#   -> 50 ps NVT equilibration (restrained, 2 fs)
+#   -> 50 ps NPT equilibration (restrained, 4 fs)
+#   -> 1 ns production (4 fs, 100 frames for the finder).
+boresch_md:
+  num_procs: -1
+  box_shape: dodecahedron
+  buffer: 15.0
+  neutralize: true
+  ionic_strength: 0.15
+  do_hmr: true
+  hydrogen_mass: 3.024
+  water_model: tip3p
+  protein_ff:
+  - ff14sb
+  water_ff:
+  - tip3p
+  basename: system
+  workflow:
+  # 1) Energy minimization.
+  - type: em
+    name: 01.em
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: false
+    cntrl:
+      maxcyc: 2000
+      ofreq: 100
+      efreq: 100
+  # 2) NVT equilibration with positional restraints, 2 fs, 50 ps (25000 steps).
+  - type: heat
+    name: 02.nvt
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: false
+    cntrl:
+      dt: 0.002
+      num_steps: 25000
+      restraint_wt: 5.0
+      ofreq: 5000
+      efreq: 5000
+  # 3) NPT equilibration with positional restraints, 4 fs, 50 ps (12500 steps).
+  - type: pres
+    name: 03.npt
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: false
+    cntrl:
+      dt: 0.004
+      num_steps: 12500
+      restraint_wt: 5.0
+      ofreq: 2500
+      efreq: 2500
+  # 4) Production, 4 fs, 1 ns (250000 steps), dumps 100 frames for the finder.
+  - type: prod
+    name: 04.prod
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: false
+    cntrl:
+      dt: 0.004
+      num_steps: 250000
+      ntr: 1
+      restraintmask: "@NA,CA,C"
+      restraint_wt: 5.0
+      ofreq: 2500
+      efreq: 2500
+
+solvent:
+  num_procs: -1
+  box_shape: cube
+  buffer: 20.0
+  neutralize: true
+  ionic_strength: 0.15
+  do_hmr: true
+  hydrogen_mass: 3.024
+  water_model: tip3p
+  protein_ff:
+  - amber14-all.xml
+  water_ff:
+  - amber14/tip3p.xml
+  workflow:
+  - type: em
+    name: 01.em
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: false
+    cntrl:
+      maxcyc: 2000
+      ofreq: 100
+  - type: heat
+    name: 02.heat
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 12500
+      dt: 0.002
+      ofreq: 1250
+  - type: pres
+    name: 03.pres
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 12500
+      dt: 0.002
+      ofreq: 1250
+  - type: prod
+    name: 04.pre_prod
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 125000
+      dt: 0.004
+      ofreq: 1250
+  - type: prod
+    name: 05.prod
+    exec: pmemd.cuda
+    use_remd: true
+    use_mpi: true
+    cntrl:
+      nstlim: 125
+      dt: 0.004
+      ofreq: 12500
+      numexchg: 10000
+  use_charge_change: false
+  use_settle_for_alchemical_water: true
+  num_lambdas: 24
+  lambdas:
+  - 0.0
+  - 0.15
+  - 0.205
+  - 0.24
+  - 0.27352941
+  - 0.30705882
+  - 0.34058824
+  - 0.37411765
+  - 0.40764706
+  - 0.44117647
+  - 0.47470588
+  - 0.50823529
+  - 0.54176471
+  - 0.57529412
+  - 0.60882353
+  - 0.64235294
+  - 0.67588235
+  - 0.70941176
+  - 0.74294118
+  - 0.77647059
+  - 0.81
+  - 0.845
+  - 0.89
+  - 1.0
+
+complex:
+  num_procs: -1
+  box_shape: dodecahedron
+  buffer: 15.0
+  neutralize: true
+  ionic_strength: 0.15
+  do_hmr: true
+  hydrogen_mass: 3.024
+  water_model: tip3p
+  protein_ff:
+  - amber14-all.xml
+  water_ff:
+  - amber14/tip3p.xml
+  workflow:
+  - type: em
+    name: 01.em
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: false
+    cntrl:
+      maxcyc: 2000
+      ofreq: 100
+  - type: heat
+    name: 02.heat
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 12500
+      dt: 0.002
+      ofreq: 1250
+  - type: pres
+    name: 03.pres
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 12500
+      dt: 0.002
+      ofreq: 1250
+  - type: prod
+    name: 04.pre_prod
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 125000
+      dt: 0.004
+      ofreq: 1250
+  - type: prod
+    name: 05.prod
+    exec: pmemd.cuda
+    use_remd: true
+    use_mpi: true
+    cntrl:
+      nstlim: 125
+      dt: 0.004
+      ofreq: 12500
+      numexchg: 10000
+  use_charge_change: false
+  use_settle_for_alchemical_water: true
+  num_lambdas: 24
+  lambdas:
+  - 0.0
+  - 0.15
+  - 0.205
+  - 0.24
+  - 0.27352941
+  - 0.30705882
+  - 0.34058824
+  - 0.37411765
+  - 0.40764706
+  - 0.44117647
+  - 0.47470588
+  - 0.50823529
+  - 0.54176471
+  - 0.57529412
+  - 0.60882353
+  - 0.64235294
+  - 0.67588235
+  - 0.70941176
+  - 0.74294118
+  - 0.77647059
+  - 0.81
+  - 0.845
+  - 0.89
+  - 1.0
+
+# Restraint leg uses a smaller numexchg (5000) on the final REMD stage than
+# solvent/complex (10000), matching the upstream reference config.
+restraint:
+  num_procs: -1
+  box_shape: dodecahedron
+  buffer: 15.0
+  neutralize: true
+  ionic_strength: 0.15
+  do_hmr: true
+  hydrogen_mass: 3.024
+  water_model: tip3p
+  protein_ff:
+  - amber14-all.xml
+  water_ff:
+  - amber14/tip3p.xml
+  workflow:
+  - type: em
+    name: 01.em
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: false
+    cntrl:
+      maxcyc: 2000
+      ofreq: 100
+  - type: heat
+    name: 02.heat
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 12500
+      dt: 0.002
+      ofreq: 1250
+  - type: pres
+    name: 03.pres
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 12500
+      dt: 0.002
+      ofreq: 1250
+  - type: prod
+    name: 04.pre_prod
+    exec: pmemd.cuda
+    use_remd: false
+    use_mpi: true
+    cntrl:
+      nstlim: 125000
+      dt: 0.004
+      ofreq: 1250
+  - type: prod
+    name: 05.prod
+    exec: pmemd.cuda
+    use_remd: true
+    use_mpi: true
+    cntrl:
+      nstlim: 125
+      dt: 0.004
+      ofreq: 12500
+      numexchg: 5000
+  use_charge_change: false
+  use_settle_for_alchemical_water: true
+  num_lambdas: 24
+  lambdas:
+  - 0.0
+  - 0.15
+  - 0.205
+  - 0.24
+  - 0.27352941
+  - 0.30705882
+  - 0.34058824
+  - 0.37411765
+  - 0.40764706
+  - 0.44117647
+  - 0.47470588
+  - 0.50823529
+  - 0.54176471
+  - 0.57529412
+  - 0.60882353
+  - 0.64235294
+  - 0.67588235
+  - 0.70941176
+  - 0.74294118
+  - 0.77647059
+  - 0.81
+  - 0.845
+  - 0.89
+  - 1.0

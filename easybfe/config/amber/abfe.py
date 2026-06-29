@@ -1,30 +1,9 @@
-from __future__ import annotations
-from typing import Any, Optional
-from pathlib import Path
-from pydantic import BaseModel, Field, model_validator, field_validator, field_serializer
-from .simulation import AmberFepSimulationConfig
+"""Backward-compatible re-exports for ABFE configuration models.
 
+The canonical definitions now live in :mod:`easybfe.abfe.config` and
+:mod:`easybfe.boresch.config`.
+"""
+from ...abfe.config import AmberAbfeConfig
+from ...boresch.config import BoreschRestraintGeneratorConfig
 
-class BoreschRestraintGeneratorConfig(BaseModel):
-    algorithm: str = 'rxrx'
-    rst_wts: tuple[float, float, float, float, float, float] = Field(
-        default=(10.0, 10.0, 10.0, 10.0, 10.0, 10.0))
-    options: dict[str, Any] = Field(default_factory=dict)
-
-
-
-class AmberAbfeConfig(BaseModel):
-    protein: Optional[Path] = None
-    ligand: Optional[Path] = None
-    ligand_batch: Optional[list[Path]] = None
-    output_dir: Optional[Path] = None
-    ligand_base: Optional[Path] = None
-    output_base: Optional[Path] = None
-    boresch: BoreschRestraintGeneratorConfig
-    complex: AmberFepSimulationConfig
-    solvent: AmberFepSimulationConfig
-    restraint: AmberFepSimulationConfig
-
-    
-
-
+__all__ = ["AmberAbfeConfig", "BoreschRestraintGeneratorConfig"]

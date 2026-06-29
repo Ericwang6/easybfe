@@ -9,7 +9,7 @@ import rich_click as click
 from .. import __version__
 from ..logging import setup_logging
 
-from .abfe import abfe
+from ..abfe.cli import abfe
 from .ligand import ligand
 from .md import md
 from .protein import protein

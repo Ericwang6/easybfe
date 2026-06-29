@@ -10,10 +10,10 @@ import parmed
 
 from .prep_utils import *
 from ..config import AmberFepSimulationConfig, AmberWtSettings
-from ..config.amber.abfe import AmberAbfeConfig, BoreschRestraintGeneratorConfig
+from ..abfe.config import AmberAbfeConfig
 from .workflow import Step, Workflow, create_script_for_workflows
 from ..core import Ligand, Protein
-from ..boresch import BORESCH_FINDER_REGISTRY, BoreschRestraint, compute_boresch_energy
+from ..boresch import BORESCH_FINDER_REGISTRY, BoreschRestraint, compute_boresch_energy, BoreschRestraintGeneratorConfig
 from ..parallel import run_func_parallel
 
 

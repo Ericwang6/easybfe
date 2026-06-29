@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .base import SmallMoleculeForceField
+from .config import LigandParamConfig
 from .custom import CustomForceField
 from .registry import PARAMETRIZER_REGISTRY
 try:

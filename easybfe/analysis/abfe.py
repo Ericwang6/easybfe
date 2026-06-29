@@ -171,18 +171,21 @@ def analyze_abfe(
     temperature: float = 298.15,
     force_run: bool = False,
     n_jobs: int = -1,
+    done_tag: str = "done.tag",
+    run_trajectory_analysis: bool = True,
 ):
     wdir = Path(directory)
 
     if not force_run and (wdir / 'result.json').is_file():
         with (wdir / 'result.json').open('r') as f:
             res = json.load(f)
-        _run_trajectory_analysis(wdir, prod_prefix, n_jobs, force_run=False)
+        if run_trajectory_analysis:
+            _run_trajectory_analysis(wdir, prod_prefix, n_jobs, force_run=False)
         return res
 
     results = {}
     for leg in ['complex', 'solvent', 'restraint']:
-        if not (wdir / leg / 'done.tag').is_file():
+        if not (wdir / leg / done_tag).is_file():
             continue
         results[leg] = run_mbar(wdir / leg, prod_prefix, temperature)
     boresch = float((wdir / 'boresch.dat').read_text().strip())
@@ -240,6 +243,7 @@ def analyze_abfe(
     with (wdir / "result.json").open("w") as f:
         json.dump(res, f, indent=4)
 
-    _run_trajectory_analysis(wdir, prod_prefix, n_jobs, force_run=force_run)
+    if run_trajectory_analysis:
+        _run_trajectory_analysis(wdir, prod_prefix, n_jobs, force_run=force_run)
     return res
     

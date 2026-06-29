@@ -36,6 +36,7 @@ from .utils import (
     compute_frame_deviations,
     plot_torsion_distributions,
 )
+from .config import BoreschRestraintGeneratorConfig
 from .restraint import BoreschRestraint, compute_boresch_energy
 from .base import BoreschRestraintsFinder, BORESCH_FINDER_REGISTRY
 from .finders import RxRxBoreschRestraintsFinder, UserSpecifiedBoreschRestraint
@@ -43,6 +44,7 @@ from .md_finder import RxRxMDBoreschRestraintsFinder
 from .select_rep import select_representative_frame
 
 __all__ = [
+    "BoreschRestraintGeneratorConfig",
     "compute_bond",
     "compute_angle",
     "compute_dihedral",
