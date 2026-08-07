@@ -168,7 +168,6 @@ slurm*.out
 # test cache
 _test*
 tests/data/_*
-*_fixed.pdb
 tests/select_rep_output/
 
 # trash
@@ -185,13 +184,11 @@ agent/
 workspace/
 .cursor/
 
-examples/rbfe/ligands
-examples/rbfe/rbfe
-examples/abfe/ligands
-examples/abfe/abfe
-examples/abfe-pipeline/run/
-examples/abfe-pipeline/EASYBFE_ABFE.o*
-examples/cdock/
+# By default, ignore all files under examples/ because the acutal simulation
+# will generate a lot of files that are not relevant to the project development
+# If you want to forcibly add specific files (e.g. input files), use
+# `git add -f examples/...`
+examples/*
 
 agent_test/
 
@@ -200,7 +197,6 @@ agent_test/
 legacy/
 playground/
 amber-manuals
-examples/gid4/
 .*.npz
 .*.lock
 tests/_*

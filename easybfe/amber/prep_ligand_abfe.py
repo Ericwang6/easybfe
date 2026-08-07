@@ -48,15 +48,24 @@ def setup_ligand_abfe_leg(
     # setup systems
     modeller = app.Modeller(app.Topology(), [])
     modeller.add(ligand_pdb.topology, ligand_pdb.positions)
-    
+
+    # Track block sizes (in atoms) so the output topology can be relabeled per block
+    # (ligand first, then protein, then OpenMM-added solvent).
+    n_ligand_block_atoms = ligand_pdb.topology.getNumAtoms()
+    n_protein_block_atoms = 0
+    protein_chain_ids: set = set()
+
     # use for resolve restraints in protein-ligand complex
     if duplicate_ligand:
         modeller.add(ligand_pdb.topology, ligand_pdb.positions)
+        n_ligand_block_atoms *= 2
 
     if protein:
         protein_openmm = protein.to_openmm()
         modeller.add(protein_openmm.topology, protein_openmm.positions)
-    
+        n_protein_block_atoms = protein_openmm.topology.getNumAtoms()
+        protein_chain_ids = {c.id for c in protein_openmm.topology.chains()}
+
     buffer = config.buffer / 10 * unit.nanometers
     box_vectors = computeBoxVectorsWithPadding(modeller.positions, buffer, config.box_shape)
     modeller.positions = shiftToBoxCenter(modeller.positions, box_vectors)
@@ -110,10 +119,33 @@ def setup_ligand_abfe_leg(
     if config.do_hmr:
         hydrogen_mass_repartition(parmed_struct, config.hydrogen_mass, config.do_hmr_water)
     
+    # Relabel chains/residue numbers per block so the protein keeps its input PDB
+    # numbering, the ligand copies get a dedicated chain (residues 1..N), and the
+    # OpenMM-added solvent gets chain X/Y numbered from 1.
+    # Residue counts are read back from the structure: the duplicated ligand of the
+    # restraint leg ends up as a single parmed residue, so the input topologies'
+    # residue counts cannot be used directly.
+    n_ligand_res = count_residues_in_atom_block(parmed_struct, n_ligand_block_atoms)
+    n_protein_res = count_residues_in_atom_block(
+        parmed_struct, n_protein_block_atoms, start_res=n_ligand_res
+    )
+    chain_info = assign_block_chains_and_resids(
+        parmed_struct,
+        n_ligand_res=n_ligand_res,
+        n_protein_res=n_protein_res,
+        protein_chain_ids=protein_chain_ids,
+    )
+    logger.info(
+        "Assigned ligand chain '%s' and solvent chain '%s'",
+        chain_info['ligand_chain'], chain_info['water_chain'],
+    )
+
     # output
     parmed_struct.save(str(wdir / f'{basename}.inpcrd'), overwrite=True)
     parmed_struct.save(str(wdir / f'{basename}.prmtop'), overwrite=True)
-    parmed_struct.save(str(wdir / f'{basename}.pdb'), overwrite=True)
+    # The PDB keeps the original numbering and carries CONECT records for all
+    # bonds (water keeps only its two O-H bonds, not the AMBER SETTLE H-H bond).
+    write_pdb_with_conect(parmed_struct, wdir / f'{basename}.pdb')
 
     # setup workflow
     workflows = []

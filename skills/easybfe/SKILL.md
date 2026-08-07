@@ -205,6 +205,29 @@ easybfe abfe analyze ./abfe/jmc_23
 easybfe abfe analyze ./abfe/jmc_23 -f   # force re-analysis
 ```
 
+#### `result.json` contents
+
+Free energies are in kcal/mol. Alongside the per-leg values the file records the
+run's diagnostics, so the quality of a number can be judged without opening the
+plots.
+
+| Key | Meaning |
+|-----|---------|
+| `complex`, `solvent`, `restraint` (+ `_std`) | Per-leg ΔG and MBAR uncertainty |
+| `boresch` | Analytical Boresch standard-state correction |
+| `total`, `total_std` | ΔG_bind = −ΔG_complex + ΔG_solvent + ΔG_restraint + ΔG_boresch |
+| `early_stop` | `true` when the legs stopped after the pre-production phase (the pipeline's early-stop check judged the ligand a weak binder), so the numbers come from the short pre-production stage |
+| `prod_prefix`, `temperature` | Stage analyzed and temperature used |
+| `convergence` | Forward/backward series of the **total** ΔG vs `data_fraction`, with `converged` per point, `is_converged` (criterion holds over the whole second half), and the `final_*` values |
+| `block_average` | Per-block ΔG of the total, `mean` and `std` (spread across blocks) |
+| `legs.<leg>` | Same `convergence` / `block_average` for that leg, plus `overlap` and `exchange` |
+| `legs.<leg>.overlap` | Nearest-neighbour MBAR overlap: `adjacent` list, `min_adjacent`, `mean_adjacent`, `n_states`. Compare against `1 / n_states` (0.042 for 24 windows) — that is the value for windows sampling the same distribution, so being *near* it is good, not bad |
+| `legs.<leg>.exchange` | H-REMD acceptance from `<leg>/<prod_prefix>.log`: `exchange_rate` (mean over neighbour pairs), `exchange_rate_min` / `_max`, `exchange_rate_per_pair`, `n_replicas`, `n_exchanges`. `null` when the stage ran without replica exchange (no remlog) |
+
+Rules of thumb: mean exchange rates around 0.2–0.4 for the solvent/complex legs
+indicate a usable lambda ladder; a pair rate near zero (or a `min_adjacent`
+overlap far below `1 / n_states`) marks a gap that needs an extra lambda window.
+
 ---
 
 ## RBFE Commands

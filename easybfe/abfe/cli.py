@@ -189,4 +189,32 @@ def analyze(
 
     from ..analysis.abfe import analyze_abfe
 
-    analyze_abfe(directory, prod_prefix=prod_prefix, temperature=temperature, force_run=force_run)
+    result = analyze_abfe(
+        directory, prod_prefix=prod_prefix, temperature=temperature, force_run=force_run
+    )
+    if not result:
+        click.echo("No result: one or more legs are incomplete.")
+        return
+
+    nan = float("nan")
+    click.echo(
+        f"dG = {result.get('total', nan):.3f} +/- {result.get('total_std', nan):.3f} kcal/mol"
+        + ("  [EARLY STOP: pre-production estimate]" if result.get("early_stop") else "")
+    )
+    convergence = result.get("convergence") or {}
+    if convergence:
+        click.echo(
+            "  convergence: "
+            + ("converged" if convergence.get("is_converged") else "NOT converged")
+        )
+    block = result.get("block_average") or {}
+    if block.get("mean") is not None:
+        click.echo(f"  block average: {block['mean']:.3f} +/- {block['std']:.3f} kcal/mol")
+    for leg, summary in (result.get("legs") or {}).items():
+        overlap = (summary.get("overlap") or {}).get("min_adjacent")
+        exchange = summary.get("exchange")
+        rate = exchange.get("exchange_rate") if exchange else None
+        line = f"  {leg:<9} dG = {summary.get('dg', nan):9.3f} +/- {summary.get('dg_std', nan):.3f}"
+        line += f"  min overlap = {overlap:.3f}" if overlap is not None else ""
+        line += f"  exchange rate = {rate:.3f}" if rate is not None else ""
+        click.echo(line)

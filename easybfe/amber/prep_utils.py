@@ -4,7 +4,7 @@ __all__ = [
     'FF_XMLS', 'create_alchemical_ions', 'sanitize_water', 'compute_net_charge_from_openmm_system',
     'hydrogen_mass_repartition', 'computeBoxVectorsWithPadding', 'shiftToBoxCenter', 'shiftPositions',
     'fix_excess_charge', 'set_alchemical_water_restraints', 'generate_amber_mask',
-    'assign_block_chains_and_resids', 'write_pdb_with_conect'
+    'assign_block_chains_and_resids', 'write_pdb_with_conect', 'count_residues_in_atom_block'
 ]
 
 import os
@@ -286,6 +286,53 @@ def _first_unused_chain(used: set, preferred: Tuple[str, ...] = ()) -> str:
         if c not in used:
             return c
     raise RuntimeError("No available single-character chain identifier")
+
+
+def count_residues_in_atom_block(
+    struct: parmed.Structure,
+    n_atoms: int,
+    start_res: int = 0,
+) -> int:
+    r"""Count the residues that make up a contiguous block of ``n_atoms`` atoms.
+
+    Blocks added to an OpenMM ``Modeller`` (ligand, protein, solvent) are known by
+    their atom counts, but :func:`assign_block_chains_and_resids` needs residue
+    counts. The two are not always the same: identical copies of a molecule added
+    twice (as in the ABFE restraint leg) can be merged into a single
+    :class:`parmed.Residue`, so the residue count must be read back from the
+    structure rather than from the input topology.
+
+    Parameters
+    ----------
+    struct : :class:`parmed.Structure`
+        The structure whose residues are counted.
+    n_atoms : int
+        Number of atoms in the block.
+    start_res : int, optional
+        Index of the residue the block starts at. Default is 0.
+
+    Returns
+    -------
+    int
+        Number of residues spanning the block.
+
+    Raises
+    ------
+    ValueError
+        If the block does not end on a residue boundary.
+    """
+    count, seen = 0, 0
+    for res in struct.residues[start_res:]:
+        if seen >= n_atoms:
+            break
+        seen += len(res.atoms)
+        count += 1
+    if seen != n_atoms:
+        raise ValueError(
+            f"Atom block of {n_atoms} atoms starting at residue {start_res} does not "
+            f"end on a residue boundary (got {seen} atoms over {count} residues)"
+        )
+    return count
 
 
 def assign_block_chains_and_resids(

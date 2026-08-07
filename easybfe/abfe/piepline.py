@@ -150,7 +150,7 @@ class ABFE:
                 result = self.run_abfe_with_early_stop()
             else:
                 self.run_abfe()
-                result = self.analyze()
+                result = self.analyze(early_stop=False)
                 self._log_final_result(result)
             logger.info("=== ABFE pipeline finished: %s ===", self.root)
             return result
@@ -226,7 +226,10 @@ class ABFE:
             json.dump(plain_md_config.model_dump(mode="json"), f, indent=4)
 
         logger.info("Running Boresch MD ...")
-        self._run_script(self.boresch_md_dir)
+        # Unlike the three legs, this one is a hard prerequisite: without it
+        # there are no anchors and no representative pose to set up ABFE with.
+        if not self._run_script(self.boresch_md_dir):
+            raise RuntimeError(f"Boresch MD failed in {self.boresch_md_dir}; see its log.")
 
         prod_name = md_cfg.workflow[-1].name
         trajectory = self.boresch_md_dir / prod_name / f"{prod_name}.mdcrd"
@@ -297,12 +300,48 @@ class ABFE:
             output_dir=self.abfe_dir,
         )
 
-    def run_abfe(self) -> None:
-        """Run each ABFE leg locally (solvent, complex, restraint) in full."""
+    def run_abfe(self) -> dict[str, bool]:
+        """Run each ABFE leg locally (solvent, complex, restraint) in full.
+
+        A failing leg does not stop the others: the point of one submission is to
+        get as far as possible, so that only the legs that actually failed need
+        to be re-run.
+
+        Returns
+        -------
+        dict
+            ``{leg: succeeded}`` for every leg.
+        """
+        results = {}
         for leg in ("solvent", "complex", "restraint"):
-            leg_dir = self.abfe_dir / leg
             logger.info("Running ABFE leg '%s' ...", leg)
-            self._run_script(leg_dir)
+            results[leg] = self._run_script(self.abfe_dir / leg)
+        self._report_failed_legs(results)
+        return results
+
+    def _report_failed_legs(self, results: dict[str, bool], phase: str = "") -> list[str]:
+        """Log which legs failed and how to re-run just those. Returns their names."""
+        failed = [leg for leg, ok in results.items() if not ok]
+        if not failed:
+            return failed
+        label = f" ({phase})" if phase else ""
+        logger.error(
+            "ABFE legs failed%s: %s. The other legs completed; re-run only these:",
+            label, ", ".join(failed),
+        )
+        for leg in failed:
+            logger.error("  cd %s && bash run.sh --force", self.abfe_dir / leg)
+        return failed
+
+    def _leg_status(self, leg_dir: Path) -> dict:
+        """Read the leg's ``status.json`` (written by its ``run.sh``)."""
+        import json
+
+        status_file = Path(leg_dir) / "status.json"
+        try:
+            return json.loads(status_file.read_text())
+        except (OSError, ValueError):
+            return {}
 
     def run_abfe_with_early_stop(self) -> dict:
         """Run the ABFE legs in two phases with an early-stop check.
@@ -323,7 +362,7 @@ class ABFE:
                 "Running the full workflow instead."
             )
             self.run_abfe()
-            result = self.analyze()
+            result = self.analyze(early_stop=False)
             self._log_final_result(result)
             return result
 
@@ -335,17 +374,25 @@ class ABFE:
             "stages (through '%s') for all legs first.",
             threshold, preprod_prefix,
         )
+        preprod_ok = {}
         for leg in legs:
             logger.info("Running ABFE leg '%s' pre-production stages ...", leg)
-            self._run_script(
-                self.abfe_dir / leg, script="run.preprod.sh", done_tag="preprod.done.tag"
+            preprod_ok[leg] = self._run_script(
+                self.abfe_dir / leg,
+                args=["--until", preprod_prefix],
+                done_tag="preprod.done.tag",
             )
+        self._report_failed_legs(preprod_ok, phase="pre-production")
 
         logger.info("Estimating ABFE from pre-production stage '%s' ...", preprod_prefix)
+        # Out of process on purpose: pymbar solves through JAX, which takes ~75% of
+        # a GPU on first use and holds it until the process exits, so running this
+        # estimate in-process would starve the production MD that follows it.
         pre_result = self.analyze(
             prod_prefix=preprod_prefix,
             done_tag="preprod.done.tag",
             run_trajectory_analysis=False,
+            out_of_process=True,
         )
         pre_dg = pre_result.get("total") if pre_result else None
 
@@ -364,13 +411,64 @@ class ABFE:
             "stage '%s' for all legs.",
             f"{pre_dg:.3f}" if pre_dg is not None else "n/a", threshold, prod_prefix,
         )
+        prod_ok = {}
         for leg in legs:
+            # A leg whose pre-production failed has no restart file to continue
+            # from, so its production stage would only fail again.
+            if not preprod_ok[leg]:
+                logger.warning(
+                    "Skipping production stage for leg '%s': its pre-production failed.", leg
+                )
+                prod_ok[leg] = False
+                continue
             logger.info("Running ABFE leg '%s' production stage ...", leg)
-            self._run_script(self.abfe_dir / leg, script="run.prod.sh", done_tag="done.tag")
+            prod_ok[leg] = self._run_script(
+                self.abfe_dir / leg, args=["--from", prod_prefix], done_tag="done.tag"
+            )
+        failed = self._report_failed_legs(prod_ok, phase="production")
 
-        result = self.analyze(prod_prefix=prod_prefix, force_run=True)
+        result = self.analyze(prod_prefix=prod_prefix, force_run=True, early_stop=False)
+        if not result and failed:
+            raise RuntimeError(
+                "No ABFE result: leg(s) "
+                f"{', '.join(failed)} failed. Fix them and re-run; the completed "
+                "legs will be skipped."
+            )
         self._log_final_result(result)
         return result
+
+    def _analyze_out_of_process(self, kwargs: dict) -> dict:
+        """Run :func:`analyze_abfe` in a child interpreter, then read the result.
+
+        pymbar solves through JAX, which takes ~75% of the first visible GPU on
+        its first computation and never hands it back -- dropping every
+        reference and forcing a GC frees nothing, because the pool belongs to
+        the XLA backend, which lives as long as the process does. Measured on an
+        A100: 30.8 GB of 40 GB, held for the rest of the run. So any analysis
+        with MD still to come has to run where the OS can reclaim it, which
+        means its own process. The child writes ``result.json``; we read it.
+
+        Its stdout/stderr are inherited rather than captured, so the analysis
+        log lands in the pipeline log like an in-process run would.
+        """
+        import json
+        import subprocess
+        import sys
+
+        code = (
+            "import json, sys\n"
+            "from easybfe.analysis.abfe import analyze_abfe\n"
+            "analyze_abfe(**json.loads(sys.argv[1]))\n"
+        )
+        payload = json.dumps(dict(kwargs, directory=str(self.abfe_dir)))
+        proc = subprocess.run([sys.executable, "-c", code, payload])
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"out-of-process ABFE analysis failed with exit code "
+                f"{proc.returncode}; see the analysis output above"
+            )
+        result_json = self.abfe_dir / "result.json"
+        return json.loads(result_json.read_text()) if result_json.is_file() else {}
 
     def analyze(
         self,
@@ -378,6 +476,8 @@ class ABFE:
         force_run: bool = False,
         done_tag: str = "done.tag",
         run_trajectory_analysis: bool = True,
+        early_stop: Optional[bool] = None,
+        out_of_process: bool = False,
     ) -> dict:
         """Run MBAR analysis on the completed ABFE directory.
 
@@ -399,6 +499,12 @@ class ABFE:
         run_trajectory_analysis : bool, optional
             Run the (slower) endpoint trajectory / interaction / Boresch
             analyses. Disabled for the quick pre-production estimate.
+        early_stop : bool, optional
+            Value recorded in ``result.json``'s ``early_stop`` field. Inferred
+            from the per-leg completion tags when ``None``.
+        out_of_process : bool, optional
+            Compute in a child interpreter instead of here. Required whenever MD
+            still has to run afterwards -- see :meth:`_analyze_out_of_process`.
         """
         import json
 
@@ -412,15 +518,19 @@ class ABFE:
             "Analyzing ABFE (prod_prefix=%s, T=%.2f K, done_tag=%s)",
             prod_prefix, temperature, done_tag,
         )
+        kwargs = dict(
+            prod_prefix=prod_prefix,
+            temperature=temperature,
+            force_run=force_run,
+            done_tag=done_tag,
+            run_trajectory_analysis=run_trajectory_analysis,
+            early_stop=early_stop,
+        )
         try:
-            result = analyze_abfe(
-                self.abfe_dir,
-                prod_prefix=prod_prefix,
-                temperature=temperature,
-                force_run=force_run,
-                done_tag=done_tag,
-                run_trajectory_analysis=run_trajectory_analysis,
-            )
+            if out_of_process:
+                result = self._analyze_out_of_process(kwargs)
+            else:
+                result = analyze_abfe(self.abfe_dir, **kwargs)
         except Exception as exc:
             if result_json.is_file():
                 logger.warning(
@@ -464,6 +574,41 @@ class ABFE:
             "  TOTAL     dG = %.3f +/- %.3f kcal/mol",
             result.get("total", nan), result.get("total_std", nan),
         )
+        self._log_diagnostics(result)
+
+    def _log_diagnostics(self, result: dict) -> None:
+        """Log the convergence / overlap / exchange-rate diagnostics."""
+        convergence = result.get("convergence") or {}
+        block = result.get("block_average") or {}
+        if convergence:
+            logger.info(
+                "  convergence: %s (forward %.3f +/- %.3f, backward %.3f +/- %.3f)",
+                "converged" if convergence.get("is_converged") else "NOT converged",
+                convergence.get("final_forward", float("nan")),
+                convergence.get("final_forward_error", float("nan")),
+                convergence.get("final_backward", float("nan")),
+                convergence.get("final_backward_error", float("nan")),
+            )
+        if block.get("mean") is not None:
+            logger.info(
+                "  block average: %.3f +/- %.3f kcal/mol (spread over blocks)",
+                block["mean"], block.get("std", float("nan")),
+            )
+        for leg, summary in (result.get("legs") or {}).items():
+            leg_conv = summary.get("convergence") or {}
+            overlap = summary.get("overlap") or {}
+            exchange = summary.get("exchange")
+            min_overlap = overlap.get("min_adjacent")
+            logger.info(
+                "  %-9s converged=%s  min adjacent overlap=%s  exchange rate=%s",
+                leg,
+                leg_conv.get("is_converged"),
+                f"{min_overlap:.3f}" if min_overlap is not None else "n/a",
+                f"{exchange['exchange_rate']:.3f} (min {exchange['exchange_rate_min']:.3f}, "
+                f"{exchange['n_exchanges']} attempts)"
+                if exchange and exchange.get("exchange_rate") is not None
+                else "n/a",
+            )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -509,24 +654,35 @@ class ABFE:
         self,
         directory: os.PathLike,
         script: str = "run.sh",
+        args: Optional[list] = None,
         done_tag: str = "done.tag",
-    ) -> None:
-        """Run ``script`` in ``directory`` (blocking), streaming output to a log.
+    ) -> bool:
+        """Run ``script`` in ``directory`` (blocking), capturing its output.
 
-        The generated scripts are idempotent (they skip when their completion tag
-        is already present), so re-running the pipeline resumes from where it
-        stopped. The captured stdout/stderr of the script is echoed into the
-        pipeline log so it is recorded in ``abfe.log``.
+        The script owns its own tag state machine and resumes at the first stage
+        that has not completed, so re-running is safe. ``--force`` is passed
+        because the pipeline is the orchestrator here and decides retry policy:
+        a leg that failed on an earlier invocation should be retried rather than
+        blocked by its own ``error.tag``. (Run the script by hand without
+        ``--force`` and that guard still applies.)
+
+        Failures are reported, not raised — the caller runs the remaining legs.
 
         Parameters
         ----------
         directory : os.PathLike
             Directory containing ``script``.
         script : str, optional
-            Script file name to execute (e.g. ``"run.preprod.sh"``).
+            Script file name to execute.
+        args : list, optional
+            Extra arguments, e.g. ``["--until", "04.pre_prod"]``.
         done_tag : str, optional
-            Completion tag for ``script``. Stale ``running``/``error``/``killed``
-            tags sharing the same prefix are cleared before launching.
+            Completion tag that means this phase is already finished.
+
+        Returns
+        -------
+        bool
+            ``True`` when the phase is complete (or was already complete).
         """
         directory = Path(directory)
         run_sh = directory / script
@@ -534,18 +690,27 @@ class ABFE:
             raise FileNotFoundError(f"{script} not found in {directory}")
         if (directory / done_tag).is_file():
             logger.info("Found %s in %s; skipping.", done_tag, directory)
-            return
-        # Stale tags (sharing this script's tag prefix) would make the script
-        # skip; clear them so a fresh local run can proceed.
-        prefix = done_tag[:-len("done.tag")] if done_tag.endswith("done.tag") else ""
-        for tag in (f"{prefix}error.tag", f"{prefix}running.tag", f"{prefix}killed.tag"):
-            (directory / tag).unlink(missing_ok=True)
+            return True
 
+        argv = [script, "--force", *(str(a) for a in (args or []))]
         log_path = directory / f"pipeline_{Path(script).stem}.log"
-        cmd = ["bash", "-c", f"bash {shlex.quote(script)} > {shlex.quote(str(log_path))} 2>&1"]
-        run_command(cmd, cwd=str(directory), raise_error=True)
-        logger.info("Finished %s in %s (log: %s)", script, directory, log_path)
+        shell_cmd = " ".join(shlex.quote(a) for a in ["bash", *argv])
+        cmd = ["bash", "-c", f"{shell_cmd} > {shlex.quote(str(log_path))} 2>&1"]
+        return_code, _, _ = run_command(cmd, cwd=str(directory), raise_error=False)
+
         self._log_script_output(directory, script, log_path)
+        if return_code == 0:
+            logger.info("Finished %s in %s (log: %s)", " ".join(argv), directory, log_path)
+            return True
+
+        status = self._leg_status(directory)
+        logger.error(
+            "%s failed in %s (exit code %s, stage '%s'): %s",
+            " ".join(argv), directory, return_code,
+            status.get("stage", "unknown"),
+            status.get("error_excerpt") or f"see {log_path}",
+        )
+        return False
 
     def _log_script_output(self, directory: Path, script: str, log_path: Path) -> None:
         """Echo a script's captured output into the pipeline log (abfe.log)."""

@@ -1,15 +1,23 @@
 import os
 import json
+import logging
 from pathlib import Path
+from typing import Optional
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
 
-from .mbar import run_mbar, save_convergence_plots, annotate_convergence_to_conv_df
+from .mbar import run_mbar, save_convergence_plots, annotate_convergence_to_conv_df, MBARResult
+from .remd import parse_remlog
 from .trajectory import post_process_trajectory, compute_rmsd, plot_rmsd
 from .interaction import analyze_interactions_for_trajectory, plot_interactions
 from .boresch import analyze_boresch_lambda, lambda_directories, plot_boresch_coordinates
+
+
+logger = logging.getLogger(__name__)
+
+LEGS = ("complex", "solvent", "restraint")
 
 
 def _cleanup_mdanalysis_offsets(wdir: Path, prod_prefix: str) -> None:
@@ -30,13 +38,21 @@ def _worker_count(n_jobs: int, task_count: int) -> int:
 
 
 def _topology_path(leg_directory: Path) -> Path:
-    preferred = leg_directory / "system.prmtop"
-    if preferred.is_file():
-        return preferred
-    topologies = sorted(leg_directory.glob("*.prmtop"))
-    if not topologies:
-        raise FileNotFoundError(f"No Amber topology found in {leg_directory}")
-    return max(topologies, key=lambda path: path.stat().st_size)
+    """Topology used to read a leg's trajectory.
+
+    The built-system PDB is preferred over the Amber prmtop because it carries the
+    chain identifiers and residue numbers inherited from the input protein (a
+    prmtop has none, so MDAnalysis would renumber residues from 1). This mirrors
+    the plain-MD analysis path, which also reads ``<basename>.pdb``.
+    """
+    for preferred in (leg_directory / "system.pdb", leg_directory / "system.prmtop"):
+        if preferred.is_file():
+            return preferred
+    for pattern in ("*.pdb", "*.prmtop"):
+        topologies = sorted(leg_directory.glob(pattern))
+        if topologies:
+            return max(topologies, key=lambda path: path.stat().st_size)
+    raise FileNotFoundError(f"No topology found in {leg_directory}")
 
 
 def _endpoint_trajectory_analysis(
@@ -165,6 +181,135 @@ def _run_trajectory_analysis(wdir: Path, prod_prefix: str, n_jobs: int, force_ru
         _cleanup_mdanalysis_offsets(wdir, prod_prefix)
 
 
+def _floats(values) -> list[float]:
+    """JSON-friendly float list (``NaN``/``inf`` become ``None``)."""
+    return [
+        None if not np.isfinite(value) else float(value)
+        for value in np.asarray(values, dtype=float)
+    ]
+
+
+def _convergence_summary(conv_df: pd.DataFrame) -> dict:
+    """Forward/backward convergence of one free energy series as plain data.
+
+    ``is_converged`` reuses the criterion of
+    :func:`~easybfe.analysis.mbar.annotate_convergence_to_conv_df` (forward and
+    backward estimates within the final forward error of the final estimate) and
+    requires it to hold over the whole second half of the simulation, not just
+    at the last point.
+    """
+    fractions = conv_df["data_fraction"].to_numpy(dtype=float)
+    converged = conv_df["Converged"].to_numpy(dtype=bool)
+    second_half = fractions >= 0.5
+    return {
+        "data_fraction": _floats(fractions),
+        "forward": _floats(conv_df["Forward"]),
+        "forward_error": _floats(conv_df["Forward_Error"]),
+        "backward": _floats(conv_df["Backward"]),
+        "backward_error": _floats(conv_df["Backward_Error"]),
+        "converged": [bool(value) for value in converged],
+        "is_converged": bool(converged[second_half].all()) if second_half.any() else False,
+        "final_forward": float(conv_df["Forward"].iloc[-1]),
+        "final_forward_error": float(conv_df["Forward_Error"].iloc[-1]),
+        "final_backward": float(conv_df["Backward"].iloc[-1]),
+        "final_backward_error": float(conv_df["Backward_Error"].iloc[-1]),
+    }
+
+
+def _block_average_summary(conv_df: pd.DataFrame) -> dict:
+    """Block-averaged free energies of one series as plain data.
+
+    ``std`` is the spread of the per-block estimates (the band drawn by
+    :func:`~easybfe.analysis.mbar.plot_block_average`), which is an
+    estimator-independent measure of how much the estimate drifts across the
+    trajectory.
+    """
+    blocks = conv_df["Block_Average"].to_numpy(dtype=float)
+    finite = blocks[np.isfinite(blocks)]
+    return {
+        "data_fraction": _floats(conv_df["data_fraction"]),
+        "values": _floats(blocks),
+        "errors": _floats(conv_df["Block_Average_Error"]),
+        "mean": float(finite.mean()) if finite.size else None,
+        "std": float(finite.std()) if finite.size else None,
+    }
+
+
+def _overlap_summary(overlap: np.ndarray) -> dict:
+    """Nearest-neighbour overlap of an MBAR overlap matrix.
+
+    Only the sub-/super-diagonal entries matter in practice: a small
+    ``min_adjacent`` flags a lambda gap where the windows barely share phase
+    space, which is the usual cause of a poorly determined leg. Judge the values
+    against ``1 / n_states``, the overlap of a ladder whose windows sample the
+    very same distribution (0.042 for 24 windows), not against 1.
+    """
+    matrix = np.asarray(overlap, dtype=float)
+    n_states = int(matrix.shape[0]) if matrix.ndim == 2 else 0
+    if n_states < 2:
+        return {
+            "n_states": n_states,
+            "adjacent": [],
+            "min_adjacent": None,
+            "mean_adjacent": None,
+        }
+    adjacent = np.diag(matrix, k=1)
+    return {
+        "n_states": n_states,
+        "adjacent": _floats(adjacent),
+        "min_adjacent": float(np.min(adjacent)),
+        "mean_adjacent": float(np.mean(adjacent)),
+    }
+
+
+def _leg_summary(result: MBARResult, leg_directory: Path, prod_prefix: str) -> dict:
+    """Per-leg diagnostics: free energy, convergence, overlap, exchange rate."""
+    summary = {
+        "dg": float(result.dg),
+        "dg_std": float(result.dg_std),
+        "convergence": _convergence_summary(result.convergence),
+        "block_average": _block_average_summary(result.convergence),
+        "overlap": _overlap_summary(result.overlap),
+    }
+    # The remlog only exists for H-REMD stages (``use_remd: true``); a plain
+    # (e.g. pre-production) stage has no exchanges to report.
+    summary["exchange"] = parse_remlog(leg_directory / f"{prod_prefix}.log")
+    return summary
+
+
+def _leg_status(leg_directory: Path) -> dict:
+    """Read a leg's ``status.json``, the file its ``run.sh`` maintains."""
+    try:
+        return json.loads((leg_directory / "status.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _format_leg_status(status: dict) -> str:
+    """One-line summary of a leg's status for the log."""
+    summary = f"{status.get('state', 'unknown')} at stage {status.get('stage', '?')}"
+    excerpt = status.get("error_excerpt")
+    if excerpt:
+        summary += f" -- {excerpt.splitlines()[0]}"
+    return summary
+
+
+def _infer_early_stop(wdir: Path) -> bool:
+    """True when the legs stopped after the pre-production phase.
+
+    A leg's ``run.sh`` writes ``preprod.done.tag`` after the second-to-last
+    stage and ``done.tag`` after the last one, so a leg carrying the former but
+    not the latter never ran its production stage.
+    """
+    leg_dirs = [wdir / leg for leg in LEGS if (wdir / leg).is_dir()]
+    if not leg_dirs:
+        return False
+    return all(
+        (leg_dir / "preprod.done.tag").is_file() and not (leg_dir / "done.tag").is_file()
+        for leg_dir in leg_dirs
+    )
+
+
 def analyze_abfe(
     directory: os.PathLike,
     prod_prefix: str = "05.prod",
@@ -173,7 +318,38 @@ def analyze_abfe(
     n_jobs: int = -1,
     done_tag: str = "done.tag",
     run_trajectory_analysis: bool = True,
+    early_stop: Optional[bool] = None,
 ):
+    """Analyze a finished ABFE directory and write ``result.json``.
+
+    Parameters
+    ----------
+    directory : os.PathLike
+        ABFE directory holding the ``complex``/``solvent``/``restraint`` legs,
+        ``boresch.dat`` and (on output) ``result.json``.
+    prod_prefix : str, optional
+        Production stage name to analyze (also the remlog basename).
+    temperature : float, optional
+        Simulation temperature in Kelvin.
+    force_run : bool, optional
+        Recompute even when ``result.json`` already exists.
+    n_jobs : int, optional
+        Workers for the trajectory analyses. ``-1`` uses up to 4.
+    done_tag : str, optional
+        Per-leg completion tag gating which legs are analyzed.
+    run_trajectory_analysis : bool, optional
+        Run the endpoint trajectory / interaction / Boresch analyses.
+    early_stop : bool, optional
+        Value of the ``early_stop`` field in ``result.json``. Inferred from the
+        per-leg completion tags when ``None`` (see :func:`_infer_early_stop`).
+
+    Returns
+    -------
+    dict
+        Per-leg and total free energies, plus the ``early_stop`` flag and
+        ``convergence``/``block_average``/``legs`` diagnostics. Empty when a leg
+        is missing.
+    """
     wdir = Path(directory)
 
     if not force_run and (wdir / 'result.json').is_file():
@@ -184,14 +360,30 @@ def analyze_abfe(
         return res
 
     results = {}
-    for leg in ['complex', 'solvent', 'restraint']:
+    missing = []
+    for leg in LEGS:
         if not (wdir / leg / done_tag).is_file():
+            missing.append(leg)
             continue
         results[leg] = run_mbar(wdir / leg, prod_prefix, temperature)
-    boresch = float((wdir / 'boresch.dat').read_text().strip())
 
-    if 'complex' not in results or 'solvent' not in results or 'restraint' not in results:
+    if missing:
+        # Say which leg is missing and why: a silent empty result here used to
+        # send people looking for a bug in the analysis instead of at the leg
+        # that never finished.
+        logger.error(
+            "Cannot compute the total dG: leg(s) %s have no %s. Per-leg state:",
+            ", ".join(missing), done_tag,
+        )
+        for leg in missing:
+            status = _leg_status(wdir / leg)
+            logger.error(
+                "  %-9s %s", leg,
+                _format_leg_status(status) if status else f"no status.json in {wdir / leg}",
+            )
         return {}
+
+    boresch = float((wdir / 'boresch.dat').read_text().strip())
 
     dg = -results['complex'].dg + results['solvent'].dg + results['restraint'].dg + boresch
     dg_std = np.linalg.norm([results['complex'].dg_std, results['solvent'].dg_std, results['restraint'].dg_std])
@@ -238,6 +430,17 @@ def analyze_abfe(
         "boresch": boresch,
         "total": dg,
         "total_std": dg_std,
+        "early_stop": _infer_early_stop(wdir) if early_stop is None else bool(early_stop),
+        "prod_prefix": prod_prefix,
+        "temperature": temperature,
+        # Diagnostics of the combined dG (the per-leg series propagated into
+        # conv_df above) followed by the per-leg ones.
+        "convergence": _convergence_summary(conv_df),
+        "block_average": _block_average_summary(conv_df),
+        "legs": {
+            leg: _leg_summary(results[leg], wdir / leg, prod_prefix)
+            for leg in LEGS
+        },
     }
 
     with (wdir / "result.json").open("w") as f:
