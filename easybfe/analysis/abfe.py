@@ -200,7 +200,7 @@ def _convergence_summary(conv_df: pd.DataFrame) -> dict:
     """
     fractions = conv_df["data_fraction"].to_numpy(dtype=float)
     converged = conv_df["Converged"].to_numpy(dtype=bool)
-    second_half = fractions >= 0.5
+    second_half = fractions > 0.5
     return {
         "data_fraction": _floats(fractions),
         "forward": _floats(conv_df["Forward"]),

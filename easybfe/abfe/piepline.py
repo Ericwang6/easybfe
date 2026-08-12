@@ -150,7 +150,12 @@ class ABFE:
                 result = self.run_abfe_with_early_stop()
             else:
                 self.run_abfe()
-                result = self.analyze(early_stop=False)
+                # force_run: analyze_abfe returns an existing result.json
+                # untouched, so a run resumed on top of an earlier, shorter
+                # attempt would report that stale number instead of the legs
+                # that just finished. The early-stop path already forces its
+                # production analysis for the same reason.
+                result = self.analyze(force_run=True, early_stop=False)
                 self._log_final_result(result)
             logger.info("=== ABFE pipeline finished: %s ===", self.root)
             return result

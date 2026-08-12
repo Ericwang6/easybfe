@@ -175,7 +175,7 @@ class Ligand(BaseModel):
     @classmethod
     def from_directory(cls, directory: os.PathLike, stem: Optional[str] = None):
         directory = Path(directory).expanduser().resolve()
-        stem = Path(directory).stem if stem is not None else stem
+        stem = Path(directory).stem if stem is None else stem
         loader = LigandLoader()
         sdf = directory / f'{stem}.sdf'
         if not sdf.is_file():
