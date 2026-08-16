@@ -22,10 +22,35 @@ import openmm.unit as unit
 import parmed
 
 from .utils import convert_to_xml
-from ..core.ligand import Ligand
+from ..core.ligand import LIGPACK_SUFFIX, Ligand
 
 
 logger = logging.getLogger(__name__)
+
+
+def _is_ligpack(dest: os.PathLike) -> bool:
+    """Whether an output destination names a ``.ligpack`` archive rather than a directory."""
+    return Path(dest).suffix.lower() == LIGPACK_SUFFIX
+
+
+def _scratch_dir_for(dest: os.PathLike) -> Path:
+    """Return the ``.smff.tmp`` working directory for an output destination.
+
+    For a ligpack destination there is no output directory to hide it in, so it
+    goes next to the archive as a dot-prefixed sibling.
+    """
+    dest = Path(dest).expanduser().resolve()
+    if _is_ligpack(dest):
+        return dest.with_name(f'.{dest.stem}.smff.tmp')
+    return dest / '.smff.tmp'
+
+
+def _dump_ligand(ligand: Ligand, dest: os.PathLike) -> None:
+    """Write a parametrized ligand to a directory or a ``.ligpack`` archive."""
+    if _is_ligpack(dest):
+        ligand.dump_ligpack(dest)
+    else:
+        ligand.dump(dest)
 
 
 def _openmm_platform_for_validation():
@@ -274,28 +299,31 @@ class SmallMoleculeForceField(abc.ABC):
     def _run(self, ligand: Ligand, wdir: os.PathLike = None):
         """
         Execute the complete parametrization workflow for a single ligand.
-        
+
         This method orchestrates the full parametrization process by calling
         :meth:`_setup`, :meth:`_parametrize` (subclass-specific), and :meth:`_validate`
         (base class validation)         in sequence within a temporary directory (or ``output_dir/.smff.tmp``
         when an output directory is set), removed after success unless
         :attr:`keep_cache` is True.
-        
+
         Parameters
         ----------
         ligand : Ligand
             Ligand object to parametrize.
-        
+        wdir : os.PathLike, optional
+            Output destination: a directory, or a path ending in ``.ligpack``
+            to write the ligand as a single zipped archive instead.
+
         Returns
         -------
         Ligand
             Ligand object with parametrized topology files and validated parameters.
-        
+
         See Also
         --------
         :meth:`run` : Public interface supporting parallel execution.
         """
-        tmpd = tempfile.mkdtemp() if wdir is None else Path(wdir).resolve() / '.smff.tmp'
+        tmpd = tempfile.mkdtemp() if wdir is None else _scratch_dir_for(wdir)
         Path(tmpd).mkdir(exist_ok=True, parents=True)
         pid = os.getpid()
         logger.info(
@@ -353,7 +381,7 @@ class SmallMoleculeForceField(abc.ABC):
         if not self.keep_cache:
             shutil.rmtree(tmpd)
         if wdir is not None:
-            ligand.dump(wdir)
+            _dump_ligand(ligand, wdir)
         return ligand
     
     def _run_wrapper(self, args):
@@ -364,23 +392,30 @@ class SmallMoleculeForceField(abc.ABC):
         ligand: list[Ligand] | Ligand,
         output_base_dir: str | Path | None = None,
         nprocs: int = -1,
+        ligpack: bool = False,
     ) -> Ligand | list[Ligand]:
         """
         Parametrize one or more ligands with optional parallel execution.
-        
+
         Parameters
         ----------
         ligand : Ligand or list of Ligand
             Single ligand or list of ligands to parametrize.
         output_base_dir : str or Path, optional
             Directory for dumped outputs (prmtop, inpcrd, etc.). If the input is
-            a list of ligands, each is written under ``output_base_dir / ligand.name``. 
-            For a single ligand, files are written directly under ``output_base_dir``. 
+            a list of ligands, each is written under ``output_base_dir / ligand.name``.
+            For a single ligand, files are written directly under ``output_base_dir``.
             Duplicate names among multiple ligands are automatically disambiguated.
         nprocs : int, default=-1
             Number of parallel processes. If -1, uses all available CPUs.
             If 1, runs sequentially without multiprocessing overhead.
-        
+        ligpack : bool, default=False
+            Write each ligand as a ``.ligpack`` archive instead of a directory:
+            ``output_base_dir / '{ligand.name}.ligpack'`` for a list of ligands,
+            and ``output_base_dir`` itself (suffix appended when missing) for a
+            single ligand. A single-ligand ``output_base_dir`` that already ends
+            in ``.ligpack`` is treated as one regardless of this flag.
+
         Returns
         -------
         Ligand or list of Ligand
@@ -437,7 +472,12 @@ class SmallMoleculeForceField(abc.ABC):
                     lig.name = new_name
                 names_count[lig.name] += 1
                 input_names.append(lig.name)
-                out_dir = base_dir if single_input else base_dir / lig.name
+                if single_input:
+                    out_dir = base_dir
+                    if ligpack and not _is_ligpack(out_dir):
+                        out_dir = out_dir.with_name(out_dir.name + LIGPACK_SUFFIX)
+                else:
+                    out_dir = base_dir / (f'{lig.name}{LIGPACK_SUFFIX}' if ligpack else lig.name)
                 output_dirs.append(out_dir)
         else:
             output_dirs = [None for _ in range(len(input_ligands))]

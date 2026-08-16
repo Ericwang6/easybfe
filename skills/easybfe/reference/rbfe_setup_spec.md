@@ -10,9 +10,9 @@ See [assets/config_rbfe_5ns.yaml](../assets/config_rbfe_5ns.yaml) for a complete
 | Field | Type | Required | Description |
 | ----- | ---- | -------- | ----------- |
 | `protein` | path | yes | Receptor PDB file |
-| `ligandA` | path | no | Single-pair mode ligand A directory |
-| `ligandB` | path | no | Single-pair mode ligand B directory |
-| `ligand_list` | list of paths | no | Network mode ligand directories |
+| `ligandA` | path | no | Single-pair mode ligand A directory or `.ligpack` archive |
+| `ligandB` | path | no | Single-pair mode ligand B directory or `.ligpack` archive |
+| `ligand_list` | list of paths | no | Network mode ligand directories or `.ligpack` archives |
 | `network` | object | no | Network-mode edge generation (`algorithm`, `options`) |
 | `ligand_base` | path | no | Parent directory used to resolve `ligandA`/`ligandB`/`ligand_list` entries |
 | `output_dir` | path | no | Output directory for single-pair mode |

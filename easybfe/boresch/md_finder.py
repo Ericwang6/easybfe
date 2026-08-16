@@ -369,8 +369,16 @@ interaction_plip.analyze_multiple_frames` schema). When ``None`` it is generated
     ):
         """Pick the best candidate by COM closeness then lowest score.
 
-        Returns a ``(protein_anchors, ligand_anchors, rst_vals)`` tuple or
-        ``None`` when no candidate passes the angle filter.
+        Returns a ``(protein_anchors, ligand_anchors, rst_vals)`` tuple, or
+        ``None`` only when no candidate yields a finite degree-of-freedom
+        series at all.
+
+        Candidates whose mean alpha/theta fall outside ``[angle_min,
+        angle_max]`` are set aside rather than discarded. If *every* candidate
+        misses the window the lowest-scoring one is used, with a warning: a
+        poor restraint on an awkward pose is more useful than refusing to run
+        the ligand, and the score's ``1/(sin(alpha) sin(theta))**sin_power``
+        factor already ranks the near-collinear geometries last.
 
         When ``protein_atoms`` and ``ligand_mol`` are provided, both the selected
         candidate and the rejected/non-selected candidates (anchor atoms,
@@ -379,6 +387,7 @@ interaction_plip.analyze_multiple_frames` schema). When ``None`` it is generated
         :meth:`_log_candidates`.
         """
         evaluated = []
+        out_of_window = []
         rejected = []
         for candidate in candidates:
             series = self._degree_of_freedom_series(candidate, protein_frames, ligand_frames)
@@ -404,24 +413,19 @@ interaction_plip.analyze_multiple_frames` schema). When ``None`` it is generated
                 "alpha_range": alpha_range,
                 "theta_range": theta_range,
             }
+            # An out-of-window angle is not disqualifying on its own: it is only
+            # preferable to avoid it. Score these candidates anyway and set them
+            # aside, so that a pose where *every* candidate misses the window can
+            # still be restrained by the least-bad one instead of failing outright.
+            angle_reason = None
             if not (self.angle_min <= mean_alpha <= self.angle_max):
-                rejected.append(
-                    {
-                        "candidate": candidate,
-                        "reason": f"alpha outside angle window [{self.angle_min}, {self.angle_max}]",
-                        **angle_info,
-                    }
+                angle_reason = (
+                    f"alpha outside angle window [{self.angle_min}, {self.angle_max}]"
                 )
-                continue
-            if not (self.angle_min <= mean_theta <= self.angle_max):
-                rejected.append(
-                    {
-                        "candidate": candidate,
-                        "reason": f"theta outside angle window [{self.angle_min}, {self.angle_max}]",
-                        **angle_info,
-                    }
+            elif not (self.angle_min <= mean_theta <= self.angle_max):
+                angle_reason = (
+                    f"theta outside angle window [{self.angle_min}, {self.angle_max}]"
                 )
-                continue
 
             sigma_r = float(np.std(r)) / 10.0  # Angstrom -> nm
             # Plain std for the bond angles (converted to radians for unit
@@ -457,32 +461,53 @@ interaction_plip.analyze_multiple_frames` schema). When ``None`` it is generated
                 sigma_beta,
                 sigma_phi,
             )
-            evaluated.append(
-                {
-                    "candidate": candidate,
-                    "score": score,
-                    "com_distance": com_distance,
-                    "rst_vals": rst_vals,
-                    "sigmas": sigmas,
-                    "mean_alpha": mean_alpha,
-                    "mean_theta": mean_theta,
-                    "l1": l1,
-                }
-            )
+            item = {
+                "candidate": candidate,
+                "score": score,
+                "com_distance": com_distance,
+                "rst_vals": rst_vals,
+                "sigmas": sigmas,
+                "mean_alpha": mean_alpha,
+                "mean_theta": mean_theta,
+                "l1": l1,
+            }
+            if angle_reason is None:
+                evaluated.append(item)
+            else:
+                out_of_window.append({**item, "reason": angle_reason})
 
-        if not evaluated:
+        if evaluated:
+            # Choose the ligand anchor closest to the center of mass, then the
+            # lowest-scoring restraint that uses that anchor.
+            closest_l1 = min(evaluated, key=lambda item: item["com_distance"])["l1"]
+            subset = [item for item in evaluated if item["l1"] == closest_l1]
+            best = min(subset, key=lambda item: item["score"])
+            pool, discarded = evaluated, rejected + out_of_window
+        elif out_of_window:
+            # Every candidate missed the angle window. Rather than declaring the
+            # pose unrestrainable, fall back to the lowest-scoring candidate: the
+            # score divides by (sin(alpha) sin(theta))**sin_power, so it already
+            # penalises the near-collinear geometry the window screens for, and
+            # its minimum is the least degenerate anchor set available.
+            best = min(out_of_window, key=lambda item: item["score"])
+            pool, discarded = out_of_window, rejected
+            logger.warning(
+                "All %d Boresch candidates fall outside the angle window "
+                "[%s, %s]; falling back to the lowest-scoring candidate "
+                "(alpha = %.1f deg, theta = %.1f deg, score = %.3g). The "
+                "restraint is usable but its geometry is poorer than usual, so "
+                "treat this ligand's dG with more caution.",
+                len(out_of_window), self.angle_min, self.angle_max,
+                best["mean_alpha"], best["mean_theta"], best["score"],
+            )
+        else:
             if protein_atoms is not None and ligand_mol is not None:
                 report = self._log_candidates([], rejected, None, protein_atoms, ligand_mol)
                 self._write_candidates_report(report)
             return None
 
-        # Choose the ligand anchor closest to the center of mass, then the
-        # lowest-scoring restraint that uses that anchor.
-        closest_l1 = min(evaluated, key=lambda item: item["com_distance"])["l1"]
-        subset = [item for item in evaluated if item["l1"] == closest_l1]
-        best = min(subset, key=lambda item: item["score"])
         if protein_atoms is not None and ligand_mol is not None:
-            report = self._log_candidates(evaluated, rejected, best, protein_atoms, ligand_mol)
+            report = self._log_candidates(pool, discarded, best, protein_atoms, ligand_mol)
             self._write_candidates_report(report)
         candidate = best["candidate"]
         return tuple(candidate[:3]), tuple(candidate[3:]), best["rst_vals"]
@@ -606,7 +631,13 @@ interaction_plip.analyze_multiple_frames` schema). When ``None`` it is generated
             f"{phi0:.1f}({math.degrees(sigma_ph):.2f})",
             f"{item['com_distance']:.2f}",
             f"{item['score']:.3e}",
-            "selected" if marker == "*" else "passed",
+            # A scored candidate carries a 'reason' only when it was kept as an
+            # angle-window fallback, so never report those as having passed.
+            (
+                f"{'selected' if marker == '*' else 'fallback'} ({item['reason']})"
+                if item.get("reason")
+                else ("selected" if marker == "*" else "passed")
+            ),
         ]
 
     def _rejected_row(self, item, protein_atoms, ligand_mol):
@@ -662,10 +693,17 @@ interaction_plip.analyze_multiple_frames` schema). When ``None`` it is generated
         str
             The assembled report (summary line, legend and candidate table).
         """
+        n_fallback = sum(1 for item in evaluated if item.get("reason"))
+        n_passed = len(evaluated) - n_fallback
         summary = (
             f"Boresch candidate selection: {len(evaluated) + len(rejected)} total, "
-            f"{len(evaluated)} passed angle filter, {len(rejected)} rejected."
+            f"{n_passed} passed angle filter, {len(rejected)} rejected."
         )
+        if n_fallback:
+            summary += (
+                f" No candidate passed the angle window; {n_fallback} out-of-window "
+                "candidate(s) were scored and the lowest-scoring one selected."
+            )
 
         headers = [
             "sel", "ligand_anchors", "protein_anchors",

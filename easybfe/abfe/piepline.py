@@ -30,7 +30,7 @@ from typing import Optional, Union
 from .config import AmberAbfeConfig
 from ..cmd import run_command
 from ..config import read_file
-from ..core import Ligand, Protein
+from ..core import LIGPACK_SUFFIX, Ligand, Protein
 
 
 logger = logging.getLogger(__name__)
@@ -150,7 +150,12 @@ class ABFE:
                 result = self.run_abfe_with_early_stop()
             else:
                 self.run_abfe()
-                result = self.analyze(early_stop=False)
+                # force_run: analyze_abfe returns an existing result.json
+                # untouched, so a run resumed on top of an earlier, shorter
+                # attempt would report that stale number instead of the legs
+                # that just finished. The early-stop path already forces its
+                # production analysis for the same reason.
+                result = self.analyze(force_run=True, early_stop=False)
                 self._log_final_result(result)
             logger.info("=== ABFE pipeline finished: %s ===", self.root)
             return result
@@ -161,10 +166,10 @@ class ABFE:
     # Steps
     # ------------------------------------------------------------------
     def prepare_ligand(self) -> Ligand:
-        """Load (directory) or parameterize (file) the ligand into ``ligand/``."""
-        if self.ligand_input.is_dir():
+        """Load (directory / ``.ligpack``) or parameterize (raw file) the ligand into ``ligand/``."""
+        if self.ligand_input.is_dir() or self.ligand_input.suffix.lower() == LIGPACK_SUFFIX:
             logger.info("Loading already-parameterized ligand from %s", self.ligand_input)
-            ligand = Ligand.from_directory(self.ligand_input)
+            ligand = Ligand.from_path(self.ligand_input)
             ligand.dump(self.ligand_dir)
         else:
             from ..smff import parametrize_ligands

@@ -10,8 +10,8 @@ See [assets/config_abfe_5ns.yaml](../assets/config_abfe_5ns.yaml) for a complete
 | Field          | Type          | Required | Description                                                                            |
 | -------------- | ------------- | -------- | -------------------------------------------------------------------------------------- |
 | `protein`      | path          | yes      | Receptor PDB file                                                                      |
-| `ligand`       | path          | no       | Single ligand directory (mutually exclusive with `ligand_batch`)                       |
-| `ligand_batch` | list of paths | no       | Multiple ligand directories                                                            |
+| `ligand`       | path          | no       | Single ligand directory or `.ligpack` archive (mutually exclusive with `ligand_batch`) |
+| `ligand_batch` | list of paths | no       | Multiple ligand directories or `.ligpack` archives                                     |
 | `ligand_base`  | path          | no       | Parent directory; ligand paths are resolved relative to this                           |
 | `output_dir`   | path          | no       | Output directory (single-ligand mode)                                                  |
 | `output_base`  | path          | no       | Base output directory (batch mode; each ligand writes to `output_base/{ligand_name}/`) |

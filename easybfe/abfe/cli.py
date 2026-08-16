@@ -22,7 +22,7 @@ def abfe():
     "-l",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Override config: single ligand directory (mutually exclusive with --ligand-batch).",
+    help="Override config: single parameterized ligand directory or .ligpack archive (mutually exclusive with --ligand-batch).",
 )
 @click.option(
     "--protein",
@@ -50,7 +50,7 @@ def abfe():
     "-L",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Override config: file listing ligand directories (one per line). Mutually exclusive with --ligand.",
+    help="Override config: file listing ligand directories or .ligpack archives (one per line). Mutually exclusive with --ligand.",
 )
 @click.option(
     "--output-base",
@@ -124,7 +124,7 @@ def setup(config: Path, ligand: Path | None, protein: Path | None, output: Path 
     "-l",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Override config: ligand directory or raw ligand file (e.g. SDF).",
+    help="Override config: parameterized ligand directory or .ligpack archive, or a raw ligand file to parameterize (e.g. SDF).",
 )
 @click.option(
     "--protein",

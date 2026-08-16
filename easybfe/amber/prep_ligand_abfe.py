@@ -12,7 +12,7 @@ from .prep_utils import *
 from ..config import AmberFepSimulationConfig, AmberWtSettings
 from ..abfe.config import AmberAbfeConfig
 from .workflow import Step, Workflow, create_script_for_workflows
-from ..core import Ligand, Protein
+from ..core import Ligand, Protein, ligand_path_label
 from ..boresch import BORESCH_FINDER_REGISTRY, BoreschRestraint, compute_boresch_energy, BoreschRestraintGeneratorConfig
 from ..parallel import run_func_parallel
 
@@ -219,8 +219,8 @@ def setup_ligand_abfe(
     (output_dir / 'boresch.dat').write_text(str(boresch_fe))
 
 
-def _resolve_ligand_directory(ligand_base: Path | None, component: os.PathLike) -> Path:
-    """Resolve a ligand directory under optional ``ligand_base`` or as an absolute path."""
+def _resolve_ligand_path(ligand_base: Path | None, component: os.PathLike) -> Path:
+    """Resolve a ligand directory or ``.ligpack`` under optional ``ligand_base``, else as a full path."""
     comp = Path(component)
     if ligand_base is not None:
         return (Path(ligand_base).expanduser().resolve() / comp).resolve()
@@ -235,7 +235,7 @@ def _setup_ligand_abfe_one(
     output_dir: Path,
 ) -> None:
     """Load ligand from path and call setup_ligand_abfe (used for batch runs)."""
-    ligand = Ligand.from_directory(ligand_path)
+    ligand = Ligand.from_path(ligand_path)
     setup_ligand_abfe(
         ligand=ligand,
         protein=protein,
@@ -251,8 +251,9 @@ def setup_ligand_abfe_from_config(
 ) -> None:
     """Run setup_ligand_abfe from an :class:`AmberAbfeConfig`.
 
-    **Ligand directories**
+    **Ligand inputs**
 
+    Each ligand is a parameterized ligand directory or a ``.ligpack`` archive.
     If :attr:`~AmberAbfeConfig.ligand_base` is set, ligand paths are resolved as
     ``ligand_base / relative_path``; otherwise they are treated as full paths.
 
@@ -290,7 +291,7 @@ def setup_ligand_abfe_from_config(
         nprocs = num_procs if num_procs is not None else -1
         args_list = [
             (
-                _resolve_ligand_directory(lig_base, path),
+                _resolve_ligand_path(lig_base, path),
                 protein,
                 leg_configs,
                 config.boresch,
@@ -310,12 +311,12 @@ def setup_ligand_abfe_from_config(
     if config.ligand is None:
         raise ValueError("AmberAbfeConfig must set either ligand or ligand_batch")
 
-    ligand_dir = _resolve_ligand_directory(lig_base, config.ligand)
+    ligand_path = _resolve_ligand_path(lig_base, config.ligand)
 
     if config.output_base is not None:
         run_out = (
             Path(config.output_base).expanduser().resolve()
-            / Path(config.ligand).name
+            / ligand_path_label(config.ligand)
         )
     elif config.output_dir is not None:
         run_out = Path(config.output_dir).expanduser().resolve()
@@ -326,7 +327,7 @@ def setup_ligand_abfe_from_config(
         )
 
     run_out.mkdir(parents=True, exist_ok=True)
-    ligand = Ligand.from_directory(ligand_dir)
+    ligand = Ligand.from_path(ligand_path)
     setup_ligand_abfe(
         ligand=ligand,
         protein=protein,

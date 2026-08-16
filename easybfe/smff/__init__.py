@@ -117,6 +117,7 @@ def parametrize_ligands(
     nprocs: int = -1,
     resp_engine: str = "",
     keep_cache: bool = False,
+    ligpack: bool = False,
     **kwargs: Any,
 ) -> list[Ligand]:
     """
@@ -170,6 +171,11 @@ def parametrize_ligands(
     keep_cache : bool, default=False
         If ``True``, keep the intermediate ``.smff.tmp`` working directory after
         parametrization.
+    ligpack : bool, default=False
+        Write ``.ligpack`` archives instead of ligand directories: ``output``
+        itself for a single ligand (``.ligpack`` appended when missing), and
+        ``output_base / '{name}.ligpack'`` per ligand otherwise. An ``output``
+        that already ends in ``.ligpack`` implies this.
     **kwargs
         Additional keyword arguments forwarded to
         :meth:`easybfe.core.ligand.LigandLoader.load` (e.g. ``only_first=True``,
@@ -217,7 +223,7 @@ def parametrize_ligands(
                 "--output (-o) will override --output-base (-O) for single ligand mode.",
                 UserWarning,
             )
-        result = parametrizer.run(ligands[0], output, nprocs)
+        result = parametrizer.run(ligands[0], output, nprocs, ligpack=ligpack)
         return [result] if result is not None else []
     else:
         if output_base is None:
@@ -225,4 +231,4 @@ def parametrize_ligands(
                 "--output-base (-O) is required when parametrizing multiple ligands "
                 "or when --output (-o) is not provided."
             )
-        return parametrizer.run(ligands, output_base, nprocs)
+        return parametrizer.run(ligands, output_base, nprocs, ligpack=ligpack)

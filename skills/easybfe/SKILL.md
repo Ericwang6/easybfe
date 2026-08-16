@@ -66,8 +66,9 @@ The `LIGAND_FILES` accepts SDF, MOL, MOL2, CSV, SMI files. If the input file doe
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
-| `--output` | `-o` | — | Output directory (single ligand; files written directly here) |
+| `--output` | `-o` | — | Output for a single ligand: a directory (files written directly here), or a path ending in `.ligpack` for a zipped ligand |
 | `--output-base` | `-O` | — | Base dir for per-ligand subdirectories (required for multiple ligands) |
+| `--ligpack` | | off | Write `.ligpack` archives instead of directories (`-O` gets one `{name}.ligpack` per ligand) |
 | `--forcefield` | `-f` | `gaff2` | Force field (e.g. `gaff2`, `openff-2.1.0`, or path to `.xml`) |
 | `--charge-method` | `-c` | `bcc` | Charge method (`bcc`, `gas`, `resp`) |
 | `--engine` | | auto | Backend: `acpype`, `openff`, or custom (auto-detected from FF) |
@@ -115,6 +116,23 @@ The program will use `bcc` as the default charge model. Always use `bcc` unless 
 easybfe ligand pargen ligands.sdf -c resp -O ./ligands
 ```
 
+### The `.ligpack` format
+
+A `.ligpack` is a zip archive holding exactly what a parameterized ligand directory holds — `{name}.sdf` plus `{name}.prmtop`, `{name}.inpcrd`, `{name}.pdb`, `{name}.xml`. It is interchangeable with a ligand directory everywhere a parameterized ligand is consumed: `abfe setup`, `abfe pipeline`, `rbfe setup` and `md setup` all accept either. Use it to move one ligand around as a single file.
+
+```bash
+# one ligand as one file
+easybfe ligand pargen mol.sdf -f gaff2 -o ./ligands/mol.ligpack
+
+# a whole batch as one archive per ligand
+easybfe ligand pargen ligands.sdf -f gaff2 -O ./ligands --ligpack
+
+# consumed exactly like a directory
+easybfe abfe setup config.yaml -l ./ligands/mol.ligpack -p protein.pdb -o ./abfe_run
+```
+
+Run directories named after a ligand input drop the suffix, so `mol.ligpack` and a `mol/` directory produce identically named outputs.
+
 ### Constrained docking reference
 
 For constrained pose generation with `easybfe ligand cdock` (reference-guided embedding, Vina optimization, and optional OpenMM minimization), see:
@@ -127,7 +145,7 @@ For constrained pose generation with `easybfe ligand cdock` (reference-guided em
 
 ### `easybfe abfe setup`
 
-Prepare ABFE simulation input files from a YAML/JSON config. Ligand inputs must be parameterized directories (output of `ligand pargen`).
+Prepare ABFE simulation input files from a YAML/JSON config. Ligand inputs must be parameterized directories or `.ligpack` archives (output of `ligand pargen`).
 
 ```
 easybfe abfe setup CONFIG [OPTIONS]
@@ -234,7 +252,7 @@ overlap far below `1 / n_states`) marks a gap that needs an extra lambda window.
 
 ### `easybfe rbfe setup`
 
-Prepare RBFE simulation input files from a YAML/JSON config. Ligand inputs must be parameterized directories (output of `ligand pargen`).
+Prepare RBFE simulation input files from a YAML/JSON config. Ligand inputs must be parameterized directories or `.ligpack` archives (output of `ligand pargen`).
 
 ```
 easybfe rbfe setup CONFIG [OPTIONS]
