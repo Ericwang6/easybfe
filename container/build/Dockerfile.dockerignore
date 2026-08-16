@@ -1,0 +1,25 @@
+# BuildKit reads <dockerfile>.dockerignore in preference to .dockerignore, so the
+# container build context is scoped here without touching the repository root.
+# Allow-list: only what the image actually needs.
+*
+
+!easybfe
+!environment.yml
+!pyproject.toml
+!README.md
+!LICENSE
+!container
+
+# ... minus everything under container/ that is not a build input.
+#
+# container/e2e-abfe-test is excluded on purpose: test systems, configs and results
+# never enter the image. They are mounted at run time instead, so changing a
+# test case does not change the image.
+container/e2e-abfe-test
+container/Amber26.pdf
+container/DEVELOP.md
+container/README.md
+
+**/__pycache__
+**/*.pyc
+**/.DS_Store

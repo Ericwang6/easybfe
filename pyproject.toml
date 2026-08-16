@@ -35,5 +35,11 @@ easybfe = "easybfe.cli:main"
 include = ["easybfe*"]
 exclude = ["tests*", "examples*", "docs*", "doc*"]
 
+[tool.setuptools.package-data]
+# Default workflow templates loaded relative to __file__ by
+# easybfe.config.amber.simulation; without this they are missing from a
+# non-editable install (`pip install .`).
+"easybfe.config.amber" = ["*.json"]
+
 [tool.setuptools_scm]
 write_to = "easybfe/_version.py"

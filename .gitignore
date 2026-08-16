@@ -200,3 +200,14 @@ amber-manuals
 .*.npz
 .*.lock
 tests/_*
+
+container/*.pdf 
+container/**/*.tar.bz2
+container/*.tar.bz2
+# --- container/ layout overrides -------------------------------------------
+# `build/` above (Python build artefacts) matches container/build/, which holds
+# the image build itself -- Dockerfile, build.sh and the source-patch scripts.
+# Re-include the directory, then re-exclude only the licensed AMBER tarball.
+!container/build/
+container/build/pmemd26.tar.bz2
+container/e2e-abfe-test/results
