@@ -15,9 +15,12 @@
 set -euo pipefail
 
 PROJECT="${PROJECT:-abfe-server-test}"
-REGION="${REGION:-us-central1}"
+REGION="${REGION:-us}"   # AR multi-region -> us-docker.pkg.dev (the Cloud Run
+                         # region in the comment above is a separate service)
 AR_REPO="${AR_REPO:-easybfe}"
-IMAGE_NAME="${IMAGE_NAME:-easybfe-amber26}"
+# EASYBFE_-prefixed: GCP Deep Learning VMs export a bare IMAGE_NAME (the VM's own
+# OS image) from /etc/profile.d/env.sh, which would silently retarget the sweep.
+IMAGE_NAME="${EASYBFE_IMAGE_NAME:-easybfe-amber26}"
 KEEP_TAGS="${KEEP_TAGS:-latest}"
 DELETE=0
 

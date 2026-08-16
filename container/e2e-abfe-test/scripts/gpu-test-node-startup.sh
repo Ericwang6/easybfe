@@ -25,7 +25,7 @@ meta() {  # meta <key> <default>
         2>/dev/null || echo "$2"
 }
 
-IMAGE=$(meta image "us-central1-docker.pkg.dev/abfe-server-test/easybfe/easybfe-amber26:latest")
+IMAGE=$(meta image "us-docker.pkg.dev/abfe-server-test/easybfe/easybfe-amber26:latest")
 LABEL=$(meta run-label "gpu")
 CONFIG=$(meta config "config.yaml")
 RESULTS=$(meta results-gs "gs://abfe-server-test-easybfe-results")
@@ -106,7 +106,7 @@ mkdir -p "${WORK}" && cd "${WORK}"
 gcloud storage cp "${BUNDLE}" ./e2e-abfe-test-bundle.tar.gz && tar xzf e2e-abfe-test-bundle.tar.gz
 chmod +x e2e-abfe-test/run-test.sh
 
-gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+gcloud auth configure-docker us-docker.pkg.dev --quiet
 docker pull "${IMAGE}" || { echo "PULL FAILED"; echo "pull-failed" > /var/log/node-done; exit 1; }
 
 docker run --rm --gpus all "${IMAGE}" selfcheck.sh

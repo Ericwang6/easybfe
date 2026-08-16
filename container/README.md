@@ -50,7 +50,12 @@ container/
 | `--no-nccl` | NCCL on | Build `pmemd.cuda.MPI` without NCCL. On by default so multi-GPU-per-simulation runs have it; note the ABFE pipeline itself never reaches AMBER's NCCL path (one rank per λ window ⇒ one GPU per simulation group). See `DEVELOP.md` §4. |
 | `--tag TAG` | `latest` | |
 | `--cuda 12.6.3` | `12.6.3` | AMBER 26 accepts CUDA ≥ 11.8 and < 12.9; the base image's gcc must match (`DEVELOP.md` §3). |
-| `--push` | off | Also tags and pushes to Artifact Registry (`--project`, `--region`, `--ar-repo`). |
+| `--ompi-source [VER]` | apt 4.1.2 | Build OpenMPI `VER` (default 5.0.6) from source and link `pmemd.cuda.MPI` against it instead of Ubuntu's apt OpenMPI. |
+| `--cache local\|remote` | `local` | `remote` reads **and** writes BuildKit layers to `us-docker.pkg.dev/abfe-server-test/easybfe/<image>:buildcache`, so a fresh VM reuses a previous machine's nvcc output instead of recompiling pmemd. Uses `docker buildx` with a `docker-container` builder (the default driver cannot export a registry cache) and `--load`s the result back into the local image store. The cache blobs contain compiled AMBER — the registry must stay **private**. |
+| `--cache-ref REF` | derived | Full override of the remote cache image ref; implies `--cache remote`. |
+
+Pushing is a separate script, not a build flag:
+`./container/build/push_gcp.sh` (`--project`, `--region`, `--ar-repo`).
 
 Three gates fail the build rather than shipping a bad image:
 
@@ -61,12 +66,14 @@ Three gates fail the build rather than shipping a bad image:
   `numpy, scipy.sparse, openmm, rdkit, parmed, MDAnalysis, alchemlyb, pymbar, openfe, easybfe`
   and `easybfe --version` must run.
 
-The build compiles pmemd twice (serial CUDA, and CUDA+MPI+NCCL). On 32 vCPUs
-that is ~50 min cold for four SM targets, plus ~15 min of conda solve.
+The build compiles pmemd once, with CUDA+MPI+NCCL; that single configure emits
+both `pmemd.cuda` and `pmemd.cuda.MPI` (`DEVELOP.md` §3). On 32 vCPUs that is
+~35 min cold for four SM targets, plus ~15 min of conda solve.
 
 ```bash
-./container/build/build.sh --push --project abfe-server-test --region us-central1
-# -> us-central1-docker.pkg.dev/abfe-server-test/easybfe/easybfe-amber26:latest
+./container/build/build.sh --cache remote
+./container/build/push_gcp.sh --project abfe-server-test --region us
+# -> us-docker.pkg.dev/abfe-server-test/easybfe/easybfe-amber26:latest
 ```
 
 ## 3. Check an image
@@ -280,7 +287,7 @@ differently:
   cannot pull from Artifact Registry:
 
   ```bash
-  gcloud artifacts repositories add-iam-policy-binding easybfe --location=us-central1 \
+  gcloud artifacts repositories add-iam-policy-binding easybfe --location=us \
       --member=serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com \
       --role=roles/artifactregistry.reader
   ```
@@ -290,7 +297,7 @@ differently:
 There is exactly one deliverable tag:
 
 ```
-us-central1-docker.pkg.dev/abfe-server-test/easybfe/easybfe-amber26:latest
+us-docker.pkg.dev/abfe-server-test/easybfe/easybfe-amber26:latest
 ```
 
 `build/scripts/registry-cleanup.sh` prunes stale manifests:

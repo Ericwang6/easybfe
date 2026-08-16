@@ -72,7 +72,8 @@ From `easybfe/abfe/piepline.py` and `easybfe/amber/workflow.py`:
 ## 3. Image design
 
 **Two stages.** Stage 1 (`nvidia/cuda:12.6.3-devel-ubuntu22.04`) compiles
-pmemd26 twice — serial CUDA, and CUDA+MPI+NCCL. Stage 2
+pmemd26 once, with `-DCUDA=TRUE -DMPI=TRUE`, which emits both `pmemd.cuda` and
+`pmemd.cuda.MPI` (see "One configure, two binaries" below). Stage 2
 (`nvidia/cuda:12.6.3-runtime-ubuntu22.04`) takes only the installed
 `/opt/amber/pmemd26` tree. The ~4 GB devel toolchain never ships, and neither
 does the AMBER source: it is deleted in stage 1, so no layer of the shipped
@@ -110,9 +111,34 @@ gcc < 13.3 with CUDA 12.4–12.6 is accepted, which is exactly what this base
 image provides. CUDA 12.x minor-version compatibility means the image runs on
 any driver ≥ 525.
 
+**One configure, two binaries.** `-DMPI=TRUE` is additive, not a mode switch, so
+`-DCUDA=TRUE -DMPI=TRUE` installs the serial `pmemd.cuda` *and* `pmemd.cuda.MPI`.
+In `pmemd/src/CMakeLists.txt` the serial executable is added and installed
+unconditionally inside `if(CUDA)` (`add_executable` :149, `install` :165, and the
+`pmemd.cuda_SPFP` → `pmemd.cuda` symlink :202 sits outside every `if(MPI)`);
+`if(MPI)` only *adds* the `.MPI` target beside it (:167–183).
+`pmemd/src/cuda/CMakeLists.txt` has the same shape a level down — the serial
+`pmemd_cuda_${PRECISION}` library (:56) is unconditional, `if(MPI)` (:84) adds a
+second `_mpi` library.
+
+An earlier version of the Dockerfile ran a separate `-DMPI=FALSE` pass first. It
+built exactly the subset the MPI pass already builds, and its `make install` was
+then overwritten by the MPI pass's. Removed: the image is byte-identical apart
+from one detail below, and stage 1 lost roughly a third of its compile time.
+
+The one difference is NCCL. `cuda/CMakeLists.txt:80–82` links `nccl` into the
+*serial* library too when `NCCL` is on, so `pmemd.cuda` now links `libnccl`,
+which the old `-DMPI=FALSE` pass (run before the NCCL patch was applied, and
+without `-DNCCL`) did not. Harmless — `libnccl.so.2` is in the CUDA `-runtime`
+base — and the runtime stage's `ldd` gate covers it. The build's `cuobjdump` and
+`ldd` loops read both binaries by name, so if `-DMPI=TRUE` ever stopped emitting
+the serial one, stage 1 fails instead of shipping an image whose `01.em` dies on
+a GPU node (§5).
+
 **GPU targets: `sm_70 sm_75 sm_80 sm_89`** = V100, T4, A100, L4, so one tag
-covers the fleet. AMBER otherwise compiles SM 5.0 → 9.0, eleven nvcc passes,
-twice. `limit-cuda-arch.sh` appends a filter *after* AMBER's own arch selection
+covers the fleet. AMBER otherwise compiles SM 5.0 → 9.0, eleven nvcc passes —
+and it does that once for the serial CUDA library and again for the MPI one.
+`limit-cuda-arch.sh` appends a filter *after* AMBER's own arch selection
 (dropping the `-gencode` pairs and re-adding the requested ones) rather than
 editing the vendor's version logic. A card whose SM is missing has no native
 code in the image — AMBER ships no PTX-only fallback — so the build verifies
@@ -187,8 +213,9 @@ default search path locates the library unaided.
 description to the parallel `3RDPARTY_TOOL_USES` list (they are indexed against
 each other; editing one alone misaligns the build report). Two lines, applied to
 the extracted copy in stage 1 — no vendor source is forked, and `src/` is not
-touched. It is applied *after* the serial build so editing it does not
-invalidate that layer's cache.
+touched. It used to sit *after* the serial `-DMPI=FALSE` build so that editing it
+left that layer cached; with that build gone it is applied immediately before the
+single compile, which is now the only thing it can invalidate.
 
 The env vars are kept because `FindNCCL.cmake` does read `$ENV{NCCL_HOME}`; the
 other two are inert (find_path/find_library consult cache variables, not the
@@ -492,14 +519,21 @@ us-central1-a suggested b and c, b suggested a and c, while all three refused.
 
 Build and run are separated: the build needs 32 CPUs and no GPU, and running it
 on an A100 node would burn GPU-hours at ~30× the price. A cold build of four SM
-targets is ~50 min of nvcc plus ~15 min of conda solve; with the serial-CUDA
-layer cached it is **29 min**.
+targets was ~50 min of nvcc plus ~15 min of conda solve while the redundant
+serial-CUDA pass was still in the Dockerfile (**29 min** with that layer cached);
+dropping it takes roughly a third off the nvcc time, and there is no longer a
+separate layer to cache.
 
 BuildKit cache behaviour that cost a full recompile this round: `COPY` keys on
 file *contents*, so moving `pmemd26.tar.bz2` to a new path stayed cached — but a
 one-line **comment** edit to `limit-cuda-arch.sh` invalidated that step and
-every step after it, including both pmemd compiles. Put the files you are likely
+every step after it, including the pmemd compile. Put the files you are likely
 to touch as late in the Dockerfile as their dependencies allow.
+
+Remote layer cache: `build.sh --cache remote` reads and writes BuildKit layers to
+`us-docker.pkg.dev/abfe-server-test/…:buildcache`, so a fresh VM can reuse a
+previous machine's nvcc output instead of recompiling. Local cache is the
+default (§2).
 
 Other things that bite on a fresh project:
 

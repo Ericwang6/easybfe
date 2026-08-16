@@ -1,8 +1,9 @@
 # EasyBFE + AMBER 26 (pmemd.cuda / pmemd.cuda.MPI), multi-GPU, portable.
 #
 # Stage 1 compiles the licensed AMBER 26 pmemd sources (container/build/pmemd26.tar.bz2,
-# not redistributable -- keep the resulting image in a private registry) twice:
-# once serial-CUDA and once CUDA+MPI+NCCL, both into /opt/amber/pmemd26.
+# not redistributable -- keep the resulting image in a private registry) in a
+# single CUDA+MPI+NCCL pass that emits *both* pmemd.cuda and pmemd.cuda.MPI
+# into /opt/amber/pmemd26.
 # Stage 2 is the full CUDA *runtime* image carrying the complete CUDA library
 # set (including NCCL), the installed pmemd tree, and the complete conda
 # environment from the repository's environment.yml.
@@ -39,10 +40,11 @@ FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS pmemd-builder
 #   80 = A100 (Ampere)     89 = L4 (Ada)
 #
 # AMBER's cmake otherwise builds every SM from 5.0 to 9.0 -- eleven nvcc passes
-# over the CUDA kernels, twice. Four targets is roughly 2x the compile time of
-# one and gives a binary that runs natively on all four cards; leaving an
-# architecture out would make that card fall back to JIT-compiling PTX at every
-# launch (or fail outright, since AMBER does not ship a PTX-only target).
+# over the CUDA kernels, and it does that once for the serial CUDA library and
+# again for the MPI one. Four targets is roughly 2x the compile time of one and
+# gives a binary that runs natively on all four cards; leaving an architecture
+# out would make that card fall back to JIT-compiling PTX at every launch (or
+# fail outright, since AMBER does not ship a PTX-only target).
 ARG SM_ARCHS="70 75 80 89"
 
 # Link NCCL into pmemd.cuda.MPI. On by default here.
@@ -154,28 +156,40 @@ ENV PMEMD_CMAKE_ARGS="-Wno-dev \
     -DBUILD_PERL=FALSE \
     -DBUILD_GUI=FALSE"
 
-# pmemd.cuda (serial, one GPU: used by any non-MPI step)
-RUN mkdir -p /build/build-cuda && cd /build/build-cuda \
-    && { cmake /build/pmemd26_src ${PMEMD_CMAKE_ARGS} -DCUDA=TRUE -DMPI=FALSE > cmake.log 2>&1 \
-         || { tail -60 cmake.log; exit 1; }; } \
-    && grep -E "CUDA version|Checking CUDA and GNU|Restricted CUDA targets" cmake.log \
-    && make -j"$(nproc)" install \
-    && cd /build && rm -rf /build/build-cuda
-
 # AMBER 26 cannot configure `-DNCCL=TRUE` out of the box: nccl is missing from
 # the master 3RDPARTY_TOOLS list that drives the NEED_<tool> flags, so
 # find_package(NCCL) is never called and cmake reports NCCL as "not found" with
 # the header and library sitting in plain sight. enable-nccl-tool.sh registers
 # it. See the script for the full trace.
-#
-# Applied here rather than next to limit-cuda-arch.sh above because only the MPI
-# build asks for NCCL -- keeping it after the serial build means editing this
-# does not invalidate that build's layer.
 COPY container/build/scripts/enable-nccl-tool.sh /build/enable-nccl-tool.sh
 RUN bash /build/enable-nccl-tool.sh /build/pmemd26_src/cmake/3rdPartyTools.cmake
 
-# pmemd.cuda.MPI (one rank per lambda window, ranks share the node's GPUs;
-# NCCL linked in for the multi-GPU-per-simulation case)
+# Both binaries, from one configure:
+#
+#   pmemd.cuda      serial, one GPU -- every non-MPI step, and `01.em`, which
+#                   AMBER refuses to run in parallel on GPUs at all
+#                   ("Minimization is NOT supported in parallel on GPUs").
+#   pmemd.cuda.MPI  one rank per lambda window, ranks share the node's GPUs;
+#                   NCCL linked in for the multi-GPU-per-simulation case.
+#
+# -DMPI=TRUE is additive, not a mode switch. In pmemd/src/CMakeLists.txt the
+# serial executable is added and installed unconditionally inside `if(CUDA)`
+# (add_executable at :149, install at :165, and the pmemd.cuda_SPFP -> pmemd.cuda
+# symlink at :202 sits outside every `if(MPI)`); `if(MPI)` only *adds* the
+# .MPI target beside it (:167-183). cuda/CMakeLists.txt is the same shape one
+# level down -- the serial pmemd_cuda_${PRECISION} library at :56 is
+# unconditional and `if(MPI)` at :84 adds a second _mpi library.
+#
+# So a separate -DMPI=FALSE pass, which this used to do first, built exactly the
+# subset this pass already builds and then had its install overwritten by this
+# one. It was removed; nothing in the image changed except the ~1/3 of stage 1
+# spent producing it.
+#
+# One real difference, from cuda/CMakeLists.txt:80-82: `if(NCCL)` links nccl
+# into the serial library too, so pmemd.cuda now links libnccl where the old
+# -DMPI=FALSE pass (built before the NCCL patch, without -DNCCL) did not.
+# Harmless -- libnccl.so.2 ships in the CUDA runtime base -- and the runtime
+# stage's ldd gate covers it.
 #
 # /opt/openmpi/bin first on PATH: empty/absent in OMPI_MODE=apt (falls through
 # to the apt mpicc on PATH), the source-built OMPI_VERSION's mpicc/mpicxx in
@@ -197,6 +211,11 @@ RUN rm -rf /build/pmemd26_src /build/limit-cuda-arch.sh /build/enable-nccl-tool.
 # Verify the build did what the arguments asked, rather than silently falling
 # back. Both are build-time gates: a wrong answer here is far cheaper to find
 # than on a GPU node.
+#
+# This is also what pins the single-configure build above honest: the loop reads
+# ${AMBER_PREFIX}/bin/pmemd.cuda as well as pmemd.cuda.MPI, so if -DMPI=TRUE ever
+# stopped emitting the serial binary the build fails here rather than shipping an
+# image whose `01.em` dies on a GPU node.
 RUN set -eux; \
     echo "== SM targets actually in the binaries =="; \
     # `cuobjdump -lelf` lists the cubins inside the fatbin, one per
