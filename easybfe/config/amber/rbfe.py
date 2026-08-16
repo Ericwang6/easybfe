@@ -17,9 +17,18 @@ class LigandNetworkConfig(BaseModel):
 
 class AmberLigandRbfeConfig(BaseModel):
     protein: Optional[Path] = None
-    ligandA: Optional[Path] = None
-    ligandB: Optional[Path] = None
-    ligand_list: Optional[List[Path]] = None
+    ligandA: Optional[Path] = Field(
+        default=None,
+        description="Ligand A: a parameterized ligand directory or a .ligpack archive.",
+    )
+    ligandB: Optional[Path] = Field(
+        default=None,
+        description="Ligand B: a parameterized ligand directory or a .ligpack archive.",
+    )
+    ligand_list: Optional[List[Path]] = Field(
+        default=None,
+        description="Network mode: ligand directories or .ligpack archives to build a perturbation network from.",
+    )
     network: LigandNetworkConfig = Field(default_factory=LigandNetworkConfig)
     output_dir: Optional[Path] = Field(
         default=None,

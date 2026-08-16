@@ -30,7 +30,10 @@ def ligand():
     "output",
     type=click.Path(path_type=Path),
     default=None,
-    help="Output directory for a single ligand (files written directly here).",
+    help=(
+        "Output for a single ligand: a directory (files written directly here), "
+        "or a path ending in .ligpack to write a single zipped ligand archive."
+    ),
 )
 @click.option(
     "--output-base",
@@ -39,6 +42,16 @@ def ligand():
     type=click.Path(path_type=Path),
     default=None,
     help="Base directory for per-ligand output subdirectories (required for multiple ligands).",
+)
+@click.option(
+    "--ligpack",
+    is_flag=True,
+    default=False,
+    help=(
+        "Write .ligpack archives instead of ligand directories "
+        "(--output-base gets one {name}.ligpack per ligand). "
+        "Implied by an --output path ending in .ligpack."
+    ),
 )
 @click.option(
     "--forcefield",
@@ -124,6 +137,7 @@ def pargen(
     ligand_files: tuple[Path, ...],
     output: Path | None,
     output_base: Path | None,
+    ligpack: bool,
     forcefield: str,
     charge_method: str,
     engine: str,
@@ -164,6 +178,7 @@ def pargen(
         nprocs=nprocs,
         resp_engine=resp_engine,
         keep_cache=keep_cache,
+        ligpack=ligpack,
         **loader_kwargs,
     )
 

@@ -122,15 +122,19 @@ solvent:
       nstlim: 12500
       dt: 0.002
       ofreq: 1250
+  # Pre-production: H-REMD, 500 ps (125 steps x 1000 exchanges x 4 fs).
+  # numexchg=1000 with bar_intervall = min(ntpr, nstlim) = 125 gives one MBAR
+  # datapoint per exchange, i.e. 1000 datapoints for the early-stop estimate.
   - type: prod
     name: 04.pre_prod
     exec: pmemd.cuda
-    use_remd: false
+    use_remd: true
     use_mpi: true
     cntrl:
-      nstlim: 125000
+      nstlim: 125
       dt: 0.004
       ofreq: 1250
+      numexchg: 1000
   - type: prod
     name: 05.prod
     exec: pmemd.cuda
@@ -210,15 +214,19 @@ complex:
       nstlim: 12500
       dt: 0.002
       ofreq: 1250
+  # Pre-production: H-REMD, 500 ps (125 steps x 1000 exchanges x 4 fs).
+  # numexchg=1000 with bar_intervall = min(ntpr, nstlim) = 125 gives one MBAR
+  # datapoint per exchange, i.e. 1000 datapoints for the early-stop estimate.
   - type: prod
     name: 04.pre_prod
     exec: pmemd.cuda
-    use_remd: false
+    use_remd: true
     use_mpi: true
     cntrl:
-      nstlim: 125000
+      nstlim: 125
       dt: 0.004
       ofreq: 1250
+      numexchg: 1000
   - type: prod
     name: 05.prod
     exec: pmemd.cuda
@@ -300,15 +308,19 @@ restraint:
       nstlim: 12500
       dt: 0.002
       ofreq: 1250
+  # Pre-production: H-REMD, 500 ps (125 steps x 1000 exchanges x 4 fs).
+  # numexchg=1000 with bar_intervall = min(ntpr, nstlim) = 125 gives one MBAR
+  # datapoint per exchange, i.e. 1000 datapoints for the early-stop estimate.
   - type: prod
     name: 04.pre_prod
     exec: pmemd.cuda
-    use_remd: false
+    use_remd: true
     use_mpi: true
     cntrl:
-      nstlim: 125000
+      nstlim: 125
       dt: 0.004
       ofreq: 1250
+      numexchg: 1000
   - type: prod
     name: 05.prod
     exec: pmemd.cuda

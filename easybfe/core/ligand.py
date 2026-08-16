@@ -5,6 +5,9 @@ This module provides a unified ligand loader that supports multiple input format
 including files (SDF, CSV, SMILES), pandas DataFrames, and RDKit molecule objects.
 """
 import io, os
+import shutil
+import tempfile
+import zipfile
 from collections import Counter
 from pathlib import Path
 from typing import Union, List, Optional, Any, Dict
@@ -19,6 +22,20 @@ from rdkit.Chem import AllChem, Descriptors, Crippen, Lipinski
 
 
 logger = logging.getLogger(__name__)
+
+LIGPACK_SUFFIX = '.ligpack'
+
+
+def ligand_path_label(path: os.PathLike) -> str:
+    """
+    Name to label a run directory with, given a ligand input path.
+
+    A ligand directory contributes its own name; a ``.ligpack`` archive
+    contributes its stem, so ``lig.ligpack`` and a ``lig/`` directory produce
+    identically named outputs.
+    """
+    p = Path(path)
+    return p.stem if p.suffix.lower() == LIGPACK_SUFFIX else p.name
 
 
 class Ligand(BaseModel):
@@ -150,7 +167,89 @@ class Ligand(BaseModel):
         for f, content in self.auxiliary_files.items():
             with open(os.path.join(dirname, f'{self.name}.{f}'), 'w' ) as f:
                 f.write(content)
-    
+
+    def dump_ligpack(self, filename: os.PathLike) -> Path:
+        """
+        Write the ligand as a ``.ligpack`` archive.
+
+        A ligpack is a zip file whose members are exactly the files
+        :meth:`dump` writes into a ligand directory (``{name}.sdf`` plus one
+        ``{name}.{ext}`` entry per auxiliary file), stored flat at the archive
+        root.
+
+        Parameters
+        ----------
+        filename : os.PathLike
+            Destination path. The ``.ligpack`` suffix is appended when missing.
+            An existing file is overwritten.
+
+        Returns
+        -------
+        Path
+            Path of the written archive.
+
+        Examples
+        --------
+        >>> ligand.dump_ligpack("benzene.ligpack")
+        """
+        path = Path(filename).expanduser().resolve()
+        if path.suffix != LIGPACK_SUFFIX:
+            path = path.with_name(path.name + LIGPACK_SUFFIX)
+        path.parent.mkdir(exist_ok=True, parents=True)
+
+        tmpd = tempfile.mkdtemp(prefix='ligpack-')
+        try:
+            self.dump(tmpd)
+            with zipfile.ZipFile(path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+                for f in sorted(Path(tmpd).iterdir()):
+                    zf.write(f, arcname=f.name)
+        finally:
+            shutil.rmtree(tmpd, ignore_errors=True)
+        return path
+
+    @classmethod
+    def from_ligpack(cls, src: os.PathLike):
+        """
+        Read a ligand from a ``.ligpack`` archive written by :meth:`dump_ligpack`.
+
+        Parameters
+        ----------
+        src : os.PathLike
+            Path to the ligpack archive.
+
+        Returns
+        -------
+        Ligand
+            The ligand, with every non-SDF archive member restored as an
+            auxiliary file (keyed by suffix, as in :meth:`from_directory`).
+
+        Raises
+        ------
+        FileNotFoundError
+            If the archive does not exist.
+        ValueError
+            If the file is not a zip archive or contains unsafe member names.
+        """
+        path = Path(src).expanduser().resolve()
+        if not path.is_file():
+            raise FileNotFoundError(f"Ligpack file not found: {path}")
+        if not zipfile.is_zipfile(path):
+            raise ValueError(f"Not a valid ligpack (zip) file: {path}")
+
+        tmpd = tempfile.mkdtemp(prefix='ligpack-')
+        try:
+            with zipfile.ZipFile(path) as zf:
+                for name in zf.namelist():
+                    member = Path(name)
+                    if member.is_absolute() or '..' in member.parts:
+                        raise ValueError(f"Unsafe member name in {path}: {name}")
+                zf.extractall(tmpd)
+            ligand = cls.from_directory(tmpd)
+        finally:
+            shutil.rmtree(tmpd, ignore_errors=True)
+        ligand.source = f'Init from {path}'
+        return ligand
+
     def embed(self, return_new: bool = True):
         mol = self.get_rdmol()
         if _need_3d(mol):
@@ -196,6 +295,44 @@ class Ligand(BaseModel):
         return ligand
     
     @classmethod
+    def from_path(cls, path: os.PathLike, stem: Optional[str] = None):
+        """
+        Load a parameterized ligand from a directory or a ``.ligpack`` archive.
+
+        The two are interchangeable everywhere a parameterized ligand is
+        consumed (ABFE/RBFE setup, the ABFE pipeline, plain MD setup).
+
+        Parameters
+        ----------
+        path : os.PathLike
+            Ligand directory or ``.ligpack`` archive.
+        stem : str, optional
+            File stem to prefer inside a ligand directory. Ignored for ligpacks,
+            whose stem always comes from the archived SDF member.
+
+        Returns
+        -------
+        Ligand
+
+        Raises
+        ------
+        FileNotFoundError
+            If ``path`` does not exist.
+        ValueError
+            If ``path`` is a file that is not a ligpack.
+        """
+        p = Path(path).expanduser().resolve()
+        if p.is_dir():
+            return cls.from_directory(p, stem=stem)
+        if not p.exists():
+            raise FileNotFoundError(f"Ligand path not found: {p}")
+        if p.suffix.lower() != LIGPACK_SUFFIX:
+            raise ValueError(
+                f"Expected a ligand directory or a {LIGPACK_SUFFIX} archive, got: {p}"
+            )
+        return cls.from_ligpack(p)
+
+    @classmethod
     def from_file(cls, src: os.PathLike, **kwargs):
         loader = LigandLoader()
         ligands = loader.load(src, **kwargs)
@@ -232,6 +369,7 @@ class LigandLoader:
     * SDF files (single or multiple molecules)
     * CSV files with name and SMILES columns
     * SMILES files (.smi, .smiles)
+    * Ligpack archives (.ligpack), a zipped ligand directory
     * Pandas DataFrames
     * Lists of RDKit molecule objects
 
@@ -434,6 +572,8 @@ class LigandLoader:
                         auto_naming=auto_naming,
                     )
                 )
+            elif p.suffix.lower() == LIGPACK_SUFFIX:
+                all_items.append(self._parse_ligpack(p))
             elif p.suffix.lower() in [".smi", ".smiles"]:
                 all_items.extend(
                     self._parse_smi(
@@ -496,6 +636,36 @@ class LigandLoader:
             if auto_naming and not items[i]['name']:
                 items[i]['name'] = f'{fpath.name}_mol_{i}'
         return items
+
+    def _parse_ligpack(self, fpath: Path) -> dict:
+        """
+        Parse the single ligand held in a ``.ligpack`` archive.
+
+        Parameters
+        ----------
+        fpath : Path
+            Path to the ligpack archive.
+
+        Returns
+        -------
+        dict
+            Dictionary with 'name', 'smiles', 'mol_block', 'auxiliary_files',
+            'dG_expt' and 'source' keys.
+
+        Notes
+        -----
+        The ligand name comes from the SDF member of the archive, never from
+        the archive filename, so a renamed ligpack still round-trips.
+        """
+        ligand = Ligand.from_ligpack(fpath)
+        return {
+            "name": ligand.name,
+            "smiles": ligand.smiles,
+            "mol_block": ligand.mol_block,
+            "auxiliary_files": ligand.auxiliary_files,
+            "dG_expt": ligand.dG_expt,
+            "source": f'Init from {fpath}',
+        }
 
     def _parse_smi(self, fpath: Path, use_stem: bool, only_first: bool, smi_col_index: int = 0, auto_naming: bool = False) -> List[dict]:
         """

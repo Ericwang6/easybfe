@@ -17,7 +17,7 @@ from ..config import AmberFepSimulationConfig, AmberWtSettings
 from ..parallel import run_func_parallel
 from .workflow import Step, Workflow, create_script_for_workflows
 from ..smff.utils import OpenmmXML
-from ..core import Ligand, Protein
+from ..core import Ligand, Protein, ligand_path_label
 from ..mapping import load_mapper
 from ..config.amber.rbfe import AmberLigandRbfeConfig, AtomMappingConfig
 from ..network import load_network_generator
@@ -541,7 +541,7 @@ def _pair_subdir_name(p0: os.PathLike, p1: os.PathLike) -> str:
     return f"{s0}~{s1}"
 
 
-def _resolve_ligand_directory(ligand_base: Path | None, component: os.PathLike) -> Path:
+def _resolve_ligand_path(ligand_base: Path | None, component: os.PathLike) -> Path:
     """Resolve a ligand directory under optional ``ligand_base`` or as an absolute path."""
     comp = Path(component)
     if ligand_base is not None:
@@ -550,16 +550,16 @@ def _resolve_ligand_directory(ligand_base: Path | None, component: os.PathLike) 
 
 
 def _setup_ligand_rbfe_one(job: tuple) -> None:
-    """Load ligands from directories and run :func:`setup_ligand_rbfe` (batch / parallel entry point).
+    """Load both ligands (directory or ``.ligpack``) and run :func:`setup_ligand_rbfe` (batch / parallel entry point).
 
     Parameters
     ----------
     job : tuple
-        ``(ligand_a_dir, ligand_b_dir, mapping, protein, leg_configs, output_dir)``.
+        ``(ligand_a_path, ligand_b_path, mapping, protein, leg_configs, output_dir)``.
     """
     ligand_a_dir, ligand_b_dir, mapping, protein, leg_configs, output_dir = job
-    ligandA = Ligand.from_directory(ligand_a_dir)
-    ligandB = Ligand.from_directory(ligand_b_dir)
+    ligandA = Ligand.from_path(ligand_a_dir)
+    ligandB = Ligand.from_path(ligand_b_dir)
     setup_ligand_rbfe(
         ligandA=ligandA,
         ligandB=ligandB,
@@ -576,8 +576,9 @@ def setup_ligand_rbfe_from_config(
 ) -> None:
     """Run RBFE setup from an :class:`AmberLigandRbfeConfig`.
 
-    **Ligand directories**
+    **Ligand inputs**
 
+    Each ligand is a parameterized ligand directory or a ``.ligpack`` archive.
     In network mode (`ligand_list`), each ligand entry is resolved as
     ``ligand_base / ligand`` when ligand_base is set, otherwise as a direct path.
     In single-pair mode (`ligandA` and `ligandB`), each ligand follows the same
@@ -610,8 +611,8 @@ def setup_ligand_rbfe_from_config(
         if config.output_base is None:
             raise ValueError("AmberLigandRbfeConfig.output_base is required when ligand_list is set")
 
-        ligand_dirs = [_resolve_ligand_directory(lig_base, lig) for lig in config.ligand_list]
-        ligands = [Ligand.from_directory(lig_dir) for lig_dir in ligand_dirs]
+        ligand_dirs = [_resolve_ligand_path(lig_base, lig) for lig in config.ligand_list]
+        ligands = [Ligand.from_path(lig_dir) for lig_dir in ligand_dirs]
         ligand_dir_by_name = {lig.name: lig_dir for lig, lig_dir in zip(ligands, ligand_dirs)}
         if len(ligand_dir_by_name) != len(ligands):
             raise ValueError("Ligand names must be unique for network generation")
@@ -653,7 +654,7 @@ def setup_ligand_rbfe_from_config(
     if config.output_base is not None:
         run_out = (
             Path(config.output_base).expanduser().resolve()
-            / f"{Path(config.ligandA).name}~{Path(config.ligandB).name}"
+            / f"{ligand_path_label(config.ligandA)}~{ligand_path_label(config.ligandB)}"
         )
     elif config.output_dir is not None:
         run_out = Path(config.output_dir).expanduser().resolve()
@@ -666,8 +667,8 @@ def setup_ligand_rbfe_from_config(
     run_out.mkdir(parents=True, exist_ok=True)
     _setup_ligand_rbfe_one(
         (
-            _resolve_ligand_directory(lig_base, config.ligandA),
-            _resolve_ligand_directory(lig_base, config.ligandB),
+            _resolve_ligand_path(lig_base, config.ligandA),
+            _resolve_ligand_path(lig_base, config.ligandB),
             config.atom_mapping,
             protein,
             leg_configs,

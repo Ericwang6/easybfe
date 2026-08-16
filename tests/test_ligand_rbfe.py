@@ -200,7 +200,7 @@ def test_setup_ligand_rbfe_from_config_network_mode(tmp_path: Path, monkeypatch)
         prep_ligand_rbfe.Protein, "from_pdb", lambda *args, **kwargs: SimpleNamespace(name="protein")
     )
     monkeypatch.setattr(
-        prep_ligand_rbfe.Ligand, "from_directory", lambda p: SimpleNamespace(name=Path(p).name)
+        prep_ligand_rbfe.Ligand, "from_path", lambda p: SimpleNamespace(name=Path(p).name)
     )
     monkeypatch.setattr(prep_ligand_rbfe, "load_network_generator", lambda *args, **kwargs: DummyGenerator())
     monkeypatch.setattr(

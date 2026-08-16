@@ -5,7 +5,7 @@ This module provides the core data structures for ligands, proteins, perturbatio
 and database models used throughout the EasyBFE package.
 """
 
-from .ligand import Ligand, LigandLoader
+from .ligand import LIGPACK_SUFFIX, Ligand, LigandLoader, ligand_path_label
 from .protein import Protein
 # from .perturbation import LigandPerturbation
 # from .sql_models import Base, ProteinDB, LigandDB, LigandPerturbationDB

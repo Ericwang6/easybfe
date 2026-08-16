@@ -68,14 +68,14 @@ def rbfe():
     "-a",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Override config: ligand A SDF or directory path.",
+    help="Override config: ligand A directory or .ligpack archive.",
 )
 @click.option(
     "--ligandB",
     "-b",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Override config: ligand B SDF or directory path.",
+    help="Override config: ligand B directory or .ligpack archive.",
 )
 @click.option(
     "--ligand-base",

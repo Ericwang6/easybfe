@@ -25,11 +25,11 @@ class AmberAbfeConfig(BaseModel):
     protein: Optional[Path] = Field(default=None, description="Protein PDB path.")
     ligand: Optional[Path] = Field(
         default=None,
-        description="Ligand input: a parameterized ligand directory or a raw ligand file (e.g. SDF).",
+        description="Ligand input: a parameterized ligand directory, a .ligpack archive, or a raw ligand file (e.g. SDF).",
     )
     ligand_batch: Optional[list[Path]] = Field(
         default=None,
-        description="List of ligand directories for batch setup (mutually exclusive with ligand).",
+        description="List of ligand directories or .ligpack archives for batch setup (mutually exclusive with ligand).",
     )
     output_dir: Optional[Path] = Field(
         default=None, description="Output directory for a single run."

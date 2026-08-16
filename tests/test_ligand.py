@@ -5,6 +5,7 @@ This module tests the Ligand class and LigandLoader class functionality.
 """
 import shutil
 import tempfile
+import zipfile
 from pathlib import Path
 import pytest
 import pandas as pd
@@ -97,6 +98,80 @@ class TestLigand:
         ligand.add_aux_file("ligand.prmtop", "new content")
         
         assert ligand.auxiliary_files == {"ligand.prmtop": "new content"}
+
+
+class TestLigpack:
+    """Test the .ligpack (zipped ligand directory) format."""
+
+    @pytest.fixture
+    def ligand(self, test_ligand_sdf):
+        lig = Ligand.from_file(test_ligand_sdf)
+        lig.add_aux_file("prmtop", "prmtop content\n")
+        lig.add_aux_file("inpcrd", "inpcrd content\n")
+        return lig
+
+    def test_ligpack_contents_match_directory(self, ligand, temp_dir):
+        """A ligpack holds exactly the files dump() writes into a directory."""
+        ligand.dump(temp_dir / 'dir')
+        ligand.dump_ligpack(temp_dir / 'lig.ligpack')
+
+        with zipfile.ZipFile(temp_dir / 'lig.ligpack') as zf:
+            members = sorted(zf.namelist())
+            assert members == sorted(p.name for p in (temp_dir / 'dir').iterdir())
+            assert members == [f'{ligand.name}.inpcrd', f'{ligand.name}.prmtop', f'{ligand.name}.sdf']
+            for name in members:
+                assert zf.read(name).decode() == (temp_dir / 'dir' / name).read_text()
+
+    def test_ligpack_round_trip(self, ligand, temp_dir):
+        """Dumping and reading back preserves identity, structure and aux files."""
+        path = ligand.dump_ligpack(temp_dir / 'lig.ligpack')
+        loaded = Ligand.from_ligpack(path)
+
+        assert loaded.name == ligand.name
+        assert loaded.smiles == ligand.smiles
+        assert loaded.auxiliary_files == ligand.auxiliary_files
+        assert Chem.MolToSmiles(loaded.get_rdmol()) == Chem.MolToSmiles(ligand.get_rdmol())
+
+    def test_suffix_appended_when_missing(self, ligand, temp_dir):
+        """A destination without the suffix gets one; the stem is untouched."""
+        path = ligand.dump_ligpack(temp_dir / 'lig')
+
+        assert path == (temp_dir / 'lig.ligpack').resolve()
+        assert path.is_file()
+
+    def test_name_survives_renamed_archive(self, ligand, temp_dir):
+        """The ligand name comes from the SDF member, not the archive filename."""
+        ligand.dump_ligpack(temp_dir / 'lig.ligpack')
+        shutil.move(temp_dir / 'lig.ligpack', temp_dir / 'renamed.ligpack')
+
+        assert Ligand.from_ligpack(temp_dir / 'renamed.ligpack').name == ligand.name
+
+    def test_load_via_from_file_and_loader(self, ligand, temp_dir):
+        """.ligpack is a first-class loader format."""
+        path = ligand.dump_ligpack(temp_dir / 'lig.ligpack')
+
+        assert Ligand.from_file(path).auxiliary_files == ligand.auxiliary_files
+        loaded = LigandLoader().load(str(path))
+        assert len(loaded) == 1
+        assert loaded[0].name == ligand.name
+        assert loaded[0].auxiliary_files == ligand.auxiliary_files
+
+    def test_from_ligpack_missing_file(self, temp_dir):
+        with pytest.raises(FileNotFoundError):
+            Ligand.from_ligpack(temp_dir / 'nope.ligpack')
+
+    def test_from_ligpack_not_a_zip(self, temp_dir):
+        bogus = temp_dir / 'bogus.ligpack'
+        bogus.write_text('not a zip')
+        with pytest.raises(ValueError, match='valid ligpack'):
+            Ligand.from_ligpack(bogus)
+
+    def test_from_ligpack_rejects_path_traversal(self, ligand, temp_dir):
+        path = ligand.dump_ligpack(temp_dir / 'lig.ligpack')
+        with zipfile.ZipFile(path, 'a') as zf:
+            zf.writestr('../escaped.txt', 'nope')
+        with pytest.raises(ValueError, match='Unsafe member name'):
+            Ligand.from_ligpack(path)
 
 
 class TestLigandLoader:

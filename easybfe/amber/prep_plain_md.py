@@ -48,7 +48,7 @@ def setup_plain_md(
     n_protein_res = 0
     protein_chain_ids: set = set()
 
-    ligand = ligand if isinstance(ligand, Ligand) or (ligand is None) else Ligand.from_directory(ligand)
+    ligand = ligand if isinstance(ligand, Ligand) or (ligand is None) else Ligand.from_path(ligand)
     if ligand:
         ligand_pdb = ligand.to_openmm()
         modeller.add(ligand_pdb.topology, ligand_pdb.positions)
