@@ -72,6 +72,7 @@ def setup_plain_md(
         modeller.positions,
         buffer,
         config.box_shape,
+        minInscribedRadius=None if config.gas_phase else _min_inscribed_radius(config),
     )
     modeller.positions = shiftToBoxCenter(modeller.positions, box_vectors)
     modeller.topology.setPeriodicBoxVectors(box_vectors)
@@ -123,6 +124,26 @@ def setup_plain_md(
     wf = Workflow(wdir, steps=steps, inpcrd=wdir / f'{basename}.inpcrd', prmtop=wdir / f'{basename}.prmtop')
     wf.create()
     return wf
+
+
+# pmemd's default pairlist skin (``skinnb``), added to ``cut`` in its box-size checks.
+_PMEMD_SKINNB = 2.0
+# Headroom for the box shrinking as NPT equilibrates the density.
+_NPT_SHRINK_MARGIN = 1.0
+
+
+def _min_inscribed_radius(config: AmberSimulationConfig) -> unit.Quantity:
+    """Smallest box inscribed-sphere radius pmemd will accept for this workflow.
+
+    pmemd needs the radius to exceed the pairlist cutoff ``cut + skinnb``;
+    pmemd.cuda further needs at least 3 neighbor-list cells of that width
+    across every dimension ("Small box detected, with <= 2 cells"), i.e. a
+    face-to-face width of ``3 * (cut + skinnb)``.
+    """
+    pairlist_cut = max((step.cntrl.cut for step in config.workflow), default=10.0) + _PMEMD_SKINNB
+    on_gpu = any('cuda' in step.exec for step in config.workflow)
+    radius = (1.5 if on_gpu else 1.0) * pairlist_cut + _NPT_SHRINK_MARGIN
+    return radius / 10 * unit.nanometers
 
 
 def setup_plain_md_from_config(cfg: AmberPlainMDConfig):

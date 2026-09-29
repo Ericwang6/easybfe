@@ -161,6 +161,15 @@ directory (`<dir>/ligand/`, `<dir>/boresch-md/`, `<dir>/abfe/{solvent,complex,re
 `early_stop_threshold`. This is distinct from the multi-node `setup`/submit/`analyze` workflow, which is
 preferred when legs need to be distributed across separate Slurm jobs/nodes.
 
+### One-line plain MD pipeline (`easybfe/md/pipeline.py`)
+
+`MD` (`easybfe md pipeline`) is the plain-MD counterpart of `ABFE`: ligand parameterization →
+`setup_plain_md` → local blocking `run.sh` → `run_plain_md_analysis_workflow` → `result.json`
+(RMSD summary, plus GBSA for a complex). Protein-only, ligand-only and complex runs are chosen by
+which inputs are given. `<MD-DIR>` is itself an `md setup` directory (not nested), with `md.log`
+added. Config is `MDPipelineConfig` (`easybfe/md/config.py`). Both pipelines share their log-file,
+ligand-preparation and `run.sh`-execution helpers in `easybfe/pipeline.py`.
+
 ## Notes
 
 - `easybfe/abfe/piepline.py` is misspelled (missing the second `e` in "pipeline") — this is the actual

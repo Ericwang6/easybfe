@@ -147,3 +147,55 @@ def analyze(
         basename=inferred_basename,
     )
 
+
+
+@md.command()
+@click.argument(
+    "config",
+    type=click.Path(exists=True, path_type=Path),
+    required=True,
+    help="Path to JSON or YAML config file (MDPipelineConfig).",
+)
+@click.option(
+    "--ligand",
+    "-l",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Override config: parameterized ligand directory or .ligpack archive, or a raw ligand file to parameterize (e.g. SDF).",
+)
+@click.option(
+    "--protein",
+    "-p",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Override config: protein PDB path.",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Override config: output directory (<MD-DIR>).",
+)
+def pipeline(config: Path, ligand: Path | None, protein: Path | None, output: Path | None) -> None:
+    """Run the full plain MD pipeline (parametrize -> setup -> run -> analyze).
+
+    Give a protein, a ligand, or both: protein-only, ligand-only (in solvent) or
+    protein-ligand complex MD respectively.
+    """
+
+    from ..md import MD
+
+    runner = MD(config, protein=protein, ligand=ligand, output=output)
+    result = runner.run()
+
+    click.echo(f"MD ({result['task_type']}) finished: {runner.root}")
+    rmsd = result.get("rmsd")
+    if rmsd:
+        click.echo(
+            f"  RMSD ({rmsd['selection']}): mean {rmsd['mean']:.2f} A, "
+            f"max {rmsd['max']:.2f} A, final {rmsd['final']:.2f} A"
+        )
+    gbsa = result.get("gbsa")
+    if gbsa:
+        click.echo(f"  GBSA dG_bind = {gbsa['mean']:.2f} +/- {gbsa['std']:.2f} kcal/mol")

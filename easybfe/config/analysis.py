@@ -148,6 +148,12 @@ def _infer_selection_from_task_type(task_type: str) -> dict[str, str]:
     data['output_selection'] = 'resname MOL' if task_type == 'ligand' else 'protein or resname MOL'
     data['align_selection'] = 'resname MOL' if task_type == 'ligand' else 'backbone'
     data['rmsd_selection'] = 'backbone' if task_type == 'protein' else 'resname MOL'
+    # Interactions and GBSA need both a protein and a ligand.
+    data['interaction_analysis'] = task_type == 'complex'
+    data['do_gbsa'] = task_type == 'complex'
+    # Graph-isomorphism symmetry correction is meant for small molecules; on a whole
+    # protein backbone it is expensive and changes nothing.
+    data['use_symmetry_correction'] = task_type != 'protein'
     return data
 
 

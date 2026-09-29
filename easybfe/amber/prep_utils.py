@@ -2,7 +2,7 @@ from __future__ import annotations
 
 __all__ = [
     'FF_XMLS', 'create_alchemical_ions', 'sanitize_water', 'compute_net_charge_from_openmm_system',
-    'hydrogen_mass_repartition', 'computeBoxVectorsWithPadding', 'shiftToBoxCenter', 'shiftPositions',
+    'hydrogen_mass_repartition', 'computeBoxVectorsWithPadding', 'inscribedSphereRadius', 'shiftToBoxCenter', 'shiftPositions',
     'fix_excess_charge', 'set_alchemical_water_restraints', 'generate_amber_mask',
     'assign_block_chains_and_resids', 'write_pdb_with_conect', 'count_residues_in_atom_block'
 ]
@@ -525,7 +525,41 @@ def hydrogen_mass_repartition(struct: parmed.Structure, hydrogen_mass: float = 3
                 atom.mass -= subtract_mass
 
 
-def computeBoxVectorsWithPadding(positions: unit.Quantity, buffer: unit.Quantity, boxShape: str = 'cube'):
+def _unitBoxVectors(boxShape: str):
+    if boxShape == 'cube':
+        return (mm.Vec3(1, 0, 0), mm.Vec3(0, 1, 0), mm.Vec3(0, 0, 1))
+    elif boxShape == 'dodecahedron':
+        return (mm.Vec3(1, 0, 0), mm.Vec3(0, 1, 0), mm.Vec3(0.5, 0.5, 0.5*math.sqrt(2)))
+    elif boxShape == 'octahedron':
+        return (mm.Vec3(1, 0, 0), mm.Vec3(1/3, 2*math.sqrt(2)/3, 0), mm.Vec3(-1/3, math.sqrt(2)/3, math.sqrt(6)/3))
+    else:
+        raise ValueError(f'Illegal box shape: {boxShape}')
+
+
+def inscribedSphereRadius(boxVectors) -> float:
+    """Half the smallest distance between opposite faces of the unit cell.
+
+    This is the "largest sphere to fit in unit cell" that pmemd checks the
+    pairlist cutoff (``cut + skinnb``) against. Same length unit as ``boxVectors``.
+    """
+    a, b, c = (np.asarray(v, dtype=float) for v in boxVectors)
+    volume = abs(np.dot(a, np.cross(b, c)))
+    return 0.5 * min(volume / np.linalg.norm(np.cross(u, v)) for u, v in ((b, c), (c, a), (a, b)))
+
+
+def computeBoxVectorsWithPadding(
+    positions: unit.Quantity,
+    buffer: unit.Quantity,
+    boxShape: str = 'cube',
+    minInscribedRadius: Optional[unit.Quantity] = None,
+):
+    """Box vectors (nm) around ``positions``, OpenMM padding convention.
+
+    ``minInscribedRadius`` enlarges the box when needed so that
+    :func:`inscribedSphereRadius` is at least that large -- pmemd refuses to run
+    when it is below ``cut + skinnb``, which a small solute with a modest
+    ``buffer`` easily hits.
+    """
     positions = positions.value_in_unit(unit.nanometer)
     buffer = buffer.value_in_unit(unit.nanometer)
     minVec = mm.Vec3(*(min((pos[i] for pos in positions)) for i in range(3)))
@@ -534,14 +568,19 @@ def computeBoxVectorsWithPadding(positions: unit.Quantity, buffer: unit.Quantity
     radius = max(unit.norm(center-pos) for pos in positions)
     width = max(2*buffer, 2*radius+buffer)
 
-    if boxShape == 'cube':
-        return (mm.Vec3(width, 0, 0), mm.Vec3(0, width, 0), mm.Vec3(0, 0, width))
-    elif boxShape == 'dodecahedron':
-        return (mm.Vec3(width, 0, 0), mm.Vec3(0, width, 0), mm.Vec3(0.5, 0.5, 0.5*math.sqrt(2))*width)
-    elif boxShape == 'octahedron':
-        return (mm.Vec3(width, 0, 0), mm.Vec3(1/3, 2*math.sqrt(2)/3, 0)*width, mm.Vec3(-1/3, math.sqrt(2)/3, math.sqrt(6)/3)*width)
-    else:
-        raise ValueError(f'Illegal box shape: {boxShape}')
+    unitVectors = _unitBoxVectors(boxShape)
+    if minInscribedRadius is not None:
+        minRadius = minInscribedRadius.value_in_unit(unit.nanometer)
+        unitRadius = inscribedSphereRadius(unitVectors)
+        if width * unitRadius < minRadius:
+            newWidth = minRadius / unitRadius
+            logger.warning(
+                "Enlarging %s box from %.2f to %.2f nm so its inscribed sphere radius "
+                "(%.2f nm) reaches the required %.2f nm",
+                boxShape, width, newWidth, width * unitRadius, minRadius,
+            )
+            width = newWidth
+    return tuple(v * width for v in unitVectors)
 
 
 def shiftToBoxCenter(positions: unit.Quantity, boxVectors: Tuple[mm.Vec3], returnShiftVec: bool = False):

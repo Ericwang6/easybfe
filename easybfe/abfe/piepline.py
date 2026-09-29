@@ -22,20 +22,18 @@ from __future__ import annotations
 
 import logging
 import os
-import shlex
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional, Union
 
 from .config import AmberAbfeConfig
-from ..cmd import run_command
 from ..config import read_file
-from ..core import LIGPACK_SUFFIX, Ligand, Protein
+from ..core import Ligand, Protein
+from ..pipeline import (
+    attach_log_file, detach_log_file, load_or_parametrize_ligand, read_script_status, run_script,
+)
 
 
 logger = logging.getLogger(__name__)
-
-_LOG_FORMAT = "%(asctime)s [%(levelname)s] [PID:%(process)d] [%(name)s]: %(message)s"
 
 
 class ABFE:
@@ -99,8 +97,7 @@ class ABFE:
         self.log_file = self.root / "abfe.log"
 
         self.root.mkdir(parents=True, exist_ok=True)
-        self._log_handler: Optional[RotatingFileHandler] = None
-        self._attach_log_handler()
+        self._log_handler: Optional[logging.Handler] = attach_log_file(self.log_file)
 
         # Populated during the run.
         self.protein: Protein = Protein.from_pdb(self.protein_path, name=self.protein_path.stem)
@@ -110,23 +107,10 @@ class ABFE:
     # ------------------------------------------------------------------
     # Logging
     # ------------------------------------------------------------------
-    def _attach_log_handler(self) -> None:
-        """Route all ``easybfe`` logging into ``<ABFE-DIR>/abfe.log``."""
-        pkg_logger = logging.getLogger("easybfe")
-        if pkg_logger.level == logging.NOTSET:
-            pkg_logger.setLevel(logging.INFO)
-        handler = RotatingFileHandler(str(self.log_file), maxBytes=50 * 1024 * 1024, backupCount=5)
-        handler.setLevel(logging.INFO)
-        handler.setFormatter(logging.Formatter(_LOG_FORMAT))
-        pkg_logger.addHandler(handler)
-        self._log_handler = handler
-
     def close(self) -> None:
         """Detach and close the pipeline log handler."""
-        if self._log_handler is not None:
-            logging.getLogger("easybfe").removeHandler(self._log_handler)
-            self._log_handler.close()
-            self._log_handler = None
+        detach_log_file(self._log_handler)
+        self._log_handler = None
 
     # ------------------------------------------------------------------
     # Orchestration
@@ -167,37 +151,10 @@ class ABFE:
     # ------------------------------------------------------------------
     def prepare_ligand(self) -> Ligand:
         """Load (directory / ``.ligpack``) or parameterize (raw file) the ligand into ``ligand/``."""
-        if self.ligand_input.is_dir() or self.ligand_input.suffix.lower() == LIGPACK_SUFFIX:
-            logger.info("Loading already-parameterized ligand from %s", self.ligand_input)
-            ligand = Ligand.from_path(self.ligand_input)
-            ligand.dump(self.ligand_dir)
-        else:
-            from ..smff import parametrize_ligands
-
-            param = self.config.ligand_param
-            logger.info(
-                "Parameterizing ligand %s (forcefield=%s, charge_method=%s, engine=%s)",
-                self.ligand_input, param.forcefield, param.charge_method, param.engine or "auto",
-            )
-            results = parametrize_ligands(
-                str(self.ligand_input),
-                output=str(self.ligand_dir),
-                forcefield=param.forcefield,
-                charge_method=param.charge_method,
-                engine=param.engine,
-                resp_engine=param.resp_engine,
-                raise_errors=True,
-                nprocs=1,
-                only_first=True,
-                name_from_stem=True,
-            )
-            if not results:
-                raise RuntimeError(f"Parameterization produced no ligand for {self.ligand_input}")
-            ligand = results[0]
-
-        self.ligand = ligand
-        logger.info("Ligand ready: %s (%d atoms)", ligand.name, ligand.get_rdmol().GetNumAtoms())
-        return ligand
+        self.ligand = load_or_parametrize_ligand(
+            self.ligand_input, self.ligand_dir, self.config.ligand_param
+        )
+        return self.ligand
 
     def run_boresch_md(self):
         """Run plain protein-ligand MD, then select Boresch anchors + a
@@ -340,13 +297,7 @@ class ABFE:
 
     def _leg_status(self, leg_dir: Path) -> dict:
         """Read the leg's ``status.json`` (written by its ``run.sh``)."""
-        import json
-
-        status_file = Path(leg_dir) / "status.json"
-        try:
-            return json.loads(status_file.read_text())
-        except (OSError, ValueError):
-            return {}
+        return read_script_status(leg_dir)
 
     def run_abfe_with_early_stop(self) -> dict:
         """Run the ABFE legs in two phases with an early-stop check.
@@ -662,72 +613,8 @@ class ABFE:
         args: Optional[list] = None,
         done_tag: str = "done.tag",
     ) -> bool:
-        """Run ``script`` in ``directory`` (blocking), capturing its output.
-
-        The script owns its own tag state machine and resumes at the first stage
-        that has not completed, so re-running is safe. ``--force`` is passed
-        because the pipeline is the orchestrator here and decides retry policy:
-        a leg that failed on an earlier invocation should be retried rather than
-        blocked by its own ``error.tag``. (Run the script by hand without
-        ``--force`` and that guard still applies.)
-
-        Failures are reported, not raised — the caller runs the remaining legs.
-
-        Parameters
-        ----------
-        directory : os.PathLike
-            Directory containing ``script``.
-        script : str, optional
-            Script file name to execute.
-        args : list, optional
-            Extra arguments, e.g. ``["--until", "04.pre_prod"]``.
-        done_tag : str, optional
-            Completion tag that means this phase is already finished.
-
-        Returns
-        -------
-        bool
-            ``True`` when the phase is complete (or was already complete).
-        """
-        directory = Path(directory)
-        run_sh = directory / script
-        if not run_sh.is_file():
-            raise FileNotFoundError(f"{script} not found in {directory}")
-        if (directory / done_tag).is_file():
-            logger.info("Found %s in %s; skipping.", done_tag, directory)
-            return True
-
-        argv = [script, "--force", *(str(a) for a in (args or []))]
-        log_path = directory / f"pipeline_{Path(script).stem}.log"
-        shell_cmd = " ".join(shlex.quote(a) for a in ["bash", *argv])
-        cmd = ["bash", "-c", f"{shell_cmd} > {shlex.quote(str(log_path))} 2>&1"]
-        return_code, _, _ = run_command(cmd, cwd=str(directory), raise_error=False)
-
-        self._log_script_output(directory, script, log_path)
-        if return_code == 0:
-            logger.info("Finished %s in %s (log: %s)", " ".join(argv), directory, log_path)
-            return True
-
-        status = self._leg_status(directory)
-        logger.error(
-            "%s failed in %s (exit code %s, stage '%s'): %s",
-            " ".join(argv), directory, return_code,
-            status.get("stage", "unknown"),
-            status.get("error_excerpt") or f"see {log_path}",
-        )
-        return False
-
-    def _log_script_output(self, directory: Path, script: str, log_path: Path) -> None:
-        """Echo a script's captured output into the pipeline log (abfe.log)."""
-        try:
-            text = Path(log_path).read_text()
-        except OSError:
-            return
-        label = f"{directory.name}/{script}"
-        logger.info("----- begin output of %s -----", label)
-        for line in text.splitlines():
-            logger.info("[%s] %s", label, line)
-        logger.info("----- end output of %s -----", label)
+        """Run a leg's ``run.sh`` locally; see :func:`easybfe.pipeline.run_script`."""
+        return run_script(directory, script=script, args=args, done_tag=done_tag)
 
 
 def _replace_pdb_coordinates(pdb_text: str, positions) -> str:

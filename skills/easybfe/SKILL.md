@@ -1,6 +1,6 @@
 ---
 name: easybfe-cli
-description: Set up and analyze ABFE (absolute) and RBFE (relative) binding free energy calculations using the easybfe CLI, including ligand parameterization. Use when the user asks about running easybfe commands, parameterizing ligands, writing FEP config files, setting up alchemical simulations, or analyzing free energy results.
+description: Set up and analyze ABFE (absolute) and RBFE (relative) binding free energy calculations using the easybfe CLI, including ligand parameterization, and run plain MD of a protein, a ligand, or a protein-ligand complex end to end (easybfe md pipeline). Use when the user asks about running easybfe commands, parameterizing ligands, writing FEP or MD config files, setting up alchemical simulations, running plain MD, or analyzing free energy / MD results.
 ---
 
 # EasyBFE CLI — ABFE & RBFE Workflows
@@ -325,3 +325,63 @@ The directory must contain `complex/` and `solvent/` (optionally `gas/`).
 easybfe rbfe analyze ./rbfe/ejm_44~ejm_31
 ```
 
+
+---
+
+## Plain MD Commands
+
+### `easybfe md pipeline`
+
+One-line plain MD: parameterize the ligand → build the solvated system → run the
+workflow locally (blocking, via the generated `run.sh`) → analyze the production
+trajectory. Which inputs are given decides the system:
+
+```bash
+easybfe md pipeline CONFIG -p protein.pdb -l ligand.sdf -o run_complex   # protein-ligand complex
+easybfe md pipeline CONFIG -p protein.pdb               -o run_protein   # protein only
+easybfe md pipeline CONFIG                -l ligand.sdf -o run_ligand    # ligand only, in solvent
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--protein` | `-p` | Protein PDB (overrides `protein` in CONFIG) |
+| `--ligand` | `-l` | Raw ligand file (parameterized with `ligand_param`), or a parameterized ligand directory / `.ligpack` (used as is) |
+| `--output` | `-o` | Output directory `<MD-DIR>` (overrides `output_dir`) |
+
+CONFIG (`MDPipelineConfig`, YAML/JSON) has `ligand_param` (as in `abfe pipeline`),
+`simulation` (same as the `simulation` block of `md setup`) and `analysis`. Analysis
+fields left unset default per system type: RMSD on `resname MOL` (ligand/complex) or
+`backbone` (protein); interaction analysis and GBSA only for a complex.
+
+**Config file spec:**
+- You should use [assets/config_md_1ns.yaml](assets/config_md_1ns.yaml) as a template (1 ns production, verified end to end for all three system types) and modify it according to the user's specifications. Refer to [reference/md_pipeline_spec.md](reference/md_pipeline_spec.md) for the full field reference, outputs, and modification examples.
+- Every stage of a plain MD workflow must have `use_remd: false` and `use_mpi: false`.
+
+**Where to run:** the pipeline blocks until MD finishes and needs a GPU for `pmemd.cuda`. Run it inside a GPU allocation or batch job, not on a login node. One GPU per run is enough, so independent runs can share a node with one `CUDA_VISIBLE_DEVICES` each. See `examples/md-pipeline/md.slurm`, which runs the three system types side by side on one node.
+
+`<MD-DIR>` is an ordinary `md setup` directory (`config.json`, `system.*`, `run.sh`,
+one directory per stage, `ligand/`, `protein.pdb`), so `easybfe md analyze <MD-DIR>`
+also works on it. The pipeline adds `md.log` (master log) and `result.json`:
+
+| Key | Meaning |
+|-----|---------|
+| `task_type` | `protein`, `ligand` or `complex` |
+| `rmsd` | `selection`, `n_frames`, `simulated_ns`, `mean`/`std`/`max`/`final` (Å) vs. the starting structure |
+| `gbsa` | complex only: `mean`/`std` MM/GBSA binding energy over frames (kcal/mol) |
+| `interaction_csv` | complex only: per-frame protein-ligand interactions |
+
+Re-running on an `<MD-DIR>` that is already set up resumes the MD at the first
+unfinished stage instead of rebuilding the system.
+
+**Validate the run**
+
+- `<MD-DIR>/result.json` exists, and `<MD-DIR>/<last stage>/done.tag` exists.
+- `rmsd.simulated_ns` matches the requested production length, and `rmsd.n_frames` matches `num_steps / ofreq`.
+- On failure, `status.json` names the failing stage and `<stage>/<stage>.out` has pmemd's message. Fix the cause, then re-run the same command: it resumes. If the fix changes the system (box, force field), delete `<MD-DIR>` first, because resume reuses the built system.
+
+**Structured summary after the run**
+
+- **System** — `task_type`, input files, ligand force field / charge model (or "pre-parameterized").
+- **Simulation** — atom count, box shape, production length, frames.
+- **Results** — RMSD mean / max / final with its selection. For a complex, also GBSA mean ± std (kcal/mol, ranking only) and the path to `interaction.csv`.
+- **Paths** — `<MD-DIR>`, `result.json`, and `prod_processed.{pdb,xtc}` for visualization.
